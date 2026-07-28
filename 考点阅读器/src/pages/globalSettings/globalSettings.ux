@@ -1,0 +1,242 @@
+<template>
+  <div class="page" style="flex-direction: column;">
+
+    <list class="list">
+      <!-- 显示设置分区 -->
+      <list-item class="item" style="padding: 7px 16px; height: 50px;" type="tip">
+        <text class="section-title" static>显示设置</text>
+      </list-item>
+      <list-item class="item" type="item">
+        <div class="item-content">
+          <text class="itemtext" static>字号大小</text>
+          <text class="itemtext2" static>全局阅读字号</text>
+        </div>
+        <div style="flex-direction: row; align-items: center;">
+          <img static src="/common/images/pre.png" @click="adjustFontSize(-1)" style="width: 40px; height: 40px;" />
+          <text style="font-size: 28px; font-weight: bold; color: white; width: 70px; text-align: center;">{{fontSizeValue}}px</text>
+          <img static src="/common/images/next.png" @click="adjustFontSize(1)" style="width: 40px; height: 40px;" />
+        </div>
+      </list-item>
+      <list-item class="item" @click="toggleKeepScreenOn" type="item">
+        <div class="item-content">
+          <text class="itemtext" static>常亮显示</text>
+          <text class="itemtext2" static>保持屏幕常亮</text>
+        </div>
+        <img src="{{keepScreenOn ? '/common/images/Switch_ON.png' : '/common/images/Switch_OFF.png'}}" class="switch" />
+      </list-item>
+      <list-item class="item" @click="toggleTimeFormat" type="item">
+        <div class="item-content">
+          <text class="itemtext" static>时间格式</text>
+          <text class="itemtext2" static>12小时/24小时制</text>
+        </div>
+        <text style="font-size: 28px; font-weight: bold; color: rgba(255,255,255,0.6);">{{timeFormat === '12h' ? '12小时' : '24小时'}}</text>
+      </list-item>
+
+      <!-- 数据管理分区 -->
+      <list-item class="item" style="padding: 7px 16px; height: 50px;" type="tip">
+        <text class="section-title" static>数据管理</text>
+      </list-item>
+      <list-item class="item" type="item">
+        <div class="item-content">
+          <text class="itemtext" static>剩余内存</text>
+          <text class="itemtext2" static>设备可用存储</text>
+        </div>
+        <text style="font-size: 28px; font-weight: bold; color: rgba(255,255,255,0.6); lines: 1; text-overflow: ellipsis;">{{availableStorage}}</text>
+      </list-item>
+      <list-item class="item" type="item">
+        <div class="item-content">
+          <text class="itemtext" static>考点总数</text>
+          <text class="itemtext2" static>已存储考点数量</text>
+        </div>
+        <text style="font-size: 28px; font-weight: bold; color: rgba(255,255,255,0.6);">{{contentCount}} 篇</text>
+      </list-item>
+      <list-item class="item" @click="goDeleteAll" type="item">
+        <div class="item-content">
+          <text class="itemtext" static>一键删除</text>
+          <text class="itemtext2" static>删除所有考点</text>
+        </div>
+        <img static src="/common/images/enter.png" class="arrow" />
+      </list-item>
+
+      <!-- 应用信息底栏 -->
+      <list-item style="width: 100%; height: 260px; flex-direction: column; align-items: center; justify-content: flex-start; padding-top: 24px;" type="footer">
+        <img static src="/common/images/icon.png" style="width: 64px; height: 64px; border-radius: 14px;" />
+        <text static style="font-size: 26px; font-weight: bold; color: white; text-align: center; margin-top: 10px;">{{appName}}</text>
+        <text static style="font-size: 22px; font-weight: bold; color: rgba(255,255,255,0.4); text-align: center; margin-top: 6px;">版本 {{versionName}}</text>
+        <text static style="font-size: 20px; font-weight: bold; color: rgba(255,255,255,0.3); text-align: center; margin-top: 8px;">开发：{{developer}}</text>
+        <text static style="font-size: 16px; font-weight: bold; color: rgba(255,255,255,0.25); text-align: center; margin-top: 6px; width: 300px;">部分资源来源：喵喵电子书vela端设计稿</text>
+      </list-item>
+    </list>
+
+    <!-- 顶部栏 -->
+    <img static src="/common/images/hd.png" style="position: absolute; left: 0px; top: 0px; width: 336px; height: 102px;" />
+    <img static src="/common/images/back.png" @click="goBack" style="position: absolute; left: 6px; top: 6px; width: 72px; height: 72px;" />
+    <text style="position: absolute; left: 78px; top: 7px; width: 180px; line-height: 32px; font-weight: bold; font-size: 24px; color: rgba(255,255,255,0.6); text-align: center;">{{nowTime}}</text>
+    <text static style="position: absolute; left: 78px; top: 35px; width: 180px; line-height: 42px; font-weight: bold; font-size: 32px; color: white; text-align: center;">全局设置</text>
+
+  </div>
+</template>
+
+<script>
+import router from '@system.router'
+import storage from '@system.storage'
+import device from '@system.device'
+import brightness from '@system.brightness'
+import app from '@system.app'
+import dataManager from '../../common/utils/dataManager.js'
+import { getNowTime, getFormattedTime } from '../../common/utils/timeUtil.js'
+
+export default {
+  private: {
+    nowTime: '00:00',
+    timer: null,
+    fontSizeValue: 26,
+    keepScreenOn: false,
+    timeFormat: '24h',
+    availableStorage: '加载中...',
+    contentCount: '加载中...',
+    versionName: 'preview',
+    appName: '考点阅读器',
+    developer: 'Vultra 和 睡不着的鸿鹄'
+  },
+
+  onInit() {
+    this.nowTime = getNowTime()
+    this.timer = setInterval(() => {
+      if (this.$valid) {
+        this.nowTime = getNowTime()
+      }
+    }, 60000)
+    this.loadVersion()
+    this.loadAllSettings()
+    this.loadStorageInfo()
+  },
+
+  onShow() {
+    if (!this.$valid) return
+    this.loadAllSettings()
+    this.loadStorageInfo()
+  },
+
+  onDestroy() {
+    if (this.timer) {
+      clearInterval(this.timer)
+      this.timer = null
+    }
+  },
+
+  loadVersion() {
+    try {
+      const info = app.getInfo()
+      if (info) {
+        if (info.versionName) {
+          this.versionName = info.versionName
+        }
+        if (info.name) {
+          this.appName = info.name
+        }
+      }
+    } catch (e) {
+      // 使用默认值
+    }
+  },
+
+  loadAllSettings() {
+    storage.get({
+      key: 'KD_FONT_SIZE',
+      success: (data) => {
+        if (!this.$valid) return
+        if (data) {
+          this.fontSizeValue = parseInt(data)
+        }
+      },
+      fail: () => {
+        if (!this.$valid) return
+        this.fontSizeValue = 26
+      }
+    })
+    storage.get({
+      key: 'KD_KEEP_SCREEN_ON',
+      success: (data) => {
+        if (!this.$valid) return
+        this.keepScreenOn = data === 'true'
+      },
+      fail: () => {
+        if (!this.$valid) return
+        this.keepScreenOn = false
+      }
+    })
+    storage.get({
+      key: 'KD_TIME_FORMAT',
+      success: (data) => {
+        if (!this.$valid) return
+        if (data) {
+          this.timeFormat = data
+          this.nowTime = getFormattedTime(this.timeFormat)
+        }
+      },
+      fail: () => {
+        if (!this.$valid) return
+        this.timeFormat = '24h'
+      }
+    })
+  },
+
+  adjustFontSize(delta) {
+    let val = this.fontSizeValue + delta
+    if (val < 20) val = 20
+    if (val > 36) val = 36
+    this.fontSizeValue = val
+    storage.set({ key: 'KD_FONT_SIZE', value: val.toString() })
+  },
+
+  toggleKeepScreenOn() {
+    this.keepScreenOn = !this.keepScreenOn
+    storage.set({ key: 'KD_KEEP_SCREEN_ON', value: this.keepScreenOn.toString() })
+    brightness.setKeepScreenOn({ keepScreenOn: this.keepScreenOn })
+  },
+
+  toggleTimeFormat() {
+    this.timeFormat = this.timeFormat === '24h' ? '12h' : '24h'
+    storage.set({ key: 'KD_TIME_FORMAT', value: this.timeFormat })
+    this.nowTime = getFormattedTime(this.timeFormat)
+  },
+
+  async loadStorageInfo() {
+    device.getAvailableStorage({
+      success: (data) => {
+        if (!this.$valid) return
+        this.availableStorage = dataManager.formatFileSize(data.availableStorage || 0)
+      },
+      fail: () => {
+        if (!this.$valid) return
+        this.availableStorage = '获取失败'
+      }
+    })
+
+    const count = await dataManager.getTotalContentCount()
+    if (!this.$valid) return
+    this.contentCount = count.toString()
+  },
+
+  goDeleteAll() {
+    router.push({
+      uri: '/pages/deleteConfirm',
+      params: { action: 'deleteAll' }
+    })
+  },
+
+  goBack() {
+    router.back()
+  },
+
+  onBackPress() {
+    router.back()
+    return true
+  }
+}
+</script>
+
+<style>
+  @import '../../common/style.css';
+</style>

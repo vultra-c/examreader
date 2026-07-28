@@ -1,0 +1,75 @@
+# =====================
+# 通用排除项
+# =====================
+.DS_Store
+*.log
+*.tmp
+*.swp
+*.bak
+
+# 上传的参考文件和压缩包
+.uploads/
+*.zip
+*.7z
+*.rar
+
+# 文档输出（源码汇总 markdown）
+手环端源码.md
+Android端源码-修改部分.md
+
+# =====================
+# Android 项目排除项
+# =====================
+# Gradle
+**/.gradle/
+**/build/
+
+# 本地配置
+**/local.properties
+**/keystore.properties
+
+# IntelliJ / Android Studio
+.idea/
+*.iml
+
+# Native build
+.externalNativeBuild/
+.cxx/
+
+# 签名文件
+*.keystore
+*.jks
+debug.keystore
+
+# APK 构建产物
+*.apk
+*.aab
+
+# =====================
+# Vela / Node.js 项目排除项
+# =====================
+node_modules/
+dist/
+.rpx
+.snapshots/
+
+# Vela 构建产物
+*.rpk
+*.abp
+output/
+
+# AAR 解包内容（不应提交）
+aar-extract/
+
+# 签名证书（私钥不应提交）
+**/sign/*/private.pem
+
+# 开发计划文档
+考点阅读器-蓝牙功能开发计划提示词.md
+
+# =====================
+# 敏感信息
+# =====================
+# 个人访问令牌等凭据
+*.token
+credentials.json

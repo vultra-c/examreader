@@ -1,0 +1,545 @@
+package com.bandbbs.ebook.utils.parser
+
+import android.content.Context
+import android.net.Uri
+import android.util.Log
+import org.xmlpull.v1.XmlPullParser
+import org.xmlpull.v1.XmlPullParserFactory
+import java.io.InputStream
+import java.nio.charset.Charset
+import java.net.URLDecoder
+import java.util.zip.ZipInputStream
+
+object EpubParserOptimized {
+    private const val TAG = "EpubParserOptimized"
+
+    data class EpubBook(
+        val title: String,
+        val author: String,
+        val chapters: List<EpubChapter>,
+        val coverImage: ByteArray? = null,
+        val summary: String? = null,
+        val category: String? = null
+    )
+
+    data class EpubChapter(
+        val title: String,
+        val content: String,
+        val wordCount: Int
+    )
+
+    fun parse(context: Context, uri: Uri): EpubBook {
+        // 第一遍:找到container.xml并解析OPF路径
+        val opfPath = context.contentResolver.openInputStream(uri)?.use { inputStream ->
+            findOpfPath(inputStream)
+        } ?: throw IllegalArgumentException("无效的EPUB文件：找不到container.xml")
+
+        // 第二遍:重新打开流读取必要的文件
+        return context.contentResolver.openInputStream(uri)?.use { inputStream ->
+            parseFromInputStream(inputStream, opfPath)
+        } ?: throw IllegalArgumentException("无法打开文件")
+    }
+
+    private fun parseFromInputStream(inputStream: InputStream, opfPath: String): EpubBook {
+        val zipEntries = mutableMapOf<String, ByteArray>()
+
+        // 只读取必要的文件
+        ZipInputStream(inputStream).use { zipStream ->
+            var entry = zipStream.nextEntry
+            while (entry != null) {
+                if (!entry.isDirectory) {
+                    val name = entry.name
+                    // 只读取必要的文件
+                    if (shouldLoadEntry(name, opfPath)) {
+                        val content = zipStream.readBytes()
+                        zipEntries[name] = content
+                    }
+                }
+                zipStream.closeEntry()
+                entry = zipStream.nextEntry
+            }
+        }
+
+        val opfContent = zipEntries[opfPath]
+            ?: throw IllegalArgumentException("无效的EPUB文件：找不到$opfPath")
+
+        val opfDir = opfPath.substringBeforeLast('/', "")
+        val (metadata, spine, coverHref) = parseOpf(opfContent)
+
+        val coverImage = coverHref?.let { href ->
+            val coverPath = if (opfDir.isNotEmpty()) normalizePath("$opfDir/$href") else href
+            zipEntries[coverPath]
+        }
+
+        var chapters = spine.mapNotNull { rawHref ->
+            val href = rawHref.substringBefore("#")
+            val itemPath = if (opfDir.isNotEmpty()) normalizePath("$opfDir/$href") else href
+            zipEntries[itemPath]?.let { content ->
+                parseHtmlChapter(content)
+            }
+        }.filter { it.content.isNotBlank() }
+
+        if (chapters.isEmpty()) {
+            chapters = zipEntries.filterKeys {
+                it.endsWith(".html", ignoreCase = true) ||
+                        it.endsWith(".htm", ignoreCase = true) ||
+                        it.endsWith(".xhtml", ignoreCase = true)
+            }.toSortedMap().values.mapNotNull { content ->
+                parseHtmlChapter(content)
+            }.filter { it.content.isNotBlank() }
+        }
+
+        return EpubBook(
+            title = metadata["title"] ?: "未知书名",
+            author = metadata["author"] ?: "未知作者",
+            chapters = chapters,
+            coverImage = coverImage,
+            summary = metadata["summary"],
+            category = metadata["category"]
+        )
+    }
+
+    /**
+     * 第一遍扫描:只找container.xml
+     */
+    private fun findOpfPath(inputStream: InputStream): String? {
+        try {
+            ZipInputStream(inputStream).use { zipStream ->
+                var entry = zipStream.nextEntry
+                while (entry != null) {
+                    if (entry.name == "META-INF/container.xml") {
+                        val containerXml = zipStream.readBytes()
+                        return parseContainerXml(containerXml)
+                    }
+                    zipStream.closeEntry()
+                    entry = zipStream.nextEntry
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error finding OPF path", e)
+        }
+        return null
+    }
+
+    /**
+     * 判断是否需要加载该ZIP条目
+     */
+    private fun shouldLoadEntry(name: String, opfPath: String): Boolean {
+        return when {
+            name == "META-INF/container.xml" -> true
+            name == opfPath -> true
+            name.endsWith(".opf", ignoreCase = true) -> true
+            name.endsWith(".html", ignoreCase = true) -> true
+            name.endsWith(".htm", ignoreCase = true) -> true
+            name.endsWith(".xhtml", ignoreCase = true) -> true
+            name.contains("cover", ignoreCase = true) &&
+                (name.endsWith(".jpg", ignoreCase = true) ||
+                 name.endsWith(".jpeg", ignoreCase = true) ||
+                 name.endsWith(".png", ignoreCase = true)) -> true
+            else -> false
+        }
+    }
+
+    private fun normalizePath(path: String): String {
+        val parts = path.split("/")
+        val result = mutableListOf<String>()
+        for (part in parts) {
+            when {
+                part == ".." -> if (result.isNotEmpty()) result.removeAt(result.size - 1)
+                part != "." && part.isNotEmpty() -> result.add(part)
+            }
+        }
+        return result.joinToString("/")
+    }
+
+    private fun parseContainerXml(xmlBytes: ByteArray): String {
+        val factory = XmlPullParserFactory.newInstance()
+        val parser = factory.newPullParser()
+        parser.setInput(xmlBytes.inputStream(), "UTF-8")
+
+        var eventType = parser.eventType
+        while (eventType != XmlPullParser.END_DOCUMENT) {
+            if (eventType == XmlPullParser.START_TAG) {
+                val tagName = parser.name.substringAfterLast(":")
+                if (tagName == "rootfile") {
+                    val fullPath = parser.getAttributeValue(null, "full-path")
+                    if (fullPath != null) {
+                        return fullPath
+                    }
+                }
+            }
+            eventType = parser.next()
+        }
+        throw IllegalArgumentException("无效的container.xml")
+    }
+
+    private fun parseOpf(opfBytes: ByteArray): Triple<Map<String, String>, List<String>, String?> {
+        val factory = XmlPullParserFactory.newInstance()
+        val parser = factory.newPullParser()
+        parser.setInput(opfBytes.inputStream(), "UTF-8")
+
+        val metadata = mutableMapOf<String, String>()
+        val manifest = mutableMapOf<String, String>()
+        val manifestProperties = mutableMapOf<String, String>()
+        val spine = mutableListOf<String>()
+        var coverItemId: String? = null
+
+        var eventType = parser.eventType
+        var inMetadata = false
+        var inManifest = false
+        var inSpine = false
+
+        while (eventType != XmlPullParser.END_DOCUMENT) {
+            when (eventType) {
+                XmlPullParser.START_TAG -> {
+                    val tagName = parser.name.substringAfterLast(":")
+                    when (tagName) {
+                        "metadata" -> inMetadata = true
+                        "manifest" -> inManifest = true
+                        "spine" -> inSpine = true
+                        "title" -> {
+                            if (inMetadata) {
+                                readCurrentTagText(parser)?.let { text ->
+                                    if (text.isNotBlank()) {
+                                        metadata["title"] = text
+                                    }
+                                }
+                            }
+                        }
+
+                        "creator" -> {
+                            if (inMetadata) {
+                                readCurrentTagText(parser)?.let { text ->
+                                    if (text.isNotBlank()) {
+                                        metadata["author"] = text
+                                    }
+                                }
+                            }
+                        }
+
+                        "description" -> {
+                            if (inMetadata) {
+                                readCurrentTagText(parser)?.let { text ->
+                                    if (text.isNotBlank() && metadata["summary"].isNullOrBlank()) {
+                                        metadata["summary"] = text
+                                    }
+                                }
+                            }
+                        }
+
+                        "subject" -> {
+                            if (inMetadata) {
+                                readCurrentTagText(parser)?.let { text ->
+                                    if (text.isNotBlank()) {
+                                        metadata["category"] = appendMetadataValue(metadata["category"], text)
+                                    }
+                                }
+                            }
+                        }
+
+                        "meta" -> {
+                            if (inMetadata) {
+                                val name = parser.getAttributeValue(null, "name")?.trim()?.lowercase()
+                                val property = parser.getAttributeValue(null, "property")?.trim()?.lowercase()
+                                val content = parser.getAttributeValue(null, "content")?.trim()
+                                val metaText = readCurrentTagText(parser)
+
+                                if (name == "cover" && !content.isNullOrBlank()) {
+                                    coverItemId = content
+                                }
+
+                                val metaValue = content?.takeIf { it.isNotBlank() } ?: metaText
+                                if (!metaValue.isNullOrBlank()) {
+                                    when {
+                                        name in setOf("description", "summary", "intro", "introduction") ||
+                                            property in setOf("description", "dcterms:description") -> {
+                                            if (metadata["summary"].isNullOrBlank()) {
+                                                metadata["summary"] = metaValue
+                                            }
+                                        }
+
+                                        name in setOf("subject", "tag", "tags", "category", "categories", "genre") ||
+                                            property in setOf("belongs-to-collection", "subject", "schema:about") -> {
+                                            metadata["category"] = appendMetadataValue(metadata["category"], metaValue)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        "item" -> {
+                            if (inManifest) {
+                                val id = parser.getAttributeValue(null, "id")
+                                val rawHref = parser.getAttributeValue(null, "href")
+                                val properties = parser.getAttributeValue(null, "properties")
+
+                                if (id != null && rawHref != null) {
+                                    val href = try {
+                                        URLDecoder.decode(rawHref, "UTF-8").substringBefore("#")
+                                    } catch (e: Exception) {
+                                        rawHref.substringBefore("#")
+                                    }
+                                    manifest[id] = href
+
+                                    if (properties != null) {
+                                        manifestProperties[id] = properties
+                                        if (properties.contains("cover-image")) {
+                                            coverItemId = id
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        "itemref" -> {
+                            if (inSpine) {
+                                val idref = parser.getAttributeValue(null, "idref")
+                                if (idref != null) {
+                                    manifest[idref]?.let { href ->
+                                        spine.add(href)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                XmlPullParser.END_TAG -> {
+                    val tagName = parser.name.substringAfterLast(":")
+                    when (tagName) {
+                        "metadata" -> inMetadata = false
+                        "manifest" -> inManifest = false
+                        "spine" -> inSpine = false
+                    }
+                }
+            }
+            eventType = parser.next()
+        }
+
+        if (coverItemId == null) {
+            coverItemId = manifest.entries.find { (_, href) ->
+                href.contains("cover", ignoreCase = true) &&
+                        (href.endsWith(".jpg", ignoreCase = true) ||
+                                href.endsWith(".jpeg", ignoreCase = true) ||
+                                href.endsWith(".png", ignoreCase = true))
+            }?.key
+        }
+        val coverHref = coverItemId?.let { manifest[it] }
+
+        return Triple(metadata, spine, coverHref)
+    }
+
+    private fun parseHtmlChapter(htmlBytes: ByteArray): EpubChapter {
+        val htmlContent = decodeHtmlBytes(htmlBytes)
+        val title = extractTitle(htmlContent)
+        var content = extractTextContent(htmlContent)
+
+        content = removeTitleFromContent(content, title)
+        content = normalizeContentStart(content)
+        val wordCount = content.length
+
+        return EpubChapter(title, content, wordCount)
+    }
+
+    private fun decodeHtmlBytes(htmlBytes: ByteArray): String {
+        val charset = detectHtmlCharset(htmlBytes)
+        return try {
+            String(htmlBytes, charset(charset))
+        } catch (_: Exception) {
+            String(htmlBytes, Charsets.UTF_8)
+        }
+    }
+
+    private fun charset(name: String) = Charset.forName(name)
+
+    private fun detectHtmlCharset(htmlBytes: ByteArray): String {
+        val sample = String(htmlBytes, Charsets.ISO_8859_1)
+        val metaCharsetRegex = Regex(
+            """<meta[^>]+charset\\s*=\\s*[\"']?([A-Za-z0-9_\\-]+)""",
+            RegexOption.IGNORE_CASE
+        )
+        val contentTypeCharsetRegex = Regex(
+            """<meta[^>]+content\\s*=\\s*[\"'][^\"']*charset=([A-Za-z0-9_\\-]+)[^\"']*[\"']""",
+            RegexOption.IGNORE_CASE
+        )
+
+        return metaCharsetRegex.find(sample)?.groupValues?.getOrNull(1)
+            ?: contentTypeCharsetRegex.find(sample)?.groupValues?.getOrNull(1)
+            ?: "UTF-8"
+    }
+
+    private fun appendMetadataValue(existing: String?, value: String): String {
+        val normalized = value.trim().replace(Regex("\\s+"), " ")
+        if (normalized.isBlank()) return existing.orEmpty()
+        if (existing.isNullOrBlank()) return normalized
+
+        val items = existing.split("|").map { it.trim() }.filter { it.isNotBlank() }.toMutableList()
+        if (items.none { it.equals(normalized, ignoreCase = true) }) {
+            items.add(normalized)
+        }
+        return items.joinToString(" | ")
+    }
+
+    private fun readCurrentTagText(parser: XmlPullParser): String? {
+        val targetDepth = parser.depth
+        val builder = StringBuilder()
+        var eventType = parser.next()
+
+        while (eventType != XmlPullParser.END_DOCUMENT) {
+            if (eventType == XmlPullParser.TEXT || eventType == XmlPullParser.CDSECT) {
+                builder.append(parser.text)
+            } else if (eventType == XmlPullParser.END_TAG && parser.depth == targetDepth) {
+                break
+            }
+            eventType = parser.next()
+        }
+
+        return builder.toString().trim().ifBlank { null }
+    }
+
+    private fun removeTitleFromContent(content: String, title: String): String {
+        if (title == "未命名章节" || title.isBlank()) {
+            return content
+        }
+
+        val lines = content.lines()
+        if (lines.isEmpty()) {
+            return content
+        }
+
+        val titleTrimmed = title.trim()
+        val titleNormalized = titleTrimmed.replace(Regex("\\s+"), " ")
+
+        val filteredLines = mutableListOf<String>()
+        var removedCount = 0
+
+        for (i in lines.indices) {
+            if (i < 3 && removedCount < 3) {
+                val line = lines[i].trim()
+                if (line.isEmpty()) {
+                    filteredLines.add(lines[i])
+                    continue
+                }
+
+                val isTitleLine = line == titleTrimmed ||
+                        line == titleNormalized ||
+                        line.contains(titleTrimmed, ignoreCase = true) ||
+                        titleTrimmed.contains(line, ignoreCase = true) ||
+                        (line.length > 3 && titleTrimmed.length > 3 &&
+                                (line.substring(
+                                    0,
+                                    minOf(10, line.length)
+                                ) == titleTrimmed.substring(0, minOf(10, titleTrimmed.length)) ||
+                                        titleTrimmed.substring(
+                                            0,
+                                            minOf(10, titleTrimmed.length)
+                                        ) == line.substring(0, minOf(10, line.length))))
+
+                if (isTitleLine) {
+                    removedCount++
+                    continue
+                }
+            }
+            filteredLines.add(lines[i])
+        }
+
+        val result = filteredLines.joinToString("\n")
+        return if (result.isBlank()) content else result
+    }
+
+    private fun normalizeContentStart(content: String): String {
+        if (content.isBlank()) {
+            return content
+        }
+        val trimmed = content.trimStart()
+        return if (trimmed.isNotEmpty()) {
+            "\n$trimmed"
+        } else {
+            trimmed
+        }
+    }
+
+    // 预编译正则表达式以提高性能
+    private val titleRegex = Regex("<title[^>]*>([^<]+)</title>", RegexOption.IGNORE_CASE)
+    private val h1Regex = Regex("<h1[^>]*>([^<]+)</h1>", RegexOption.IGNORE_CASE)
+    private val h2Regex = Regex("<h2[^>]*>([^<]+)</h2>", RegexOption.IGNORE_CASE)
+    private val brRegex = Regex("<br\\s*/?>", RegexOption.IGNORE_CASE)
+    private val blockTagRegex = Regex("</?(p|div|section|article|li|tr|td|blockquote|h[1-6])[^>]*>", RegexOption.IGNORE_CASE)
+    private val scriptRegex = Regex(
+        "<script[^>]*>.*?</script>",
+        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
+    )
+    private val styleRegex = Regex(
+        "<style[^>]*>.*?</style>",
+        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
+    )
+    private val tagRegex = Regex("<[^>]+>")
+    private val spaceRegex = Regex("[ \\t]+")
+    private val newlineRegex = Regex("\\n\\s*\\n+")
+
+    private fun extractTitle(html: String): String {
+        titleRegex.find(html)?.let {
+            return it.groupValues[1].trim()
+        }
+
+        h1Regex.find(html)?.let {
+            return it.groupValues[1].trim()
+        }
+
+        h2Regex.find(html)?.let {
+            return it.groupValues[1].trim()
+        }
+
+        return "未命名章节"
+    }
+
+    private fun extractTextContent(html: String): String {
+        var text = scriptRegex.replace(html, "")
+        text = styleRegex.replace(text, "")
+        text = brRegex.replace(text, "\n")
+        text = blockTagRegex.replace(text, "\n")
+        text = tagRegex.replace(text, " ")
+        text = text.replace("&nbsp;", " ")
+            .replace("&#160;", " ")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&amp;", "&")
+            .replace("&quot;", "\"")
+            .replace("&apos;", "'")
+            .replace("&#39;", "'")
+            .replace("&ldquo;", "\"")
+            .replace("&rdquo;", "\"")
+            .replace("&lsquo;", "'")
+            .replace("&rsquo;", "'")
+            .replace("&hellip;", "…")
+
+        text = text.replace("\r\n", "\n").replace('\r', '\n')
+        text = text.lines().joinToString("\n") { it.trim() }
+        text = spaceRegex.replace(text, " ")
+        text = newlineRegex.replace(text, "\n\n")
+
+        return text.trim()
+    }
+
+    fun isEpubFile(context: Context, uri: Uri): Boolean {
+        return try {
+            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                ZipInputStream(inputStream).use { zipStream ->
+                    var entry = zipStream.nextEntry
+                    while (entry != null) {
+                        if (entry.name == "mimetype") {
+                            val mimetype = String(zipStream.readBytes(), Charsets.US_ASCII).trim()
+                            return mimetype == "application/epub+zip"
+                        }
+                        zipStream.closeEntry()
+                        entry = zipStream.nextEntry
+                    }
+                    false
+                }
+            } ?: false
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking EPUB file", e)
+            false
+        }
+    }
+}

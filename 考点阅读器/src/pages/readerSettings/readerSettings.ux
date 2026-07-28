@@ -1,0 +1,230 @@
+<template>
+  <div class="page" style="flex-direction: column;">
+
+    <list class="list">
+      <!-- 阅读导航分区 -->
+      <list-item class="item" style="padding: 7px 16px; height: 50px;" type="tip">
+        <text class="section-title" static>阅读导航</text>
+      </list-item>
+      <list-item class="item" @click="goPageJump" type="item">
+        <div class="item-content">
+          <text class="itemtext" static>按页数跳转</text>
+          <text class="itemtext2" static>跳转到指定页码</text>
+        </div>
+        <img static src="/common/images/enter.png" class="arrow" />
+      </list-item>
+      <list-item class="item" @click="goPercentJump" type="item">
+        <div class="item-content">
+          <text class="itemtext" static>按百分比跳转</text>
+          <text class="itemtext2" static>跳转到指定进度</text>
+        </div>
+        <img static src="/common/images/enter.png" class="arrow" />
+      </list-item>
+
+      <!-- 显示设置分区 -->
+      <list-item class="item" style="padding: 7px 16px; height: 50px;" type="tip">
+        <text class="section-title" static>显示设置</text>
+      </list-item>
+      <list-item class="item" type="item">
+        <div class="item-content">
+          <text class="itemtext" static>字号大小</text>
+          <text class="itemtext2" static>阅读字体大小</text>
+        </div>
+        <div style="flex-direction: row; align-items: center;">
+          <img static src="/common/images/pre.png" @click="adjustFontSize(-1)" style="width: 40px; height: 40px;" />
+          <text style="font-size: 28px; font-weight: bold; color: white; width: 70px; text-align: center;">{{fontSizeValue}}px</text>
+          <img static src="/common/images/next.png" @click="adjustFontSize(1)" style="width: 40px; height: 40px;" />
+        </div>
+      </list-item>
+      <list-item class="item" type="item">
+        <div class="item-content">
+          <text class="itemtext" static>行间距</text>
+          <text class="itemtext2" static>阅读行间距</text>
+        </div>
+        <div style="flex-direction: row; align-items: center;">
+          <img static src="/common/images/pre.png" @click="adjustLineHeight(-1)" style="width: 40px; height: 40px;" />
+          <text style="font-size: 28px; font-weight: bold; color: white; width: 70px; text-align: center;">{{lineHeightValue}}px</text>
+          <img static src="/common/images/next.png" @click="adjustLineHeight(1)" style="width: 40px; height: 40px;" />
+        </div>
+      </list-item>
+      <list-item class="item" @click="toggleKeepScreenOn" type="item">
+        <div class="item-content">
+          <text class="itemtext" static>常亮显示</text>
+          <text class="itemtext2" static>阅读时保持屏幕常亮</text>
+        </div>
+        <img src="{{keepScreenOn ? '/common/images/Switch_ON.png' : '/common/images/Switch_OFF.png'}}" class="switch" />
+      </list-item>
+
+      <!-- 文件管理分区 -->
+      <list-item class="item" style="padding: 7px 16px; height: 50px;" type="tip">
+        <text class="section-title" static>文件管理</text>
+      </list-item>
+      <list-item class="item" @click="goDeleteConfirm" type="item">
+        <div class="item-content">
+          <text class="itemtext" static>删除该文件</text>
+          <text class="itemtext2" static>删除后不可恢复</text>
+        </div>
+        <img static src="/common/images/enter.png" class="arrow" />
+      </list-item>
+    </list>
+
+    <!-- 顶部栏 -->
+    <img static src="/common/images/hd.png" style="position: absolute; left: 0px; top: 0px; width: 336px; height: 102px;" />
+    <img static src="/common/images/back.png" @click="goBack" style="position: absolute; left: 6px; top: 6px; width: 72px; height: 72px;" />
+    <text style="position: absolute; left: 78px; top: 7px; width: 180px; line-height: 32px; font-weight: bold; font-size: 24px; color: rgba(255,255,255,0.6); text-align: center;">{{nowTime}}</text>
+    <text style="position: absolute; left: 78px; top: 35px; width: 180px; line-height: 42px; font-weight: bold; font-size: 32px; color: white; text-align: center; lines: 1; text-overflow: ellipsis;">{{contentName}}</text>
+
+  </div>
+</template>
+
+<script>
+import router from '@system.router'
+import storage from '@system.storage'
+import brightness from '@system.brightness'
+import dataManager from '../../common/utils/dataManager.js'
+import { getNowTime } from '../../common/utils/timeUtil.js'
+import appState from '../../common/utils/appState.js'
+
+export default {
+  private: {
+    nowTime: '00:00',
+    timer: null,
+    fontSizeValue: 26,
+    lineHeightValue: 30,
+    keepScreenOn: false,
+    contentPath: '',
+    contentName: '阅读设置'
+  },
+  protected: {
+    path: ''
+  },
+
+  onInit() {
+    this.nowTime = getNowTime()
+    this.timer = setInterval(() => {
+      if (this.$valid) {
+        this.nowTime = getNowTime()
+      }
+    }, 60000)
+    this.contentPath = this.path
+    const name = dataManager.getNodeName(this.path)
+    if (name) {
+      this.contentName = name
+    }
+    this.loadAllSettings()
+  },
+
+  onShow() {
+    if (appState.needBackToReader) {
+      appState.needBackToReader = false
+      router.back()
+      return
+    }
+    if (!this.$valid) return
+    this.loadAllSettings()
+  },
+
+  onDestroy() {
+    if (this.timer) {
+      clearInterval(this.timer)
+      this.timer = null
+    }
+  },
+
+  loadAllSettings() {
+    storage.get({
+      key: 'KD_FONT_SIZE',
+      success: (data) => {
+        if (!this.$valid) return
+        if (data) {
+          this.fontSizeValue = parseInt(data)
+        }
+      },
+      fail: () => {
+        if (!this.$valid) return
+        this.fontSizeValue = 26
+      }
+    })
+    storage.get({
+      key: 'KD_LINE_HEIGHT',
+      success: (data) => {
+        if (!this.$valid) return
+        if (data) {
+          this.lineHeightValue = parseInt(data)
+        }
+      },
+      fail: () => {
+        if (!this.$valid) return
+        this.lineHeightValue = 30
+      }
+    })
+    storage.get({
+      key: 'KD_KEEP_SCREEN_ON',
+      success: (data) => {
+        if (!this.$valid) return
+        this.keepScreenOn = data === 'true'
+      },
+      fail: () => {
+        if (!this.$valid) return
+        this.keepScreenOn = false
+      }
+    })
+  },
+
+  adjustFontSize(delta) {
+    let val = this.fontSizeValue + delta
+    if (val < 20) val = 20
+    if (val > 36) val = 36
+    this.fontSizeValue = val
+    storage.set({ key: 'KD_FONT_SIZE', value: val.toString() })
+  },
+
+  adjustLineHeight(delta) {
+    let val = this.lineHeightValue + delta
+    if (val < 20) val = 20
+    if (val > 50) val = 50
+    this.lineHeightValue = val
+    storage.set({ key: 'KD_LINE_HEIGHT', value: val.toString() })
+  },
+
+  toggleKeepScreenOn() {
+    this.keepScreenOn = !this.keepScreenOn
+    storage.set({ key: 'KD_KEEP_SCREEN_ON', value: this.keepScreenOn.toString() })
+    brightness.setKeepScreenOn({ keepScreenOn: this.keepScreenOn })
+  },
+
+  goPageJump() {
+    router.push({
+      uri: '/pages/pageJump',
+      params: { path: this.contentPath }
+    })
+  },
+
+  goPercentJump() {
+    router.push({
+      uri: '/pages/percentJump',
+      params: { path: this.contentPath }
+    })
+  },
+
+  goDeleteConfirm() {
+    router.push({
+      uri: '/pages/deleteConfirm',
+      params: { action: 'deleteContent', path: this.contentPath }
+    })
+  },
+
+  goBack() {
+    router.back()
+  },
+
+  onBackPress() {
+    router.back()
+    return true
+  }
+}
+</script>
+
+<style>
+  @import '../../common/style.css';
+</style>

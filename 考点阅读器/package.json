@@ -1,0 +1,24 @@
+{
+  "name": "com.silenthong.kdreader",
+  "version": "1.0.0",
+  "description": "考点阅读器",
+  "engines": {
+    "node": ">=8.10"
+  },
+  "scripts": {
+    "start": "aiot server --watch --open-nuttx",
+    "build": "aiot build",
+    "release": "aiot release --enable-jsc",
+    "watch": "aiot watch --open-nuttx"
+  },
+  "devDependencies": {
+    "@aiot-toolkit/velasim": "^0.1.25",
+    "aiot-toolkit": "^2.0.4"
+  },
+  "dependencies": {
+    "@aiot-toolkit/jsc": "^1.0.7"
+  },
+  "browserslist": [
+    "chrome 65"
+  ]
+}

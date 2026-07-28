@@ -1,0 +1,2317 @@
+package com.bandbbs.ebook.ui.viewmodel
+
+import android.app.Application
+import android.content.Context
+import android.content.SharedPreferences
+import android.net.Uri
+import android.util.Log
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.application
+import androidx.lifecycle.viewModelScope
+import com.bandbbs.ebook.database.AppDatabase
+import com.bandbbs.ebook.database.BookmarkEntity
+import com.bandbbs.ebook.database.ChapterInfo
+import com.bandbbs.ebook.logic.InterHandshake
+import com.bandbbs.ebook.logic.SyncReadingData
+import com.bandbbs.ebook.ui.model.Book
+import com.bandbbs.ebook.ui.model.ChapterEditContent
+import com.bandbbs.ebook.ui.model.ChapterSegment
+import com.bandbbs.ebook.ui.viewmodel.handlers.CategoryHandler
+import com.bandbbs.ebook.ui.viewmodel.handlers.ConnectionHandler
+import com.bandbbs.ebook.ui.viewmodel.handlers.ImportHandler
+import com.bandbbs.ebook.ui.viewmodel.handlers.LibraryHandler
+import com.bandbbs.ebook.ui.viewmodel.handlers.PushHandler
+import com.bandbbs.ebook.utils.ReadingTimeStorage
+import com.bandbbs.ebook.utils.VersionChecker
+import com.bandbbs.ebook.utils.manager.BookmarkManager
+import com.bandbbs.ebook.utils.manager.ChapterContentManager
+import com.bandbbs.ebook.utils.manager.DataBackupManager
+import com.bandbbs.ebook.utils.parser.BookInfoParser
+import com.bandbbs.ebook.utils.parser.EpubParser
+import com.bandbbs.ebook.utils.parser.NvbParser
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import org.json.JSONObject
+import java.io.File
+
+data class BandSettingsState(
+    val fontSize: Int = 30,
+    val opacity: Int = 100,
+    val boldEnabled: Boolean = true,
+    val verticalMargin: Int = 10,
+    val timeFormat: String = "24h",
+    val readMode: String = "scroll",
+    val txtSizePage: Int = 400,
+    val showProgressBar: Boolean = true,
+    val showProgressBarPercent: Boolean = false,
+    val progressBarOpacity: Int = 100,
+    val progressBarHeight: Int = 8,
+    val preventParagraphSplitting: Boolean = false,
+    val brightness: Int = 128,
+    val brightnessFollowSystem: Boolean = true,
+    val alwaysShowTime: Boolean = false,
+    val alwaysShowBattery: Boolean = true,
+    val alwaysShowTimeSensitivity: Int = 200,
+    val chapterStartEmptyLines: Boolean = false,
+    val chapterStartNumber: Boolean = false,
+    val chapterStartName: Boolean = false,
+    val chapterStartWordCount: Boolean = false,
+    val chapterSwitchStyle: String = "button",
+    val chapterSwitchHeight: Int = 80,
+    val chapterSwitchSensitivity: Int = 50,
+    val chapterSwitchShowInfo: Boolean = false,
+    val swipeSensitivity: Int = 80,
+    val swipe: String = "column",
+    val autoReadEnabled: Boolean = false,
+    val autoReadSpeed: Int = 10,
+    val autoReadDistance: Int = 100,
+    val gesture: String = "single",
+    val progressSaveMode: String = "exit",
+    val progressSaveInterval: Int = 10,
+    val shelfMarqueeEnabled: Boolean = false,
+    val bookmarkMarqueeEnabled: Boolean = false,
+    val bookinfoMarqueeEnabled: Boolean = true,
+    val chapterListMarqueeEnabled: Boolean = false,
+    val textReaderMarqueeEnabled: Boolean = false,
+    val detailMarqueeEnabled: Boolean = false,
+    val detailProgressMarqueeEnabled: Boolean = false,
+    val nostalgicPageTurnMode: String = "topBottomClick",
+    val teacherScreenEnabled: Boolean = false
+)
+
+data class GlobalLoadingState(
+    val isLoading: Boolean = false,
+    val message: String = ""
+)
+
+class MainViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val booksDir = File(application.filesDir, "books").apply { mkdirs() }
+    private val db = AppDatabase.getDatabase(application)
+    private val prefs: SharedPreferences =
+        application.getSharedPreferences("ebook_prefs", Context.MODE_PRIVATE)
+    private val readerPrefs: SharedPreferences =
+        application.getSharedPreferences("chapter_reader_prefs", Context.MODE_PRIVATE)
+
+    private val FIRST_SYNC_CONFIRMED_KEY = "first_sync_confirmed"
+    private val FIRST_SYNC_READING_DATA_CONFIRMED_KEY = "first_sync_reading_data_confirmed"
+
+    private val _connectionState = MutableStateFlow(ConnectionState())
+    val connectionState = _connectionState.asStateFlow()
+
+    private val _books = MutableStateFlow<List<Book>>(emptyList())
+    val books = _books.asStateFlow()
+
+    private val _recentBook = MutableStateFlow<Book?>(null)
+    val recentBook = _recentBook.asStateFlow()
+
+    private val _recentUpdatedBook = MutableStateFlow<Book?>(null)
+    val recentUpdatedBook = _recentUpdatedBook.asStateFlow()
+
+    private val _expandedBookPath = MutableStateFlow<String?>(null)
+    val expandedBookPath = _expandedBookPath.asStateFlow()
+
+    private val _expandedCategories = MutableStateFlow<Set<String>>(emptySet())
+    val expandedCategories = _expandedCategories.asStateFlow()
+
+    private val _pushState = MutableStateFlow(PushState())
+    val pushState = _pushState.asStateFlow()
+
+    private val _importState = MutableStateFlow<ImportState?>(null)
+    val importState = _importState.asStateFlow()
+
+    private val _importingState = MutableStateFlow<ImportingState?>(null)
+    val importingState = _importingState.asStateFlow()
+
+    private val _importReportState = MutableStateFlow<ImportReportState?>(null)
+    val importReportState = _importReportState.asStateFlow()
+
+    private val _selectedBookForChapters = MutableStateFlow<Book?>(null)
+    val selectedBookForChapters = _selectedBookForChapters.asStateFlow()
+
+    private val _chaptersForSelectedBook = MutableStateFlow<List<ChapterInfo>>(emptyList())
+    val chaptersForSelectedBook = _chaptersForSelectedBook.asStateFlow()
+
+    private val _chapterToPreview =
+        MutableStateFlow<com.bandbbs.ebook.ui.model.ChapterWithContent?>(null)
+    val chapterToPreview = _chapterToPreview.asStateFlow()
+
+    private val _chaptersForPreview = MutableStateFlow<List<ChapterInfo>>(emptyList())
+    val chaptersForPreview = _chaptersForPreview.asStateFlow()
+
+    private val _chapterEditorContent = MutableStateFlow<ChapterEditContent?>(null)
+    val chapterEditorContent = _chapterEditorContent.asStateFlow()
+
+    private val _bookToDelete = MutableStateFlow<Book?>(null)
+    val bookToDelete = _bookToDelete.asStateFlow()
+
+    private val _booksToDelete = MutableStateFlow<List<Book>>(emptyList())
+    val booksToDelete = _booksToDelete.asStateFlow()
+
+    private val _syncOptionsState = MutableStateFlow<SyncOptionsState?>(null)
+    val syncOptionsState = _syncOptionsState.asStateFlow()
+
+    private val _overwriteConfirmState = MutableStateFlow<OverwriteConfirmState?>(null)
+    val overwriteConfirmState = _overwriteConfirmState.asStateFlow()
+
+    private val _largeChapterWarningState = MutableStateFlow<LargeChapterWarningState?>(null)
+    val largeChapterWarningState = _largeChapterWarningState.asStateFlow()
+
+    private val _bookForCoverImport = MutableStateFlow<Book?>(null)
+    val bookForCoverImport = _bookForCoverImport.asStateFlow()
+
+    private val _connectionErrorState = MutableStateFlow<ConnectionErrorState?>(null)
+    val connectionErrorState = _connectionErrorState.asStateFlow()
+
+    private val _connectionRequiredDialogState =
+        MutableStateFlow<ConnectionRequiredDialogState?>(null)
+    val connectionRequiredDialogState = _connectionRequiredDialogState.asStateFlow()
+
+    private val _categoryState = MutableStateFlow<CategoryState?>(null)
+    val categoryState = _categoryState.asStateFlow()
+
+    private val _firstSyncConfirmState = MutableStateFlow<Book?>(null)
+    val firstSyncConfirmState = _firstSyncConfirmState.asStateFlow()
+
+    private val _firstTransferFailureDialogState = MutableStateFlow(false)
+    val firstTransferFailureDialogState = _firstTransferFailureDialogState.asStateFlow()
+
+    private val _editBookInfoState = MutableStateFlow<EditBookInfoState?>(null)
+    val editBookInfoState = _editBookInfoState.asStateFlow()
+
+    private val _syncReadingDataState = MutableStateFlow(SyncReadingDataState())
+    val syncReadingDataState = _syncReadingDataState.asStateFlow()
+
+    private val _syncResultState = MutableStateFlow<SyncResultState?>(null)
+    val syncResultState = _syncResultState.asStateFlow()
+
+    private var syncReadingDataJob: Job? = null
+
+    private val _versionIncompatibleState = MutableStateFlow<VersionIncompatibleState?>(null)
+    val versionIncompatibleState = _versionIncompatibleState.asStateFlow()
+
+    private val _updateCheckState = MutableStateFlow(UpdateCheckState())
+    val updateCheckState = _updateCheckState.asStateFlow()
+
+    private val _bandStorageInfo = MutableStateFlow(BandStorageInfo(isLoading = false))
+    val bandStorageInfo = _bandStorageInfo.asStateFlow()
+
+    private val _backupRestoreState = MutableStateFlow<BackupRestoreResult?>(null)
+    val backupRestoreState = _backupRestoreState.asStateFlow()
+
+    private val _bandSettingsState = MutableStateFlow<BandSettingsState?>(null)
+    val bandSettingsState = _bandSettingsState.asStateFlow()
+
+    private val _globalLoadingState = MutableStateFlow(GlobalLoadingState())
+    val globalLoadingState = _globalLoadingState.asStateFlow()
+
+    private val _notices = MutableStateFlow<List<NoticeState>>(emptyList())
+    val notices = _notices.asStateFlow()
+
+    private val SHOW_RECENT_IMPORT_KEY = "show_recent_import"
+    private val SHOW_RECENT_UPDATE_KEY = "show_recent_update"
+    private val AUTO_CHECK_UPDATES_KEY = "auto_check_updates"
+    private val SHOW_CONNECTION_ERROR_KEY = "show_connection_error"
+    private val SHOW_SEARCH_BAR_KEY = "show_search_bar"
+    private val THEME_MODE_KEY = "theme_mode"
+    private val QUICK_EDIT_CATEGORY_KEY = "quick_edit_category"
+    private val AUTO_MINIMIZE_ON_TRANSFER_KEY = "auto_minimize_on_transfer"
+    private val AUTO_RETRY_ON_TRANSFER_ERROR_KEY = "auto_retry_on_transfer_error"
+    private val HAS_CLICKED_TRANSFER_BUTTON_KEY = "has_clicked_transfer_button"
+    private val FIRST_TRANSFER_FAILURE_DIALOG_SHOWN_KEY = "first_transfer_failure_dialog_shown"
+    private val QUICK_RENAME_CATEGORY_KEY = "quick_rename_category"
+    private val LAST_SPLIT_METHOD_KEY = "last_split_method"
+    private val BAND_TRANSFER_ENABLED_KEY = "band_transfer_enabled"
+    private val USE_FLOATING_NAVIGATION_BAR_KEY = "use_floating_navigation_bar"
+    private val USE_BUILTIN_FILE_MANAGER_KEY = "use_builtin_file_manager"
+    private val AUTO_DELETE_SOURCE_AFTER_IMPORT_KEY = "auto_delete_source_after_import"
+    private val SHOW_DONATE_CARD_KEY = "show_donate_card"
+
+    private var FIRST_AUTO_CHECK = true
+
+    private val _showRecentImport = MutableStateFlow(prefs.getBoolean(SHOW_RECENT_IMPORT_KEY, true))
+    val showRecentImport = _showRecentImport.asStateFlow()
+
+    private val _showRecentUpdate = MutableStateFlow(prefs.getBoolean(SHOW_RECENT_UPDATE_KEY, true))
+    val showRecentUpdate = _showRecentUpdate.asStateFlow()
+
+    private val _autoCheckUpdates = MutableStateFlow(prefs.getBoolean(AUTO_CHECK_UPDATES_KEY, true))
+    val autoCheckUpdates = _autoCheckUpdates.asStateFlow()
+
+    private val _showConnectionError =
+        MutableStateFlow(prefs.getBoolean(SHOW_CONNECTION_ERROR_KEY, true))
+    val showConnectionError = _showConnectionError.asStateFlow()
+
+    private val _showSearchBar = MutableStateFlow(prefs.getBoolean(SHOW_SEARCH_BAR_KEY, true))
+    val showSearchBar = _showSearchBar.asStateFlow()
+
+    private val _quickEditCategoryEnabled =
+        MutableStateFlow(prefs.getBoolean(QUICK_EDIT_CATEGORY_KEY, false))
+    val quickEditCategoryEnabled = _quickEditCategoryEnabled.asStateFlow()
+
+    private val _autoMinimizeOnTransfer =
+        MutableStateFlow(prefs.getBoolean(AUTO_MINIMIZE_ON_TRANSFER_KEY, false))
+    val autoMinimizeOnTransfer = _autoMinimizeOnTransfer.asStateFlow()
+
+    private val _autoRetryOnTransferError =
+        MutableStateFlow(prefs.getBoolean(AUTO_RETRY_ON_TRANSFER_ERROR_KEY, false))
+    val autoRetryOnTransferError = _autoRetryOnTransferError.asStateFlow()
+
+    private val _hasClickedTransferButton =
+        MutableStateFlow(prefs.getBoolean(HAS_CLICKED_TRANSFER_BUTTON_KEY, false))
+    val hasClickedTransferButton = _hasClickedTransferButton.asStateFlow()
+
+    private val _quickRenameCategoryEnabled =
+        MutableStateFlow(prefs.getBoolean(QUICK_RENAME_CATEGORY_KEY, false))
+    val quickRenameCategoryEnabled = _quickRenameCategoryEnabled.asStateFlow()
+
+    private val _bandTransferEnabled =
+        MutableStateFlow(prefs.getBoolean(BAND_TRANSFER_ENABLED_KEY, true))
+    val bandTransferEnabled = _bandTransferEnabled.asStateFlow()
+
+    private val _useFloatingNavigationBar =
+        MutableStateFlow(prefs.getBoolean(USE_FLOATING_NAVIGATION_BAR_KEY, false))
+    val useFloatingNavigationBar = _useFloatingNavigationBar.asStateFlow()
+
+    private val _useBuiltinFileManager =
+        MutableStateFlow(prefs.getBoolean(USE_BUILTIN_FILE_MANAGER_KEY, true))
+    val useBuiltinFileManager = _useBuiltinFileManager.asStateFlow()
+
+    private val _autoDeleteSourceAfterImport =
+        MutableStateFlow(prefs.getBoolean(AUTO_DELETE_SOURCE_AFTER_IMPORT_KEY, false))
+    val autoDeleteSourceAfterImport = _autoDeleteSourceAfterImport.asStateFlow()
+
+    private val _showDonateCard = MutableStateFlow(prefs.getBoolean(SHOW_DONATE_CARD_KEY, true))
+    val showDonateCard = _showDonateCard.asStateFlow()
+
+    private val _isMultiSelectMode = MutableStateFlow(false)
+    val isMultiSelectMode = _isMultiSelectMode.asStateFlow()
+
+    private val _selectedBooks = MutableStateFlow<Set<String>>(emptySet())
+    val selectedBooks = _selectedBooks.asStateFlow()
+
+    enum class ThemeMode {
+        LIGHT, DARK, SYSTEM
+    }
+
+    private val _themeMode = MutableStateFlow(
+        ThemeMode.valueOf(
+            prefs.getString(THEME_MODE_KEY, ThemeMode.SYSTEM.name) ?: ThemeMode.SYSTEM.name
+        )
+    )
+    val themeMode = _themeMode.asStateFlow()
+
+    private val connectionHandler = ConnectionHandler(
+        scope = viewModelScope,
+        connectionState = _connectionState,
+        connectionErrorState = _connectionErrorState,
+        showConnectionError = _showConnectionError,
+        versionIncompatibleState = _versionIncompatibleState,
+        bandTransferEnabled = _bandTransferEnabled
+    ).apply {
+        onBandConnected = { deviceName ->
+            if (FIRST_AUTO_CHECK) autoCheckUpdates()
+            refreshBandStorageInfo()
+        }
+        onBandVersionReceived = { bandVersion ->
+            checkBandUpdateOnly(bandVersion)
+        }
+    }
+
+    private val categoryHandler = CategoryHandler(
+        prefs = prefs,
+        db = db,
+        scope = viewModelScope,
+        categoryState = _categoryState,
+        importState = _importState,
+        onBooksChanged = { loadBooks() }
+    )
+
+    private val importHandler = ImportHandler(
+        application = application,
+        db = db,
+        booksDir = booksDir,
+        scope = viewModelScope,
+        booksState = _books,
+        importState = _importState,
+        importingState = _importingState,
+        importReportState = _importReportState,
+        overwriteConfirmState = _overwriteConfirmState,
+        largeChapterWarningState = _largeChapterWarningState,
+        autoDeleteSourceAfterImport = _autoDeleteSourceAfterImport,
+        onBooksChanged = { loadBooks() }
+    )
+
+    private val pushHandler = PushHandler(
+        db = db,
+        prefs = prefs,
+        scope = viewModelScope,
+        pushState = _pushState,
+        syncOptionsState = _syncOptionsState,
+        firstSyncConfirmState = _firstSyncConfirmState,
+        connectionHandler = connectionHandler,
+        firstSyncConfirmedKey = FIRST_SYNC_CONFIRMED_KEY,
+        appContext = application.applicationContext,
+        autoRetryOnTransferError = _autoRetryOnTransferError,
+        onFirstTransferFailure = { showFirstTransferFailureDialog() }
+    )
+
+    private val libraryHandler = LibraryHandler(
+        application = application,
+        db = db,
+        booksDir = booksDir,
+        scope = viewModelScope,
+        booksState = _books,
+        bookToDelete = _bookToDelete,
+        selectedBookForChapters = _selectedBookForChapters,
+        chaptersForSelectedBook = _chaptersForSelectedBook,
+        chapterToPreview = _chapterToPreview, chaptersForPreview = _chaptersForPreview,
+        bookForCoverImport = _bookForCoverImport,
+        chapterEditorContent = _chapterEditorContent,
+        onBooksChanged = { loadBooks() }
+    )
+
+    init {
+        loadBooks()
+        performInitialUpdateCheck()
+        loadNotices()
+    }
+
+    private fun loadNotices() {
+        viewModelScope.launch(Dispatchers.IO) {
+            VersionChecker.getNotices().onSuccess { noticeList ->
+                withContext(Dispatchers.Main) {
+                    _notices.value = noticeList.map {
+                        NoticeState(it.id, it.title, it.summary, it.content, it.time, it.link)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun parseProgressJson(jsonStr: String?): Map<String, Any>? {
+        if (jsonStr.isNullOrEmpty()) return null
+        return try {
+            val progressMap = JSONObject(jsonStr)
+            val tempMap = mutableMapOf<String, Any>()
+            val keys = progressMap.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                val value = progressMap.get(key)
+                if (key == "chapterIndex") {
+                    when {
+                        value == JSONObject.NULL -> continue
+                        value is Int -> tempMap[key] = value
+                        value is Long -> tempMap[key] = value.toInt()
+                        value is Double -> tempMap[key] = value.toInt()
+                        value is String -> {
+                            val intValue = value.toIntOrNull()
+                            if (intValue != null && intValue >= 0) tempMap[key] = intValue
+                        }
+
+                        else -> {
+                            val intValue = (value as? Number)?.toInt()
+                            if (intValue != null && intValue >= 0) tempMap[key] = intValue
+                        }
+                    }
+                } else {
+                    tempMap[key] = when (value) {
+                        is JSONObject, is org.json.JSONArray -> value.toString()
+                        else -> value
+                    }
+                }
+            }
+            if (tempMap.containsKey("chapterIndex")) tempMap else null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun parseReadingTimeJson(jsonStr: String?): Map<String, Any>? {
+        if (jsonStr.isNullOrEmpty()) return null
+        return try {
+            val readingTimeMap = JSONObject(jsonStr)
+            val tempMap = mutableMapOf<String, Any>()
+            val keys = readingTimeMap.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                val value = readingTimeMap.get(key)
+                tempMap[key] = when (value) {
+                    is JSONObject -> {
+                        val sessionMap = mutableMapOf<String, Any>()
+                        val sessionKeys = value.keys()
+                        while (sessionKeys.hasNext()) {
+                            val sessionKey = sessionKeys.next()
+                            sessionMap[sessionKey] = value.get(sessionKey)
+                        }
+                        sessionMap
+                    }
+
+                    is org.json.JSONArray -> {
+                        val sessionList = mutableListOf<Any>()
+                        for (i in 0 until value.length()) {
+                            val sessionObj = value.getJSONObject(i)
+                            val sessionMap = mutableMapOf<String, Any>()
+                            val sessionKeys = sessionObj.keys()
+                            while (sessionKeys.hasNext()) {
+                                val sessionKey = sessionKeys.next()
+                                sessionMap[sessionKey] = sessionObj.get(sessionKey).toString()
+                            }
+                            sessionList.add(sessionMap)
+                        }
+                        sessionList
+                    }
+
+                    else -> value
+                }
+            }
+            tempMap
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun performInitialUpdateCheck() {
+        val autoCheckEnabled = prefs.getBoolean(AUTO_CHECK_UPDATES_KEY, true)
+        if (!autoCheckEnabled) {
+            return
+        }
+        performUpdateCheck(isAutoCheck = true)
+    }
+
+    fun setExpandedBook(path: String?) {
+        _expandedBookPath.value = path
+    }
+
+    fun toggleCategoryExpansion(category: String) {
+        val current = _expandedCategories.value
+        if (current.contains(category)) {
+            _expandedCategories.value = current - category
+        } else {
+            _expandedCategories.value = current + category
+        }
+    }
+
+    fun getCategories(): List<String> = categoryHandler.getCategories()
+
+    fun showCategorySelector(book: Book? = null) = categoryHandler.showCategorySelector(book)
+
+    fun showCategorySelectorForEditBookInfo(
+        selectedCategory: String?,
+        onCategorySelected: (String?) -> Unit
+    ) {
+        categoryHandler.showCategorySelectorForEdit(selectedCategory, onCategorySelected)
+    }
+
+    fun createCategory(categoryName: String) = categoryHandler.createCategory(categoryName)
+
+    fun deleteCategory(categoryName: String) = categoryHandler.deleteCategory(categoryName)
+
+    fun selectCategory(category: String?) = categoryHandler.selectCategory(category)
+
+    fun dismissCategorySelector() = categoryHandler.dismissCategorySelector()
+
+    fun enterMultiSelectMode() {
+        _isMultiSelectMode.value = true
+        _selectedBooks.value = emptySet()
+    }
+
+    fun exitMultiSelectMode() {
+        _isMultiSelectMode.value = false
+        _selectedBooks.value = emptySet()
+    }
+
+    fun selectBook(bookPath: String) {
+        val current = _selectedBooks.value.toMutableSet()
+        if (current.contains(bookPath)) {
+            current.remove(bookPath)
+        } else {
+            current.add(bookPath)
+        }
+        _selectedBooks.value = current
+    }
+
+    fun requestDeleteSelectedBooks() {
+        val selectedPaths = _selectedBooks.value
+        if (selectedPaths.isEmpty()) return
+
+        val booksToDelete = _books.value.filter { it.path in selectedPaths }
+        if (booksToDelete.isEmpty()) return
+
+        _booksToDelete.value = booksToDelete
+    }
+
+    fun cancelDeleteSelectedBooks() {
+        _booksToDelete.value = emptyList()
+    }
+
+    fun confirmDeleteSelectedBooks() {
+        val booksToDelete = _booksToDelete.value
+        if (booksToDelete.isEmpty()) return
+
+        viewModelScope.launch(Dispatchers.IO) {
+            booksToDelete.forEach { book ->
+                File(book.path).delete()
+                val bookEntity = db.bookDao().getBookByPath(book.path)
+                if (bookEntity != null) {
+                    val context = application.applicationContext
+                    ChapterContentManager.deleteBookChapters(context, bookEntity.id)
+                    db.chapterDao().deleteChaptersByBookId(bookEntity.id)
+                    db.bookDao().delete(bookEntity)
+                }
+            }
+
+            withContext(Dispatchers.Main) {
+                _booksToDelete.value = emptyList()
+                loadBooks()
+                exitMultiSelectMode()
+            }
+        }
+    }
+
+    fun setConnection(connection: InterHandshake) = connectionHandler.setConnection(connection)
+
+    fun reconnect() = connectionHandler.reconnect()
+
+    fun refreshBandStorageInfo() {
+        if (!connectionHandler.isConnected()) {
+            _bandStorageInfo.value = BandStorageInfo(isLoading = false)
+            return
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                _bandStorageInfo.value = BandStorageInfo(isLoading = true)
+                connectionHandler.markPreparingStorage()
+
+                val fileConnection = connectionHandler.getFileConnection()
+                fileConnection.onStorageInfo = { storageInfo ->
+                    _bandStorageInfo.value = BandStorageInfo(
+                        product = storageInfo.product,
+                        totalStorage = storageInfo.totalStorage,
+                        availableStorage = storageInfo.availableStorage,
+                        reservedStorage = storageInfo.reservedStorage,
+                        usedStorage = storageInfo.usedStorage,
+                        actualAvailable = storageInfo.actualAvailable,
+                        isLoading = false
+                    )
+                    connectionHandler.markConnectedReady()
+                }
+
+                withTimeout(8000L) {
+                    fileConnection.getStorageInfo()
+                }
+            } catch (_: TimeoutCancellationException) {
+                _bandStorageInfo.value = BandStorageInfo(isLoading = false)
+                _connectionRequiredDialogState.value = ConnectionRequiredDialogState(
+                    title = "手环准备中",
+                    message = "获取手环存储信息失败，请多次重试即可。",
+                    showRetry = true
+                )
+            } catch (e: Exception) {
+                _bandStorageInfo.value = BandStorageInfo(isLoading = false)
+                _connectionRequiredDialogState.value = ConnectionRequiredDialogState(
+                    title = "手环准备中",
+                    message = "获取手环存储信息失败，请多次重试即可。",
+                    showRetry = true
+                )
+            }
+        }
+    }
+
+    fun dismissConnectionError() = connectionHandler.dismissConnectionError()
+
+    private fun requireBandReadyOrShowDialog(): Boolean {
+        if (!connectionHandler.isConnected()) {
+            _connectionRequiredDialogState.value = ConnectionRequiredDialogState(
+                title = "请先连接手环",
+                message = "当前操作需要先连接手环后才能继续。"
+            )
+            return false
+        }
+        if (_bandStorageInfo.value.isLoading || !_bandStorageInfo.value.hasValidData) {
+            _connectionRequiredDialogState.value = ConnectionRequiredDialogState(
+                title = "手环准备中",
+                message = "正在获取手环存储信息，请稍后重试。",
+                showRetry = true
+            )
+            return false
+        }
+        return true
+    }
+
+    fun retryConnectionOrStoragePreparation() {
+        _connectionRequiredDialogState.value = null
+        if (!connectionHandler.isConnected()) {
+            reconnect()
+        } else {
+            refreshBandStorageInfo()
+        }
+    }
+
+    fun dismissConnectionRequiredDialog() {
+        _connectionRequiredDialogState.value = null
+    }
+
+    fun startImport(uri: Uri) = importHandler.startImport(uri)
+
+    fun startImportBatch(uris: List<Uri>) = importHandler.startImportBatch(uris)
+
+    fun cancelImport() = importHandler.cancelImport()
+
+    fun dismissImportProgress() {
+        _importingState.value = null
+    }
+
+    fun confirmImport(
+        bookName: String,
+        splitMethod: String,
+        noSplit: Boolean,
+        wordsPerChapter: Int,
+        selectedCategory: String? = null,
+        enableChapterMerge: Boolean = false,
+        mergeMinWords: Int = 500,
+        enableChapterRename: Boolean = false,
+        renamePattern: String = "",
+        customRegex: String = "",
+        selectedCustomRegexTemplateName: String? = null,
+        customRegexTemplates: List<RegexTemplate> = emptyList()
+    ) = importHandler.confirmImport(
+        bookName,
+        splitMethod,
+        noSplit,
+        wordsPerChapter,
+        selectedCategory,
+        enableChapterMerge,
+        mergeMinWords,
+        enableChapterRename,
+        renamePattern,
+        customRegex,
+        selectedCustomRegexTemplateName,
+        customRegexTemplates
+    )
+
+    fun cancelOverwriteConfirm() = importHandler.cancelOverwriteConfirm()
+
+    fun confirmOverwrite() = importHandler.confirmOverwrite()
+
+    fun dismissImportReport() = importHandler.dismissImportReport()
+
+    fun dismissLargeChapterWarning() = importHandler.dismissLargeChapterWarning()
+
+    fun requestDeleteBook(book: Book) = libraryHandler.requestDeleteBook(book)
+
+    fun createBook(bookName: String, selectedCategory: String?) =
+        libraryHandler.createBook(bookName, selectedCategory)
+
+    fun confirmDeleteBook() = libraryHandler.confirmDeleteBook()
+
+    fun cancelDeleteBook() = libraryHandler.cancelDeleteBook()
+
+    fun deleteBandBook(book: Book) {
+        if (!requireBandReadyOrShowDialog()) return
+
+        val fileConn = runCatching { connectionHandler.getFileConnection() }.getOrElse {
+            Log.e("MainViewModel", "Cannot get file connection")
+            return
+        }
+
+        if (fileConn.busy) {
+            Log.w("MainViewModel", "File connection is busy")
+            return
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val success = fileConn.deleteBook(
+                    bookName = book.name,
+                    onSuccess = { message ->
+                        Log.d("MainViewModel", "Delete band book success: $message")
+                    },
+                    onError = { errorMessage ->
+                        Log.e("MainViewModel", "Delete band book error: $errorMessage")
+                    }
+                )
+                Log.d("MainViewModel", "Delete band book result: $success")
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "Failed to delete band book", e)
+            }
+        }
+        libraryHandler.cancelDeleteBook()
+    }
+
+    fun startPush(book: Book) {
+        if (!_bandTransferEnabled.value) {
+            return
+        }
+        if (!requireBandReadyOrShowDialog()) return
+
+        if (!_hasClickedTransferButton.value) {
+            prefs.edit().putBoolean(HAS_CLICKED_TRANSFER_BUTTON_KEY, true).apply()
+            _hasClickedTransferButton.value = true
+        }
+        pushHandler.startPush(book)
+    }
+
+    fun syncCoverOnly(book: Book) {
+        if (!requireBandReadyOrShowDialog()) return
+        pushHandler.syncCoverOnly(book)
+    }
+
+    fun confirmPush(book: Book, selectedChapterIndices: Set<Int>, syncCover: Boolean = false) {
+        if (!requireBandReadyOrShowDialog()) return
+        pushHandler.confirmPush(book, selectedChapterIndices, syncCover)
+    }
+
+    fun confirmFirstSync() = pushHandler.confirmFirstSync()
+
+    fun cancelFirstSyncConfirm() = pushHandler.cancelFirstSyncConfirm()
+
+    fun showFirstTransferFailureDialog() {
+        val hasShown = prefs.getBoolean(FIRST_TRANSFER_FAILURE_DIALOG_SHOWN_KEY, false)
+        Log.d("MainViewModel", "showFirstTransferFailureDialog called, hasShown=$hasShown")
+        if (!hasShown) {
+            _firstTransferFailureDialogState.value = true
+            Log.d("MainViewModel", "Setting firstTransferFailureDialogState to true")
+        }
+    }
+
+    fun dismissFirstTransferFailureDialog() {
+        _firstTransferFailureDialogState.value = false
+        prefs.edit().putBoolean(FIRST_TRANSFER_FAILURE_DIALOG_SHOWN_KEY, true).apply()
+    }
+
+    fun cancelPush() = pushHandler.cancelPush()
+
+    fun resetPushState() = pushHandler.resetPushState()
+
+    fun deleteBandChapters(book: Book, chapterIndices: Set<Int>) {
+        if (!requireBandReadyOrShowDialog()) return
+
+        val fileConn = runCatching { connectionHandler.getFileConnection() }.getOrElse {
+            Log.e("MainViewModel", "Cannot get file connection")
+            return
+        }
+
+        if (fileConn.busy) {
+            Log.w("MainViewModel", "File connection is busy")
+            return
+        }
+
+        _pushState.value = PushState(
+            book = book,
+            progress = 0.0,
+            preview = "准备删除章节...",
+            transferLog = listOf("准备删除 ${chapterIndices.size} 个章节..."),
+            statusText = "准备删除...",
+            isTransferring = true
+        )
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val success = fileConn.deleteChapters(
+                    bookName = book.name,
+                    chapterIndices = chapterIndices.toList(),
+                    onProgress = { progress, message ->
+                        viewModelScope.launch(Dispatchers.Main) {
+                            val currentState = _pushState.value
+                            val newLog = (currentState.transferLog + message).takeLast(100)
+                            _pushState.value = currentState.copy(
+                                progress = progress,
+                                preview = message,
+                                statusText = message,
+                                transferLog = newLog
+                            )
+                        }
+                    },
+                    onSuccess = { message ->
+                        viewModelScope.launch(Dispatchers.Main) {
+                            val currentState = _pushState.value
+                            val newLog = (currentState.transferLog + message).takeLast(100)
+                            _pushState.value = currentState.copy(
+                                progress = 1.0,
+                                statusText = message,
+                                isFinished = true,
+                                isSuccess = true,
+                                isTransferring = false,
+                                transferLog = newLog
+                            )
+                            pushHandler.refreshBookStatus(book)
+                        }
+                    },
+                    onError = { errorMessage ->
+                        viewModelScope.launch(Dispatchers.Main) {
+                            val currentState = _pushState.value
+                            val newLog =
+                                (currentState.transferLog + "错误: $errorMessage").takeLast(100)
+                            _pushState.value = currentState.copy(
+                                statusText = errorMessage,
+                                isFinished = true,
+                                isSuccess = false,
+                                isTransferring = false,
+                                transferLog = newLog
+                            )
+                        }
+                    }
+                )
+
+                if (!success) {
+                    withContext(Dispatchers.Main) {
+                        val currentState = _pushState.value
+                        _pushState.value = currentState.copy(
+                            statusText = "删除失败",
+                            isFinished = true,
+                            isSuccess = false,
+                            isTransferring = false
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "Error deleting chapters from band", e)
+                withContext(Dispatchers.Main) {
+                    val currentState = _pushState.value
+                    _pushState.value = currentState.copy(
+                        statusText = "删除失败: ${e.message}",
+                        isFinished = true,
+                        isSuccess = false,
+                        isTransferring = false
+                    )
+                }
+            }
+        }
+    }
+
+    fun showChapterList(book: Book) = libraryHandler.showChapterList(book)
+
+    fun closeChapterList() = libraryHandler.closeChapterList()
+
+    fun showChapterPreview(chapterId: Int) = libraryHandler.showChapterPreview(chapterId)
+
+    fun continueReading(book: Book) = libraryHandler.continueReading(book)
+
+    fun closeChapterPreview() {
+        libraryHandler.closeChapterPreview()
+        loadBooks()
+    }
+
+    fun renameChapter(chapterId: Int, newTitle: String) =
+        libraryHandler.renameChapter(chapterId, newTitle)
+
+    fun moveChapter(chapterId: Int, direction: Int) =
+        libraryHandler.moveChapter(chapterId, direction)
+
+    fun reorderChapter(chapterId: Int, targetIndex: Int) =
+        libraryHandler.reorderChapter(chapterId, targetIndex)
+
+    fun openChapterEditor(chapterId: Int) = libraryHandler.openChapterEditor(chapterId)
+
+    fun closeChapterEditor() = libraryHandler.closeChapterEditor()
+
+    fun saveChapterContent(chapterId: Int, title: String, content: String) =
+        libraryHandler.saveChapterContent(chapterId, title, content)
+
+    suspend fun loadChapterContent(chapterId: Int): String {
+        return withContext(Dispatchers.IO) {
+            val chapter = db.chapterDao().getChapterById(chapterId)
+            if (chapter != null) {
+                ChapterContentManager.readChapterContent(chapter.contentFilePath)
+            } else {
+                ""
+            }
+        }
+    }
+
+    fun addChapter(insertIndex: Int, title: String, content: String) =
+        libraryHandler.addChapter(insertIndex, title, content)
+
+    fun batchRenameChapters(
+        chapterIds: List<Int>,
+        prefix: String,
+        suffix: String,
+        startNumber: Int,
+        padding: Int
+    ) = libraryHandler.batchRenameChapters(chapterIds, prefix, suffix, startNumber, padding)
+
+    fun mergeChapters(chapterIds: List<Int>, mergedTitle: String, insertBlankLine: Boolean) =
+        libraryHandler.mergeChapters(chapterIds, mergedTitle, insertBlankLine)
+
+    fun splitChapter(chapterId: Int, segments: List<ChapterSegment>) =
+        libraryHandler.splitChapter(chapterId, segments)
+
+    fun requestImportCover(book: Book) = libraryHandler.requestImportCover(book)
+
+    fun cancelImportCover() = libraryHandler.cancelImportCover()
+
+    fun importCoverForBook(uri: Uri) = libraryHandler.importCoverForBook(uri)
+
+    fun exportBookToUri(book: Book, uri: Uri) = libraryHandler.exportBookToUri(book, uri)
+
+    fun showEditBookInfo(book: Book) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val bookEntity = db.bookDao().getBookByPath(book.path)
+            if (bookEntity != null) {
+                _editBookInfoState.value = EditBookInfoState(bookEntity, isResyncing = false)
+            }
+        }
+    }
+
+    fun dismissEditBookInfo() {
+        _editBookInfoState.value = null
+    }
+
+    fun saveBookInfo(bookEntity: com.bandbbs.ebook.database.BookEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            db.bookDao().update(bookEntity)
+            loadBooks()
+            withContext(Dispatchers.Main) {
+                _editBookInfoState.value = null
+            }
+        }
+    }
+
+    suspend fun saveBookInfoWithoutDismiss(bookEntity: com.bandbbs.ebook.database.BookEntity) {
+        withContext(Dispatchers.IO) {
+            db.bookDao().update(bookEntity)
+            loadBooks()
+        }
+        withContext(Dispatchers.Main) {
+            _editBookInfoState.value?.let { currentState ->
+                _editBookInfoState.value = currentState.copy(book = bookEntity)
+            }
+        }
+    }
+
+    fun resyncBookCategory(book: Book) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val bookEntity = db.bookDao().getBookByPath(book.path)
+            if (bookEntity != null) {
+                try {
+                    val context = getApplication<Application>().applicationContext
+                    val fileUri = Uri.fromFile(File(book.path))
+
+                    when (bookEntity.format) {
+                        "nvb" -> {
+                            val nvbBook = NvbParser.parse(context, fileUri)
+                            val updatedEntity = bookEntity.copy(
+                                category = nvbBook.metadata.category,
+                                localCategory = bookEntity.localCategory
+                            )
+                            db.bookDao().update(updatedEntity)
+                        }
+
+                        "epub" -> {
+                            EpubParser.parse(context, fileUri)
+                        }
+                    }
+                    loadBooks()
+                } catch (e: Exception) {
+                    Log.e("MainViewModel", "Failed to resync book category", e)
+                }
+            }
+        }
+    }
+
+    fun resyncBookInfo(book: Book) {
+        _globalLoadingState.value =
+            GlobalLoadingState(isLoading = true, message = "正在同步书籍信息...")
+
+        viewModelScope.launch(Dispatchers.IO) {
+            _editBookInfoState.value?.let { currentState ->
+                _editBookInfoState.value = currentState.copy(isResyncing = true)
+            }
+
+            val bookEntity = db.bookDao().getBookByPath(book.path)
+            if (bookEntity != null) {
+                try {
+                    val context = getApplication<Application>().applicationContext
+                    val fileUri = Uri.fromFile(File(book.path))
+                    var updatedEntity: com.bandbbs.ebook.database.BookEntity? = null
+
+                    when (bookEntity.format) {
+                        "nvb" -> {
+                            val nvbBook = NvbParser.parse(context, fileUri)
+                            updatedEntity = bookEntity.copy(
+                                author = nvbBook.metadata.author,
+                                summary = nvbBook.metadata.summary,
+                                bookStatus = nvbBook.metadata.bookStatus,
+                                category = nvbBook.metadata.category
+                            )
+                            db.bookDao().update(updatedEntity)
+                        }
+
+                        "epub" -> {
+                            val epubBook = EpubParser.parse(context, fileUri)
+                            updatedEntity = bookEntity.copy(
+                                author = epubBook.author
+                            )
+                            db.bookDao().update(updatedEntity)
+                        }
+
+                        "txt" -> {
+                            val chapters = db.chapterDao().getChapterInfoForBook(bookEntity.id)
+                            if (chapters.isNotEmpty() &&
+                                (chapters[0].name == "简介" || chapters[0].name == "介绍")
+                            ) {
+                                val chapter = db.chapterDao().getChapterById(chapters[0].id)
+                                if (chapter != null) {
+                                    val content =
+                                        ChapterContentManager.readChapterContent(chapter.contentFilePath)
+                                    val parsedInfo =
+                                        BookInfoParser.parseIntroductionContent(content)
+                                    if (parsedInfo != null) {
+                                        updatedEntity = bookEntity.copy(
+                                            author = parsedInfo.author ?: bookEntity.author,
+                                            summary = parsedInfo.summary ?: bookEntity.summary,
+                                            bookStatus = parsedInfo.status ?: bookEntity.bookStatus,
+                                            category = parsedInfo.tags ?: bookEntity.category
+                                        )
+                                        db.bookDao().update(updatedEntity)
+                                    }
+                                }
+                            }
+                        }
+
+                        "docx" -> {
+                            val chapters = db.chapterDao().getChapterInfoForBook(bookEntity.id)
+                            if (chapters.isNotEmpty() &&
+                                (chapters[0].name == "简介" || chapters[0].name == "介绍")
+                            ) {
+                                val chapter = db.chapterDao().getChapterById(chapters[0].id)
+                                if (chapter != null) {
+                                    val content =
+                                        ChapterContentManager.readChapterContent(chapter.contentFilePath)
+                                    val parsedInfo =
+                                        BookInfoParser.parseIntroductionContent(content)
+                                    if (parsedInfo != null) {
+                                        updatedEntity = bookEntity.copy(
+                                            author = parsedInfo.author ?: bookEntity.author,
+                                            summary = parsedInfo.summary ?: bookEntity.summary,
+                                            bookStatus = parsedInfo.status ?: bookEntity.bookStatus,
+                                            category = parsedInfo.tags ?: bookEntity.category
+                                        )
+                                        db.bookDao().update(updatedEntity)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (updatedEntity != null) {
+                        if (connectionHandler.isConnected()) {
+                            try {
+                                val fileConn = connectionHandler.getFileConnection()
+                                fileConn.updateBookInfo(
+                                    bookName = updatedEntity.name,
+                                    author = updatedEntity.author,
+                                    summary = updatedEntity.summary,
+                                    bookStatus = updatedEntity.bookStatus,
+                                    category = updatedEntity.category,
+                                    localCategory = updatedEntity.localCategory
+                                )
+                                Log.d(
+                                    "MainViewModel",
+                                    "Book info updated on watch: ${updatedEntity.name}"
+                                )
+                            } catch (e: Exception) {
+                                Log.e("MainViewModel", "Failed to update book info on watch", e)
+                            }
+                        }
+                        withContext(Dispatchers.Main) {
+                            _editBookInfoState.value =
+                                EditBookInfoState(updatedEntity, isResyncing = false)
+                        }
+                    } else {
+                        withContext(Dispatchers.Main) {
+                            _editBookInfoState.value?.let { currentState ->
+                                _editBookInfoState.value = currentState.copy(isResyncing = false)
+                            }
+                        }
+                    }
+
+                    loadBooks()
+                } catch (e: Exception) {
+                    Log.e("MainViewModel", "Failed to resync book info", e)
+                    withContext(Dispatchers.Main) {
+                        _editBookInfoState.value?.let { currentState ->
+                            _editBookInfoState.value = currentState.copy(isResyncing = false)
+                        }
+                    }
+                }
+            } else {
+                withContext(Dispatchers.Main) {
+                    _editBookInfoState.value?.let { currentState ->
+                        _editBookInfoState.value = currentState.copy(isResyncing = false)
+                    }
+                }
+            }
+
+            withContext(Dispatchers.Main) {
+                _globalLoadingState.value = GlobalLoadingState(isLoading = false)
+            }
+        }
+    }
+
+    fun syncAllReadingData() {
+        if (!_bandTransferEnabled.value) {
+            _syncReadingDataState.value = SyncReadingDataState(
+                isSyncing = false,
+                statusText = "手环功能已关闭",
+                progress = 0f
+            )
+            return
+        }
+
+        if (!requireBandReadyOrShowDialog()) {
+            return
+        }
+
+        _syncReadingDataState.value = _syncReadingDataState.value.copy(
+            selectedBooksForSync = _books.value.map { it.name }.toSet()
+        )
+
+        val hasConfirmedFirstSync = prefs.getBoolean(FIRST_SYNC_READING_DATA_CONFIRMED_KEY, false)
+        if (!hasConfirmedFirstSync) {
+            _syncReadingDataState.value = _syncReadingDataState.value.copy(showConfirmDialog = true)
+        } else {
+            _syncReadingDataState.value = _syncReadingDataState.value.copy(showModeDialog = true)
+        }
+    }
+
+    fun toggleBookForSync(bookName: String) {
+        val current = _syncReadingDataState.value.selectedBooksForSync.toMutableSet()
+        if (current.contains(bookName)) {
+            current.remove(bookName)
+        } else {
+            current.add(bookName)
+        }
+        _syncReadingDataState.value =
+            _syncReadingDataState.value.copy(selectedBooksForSync = current)
+    }
+
+    fun selectAllBooksForSync(selectAll: Boolean) {
+        if (selectAll) {
+            _syncReadingDataState.value = _syncReadingDataState.value.copy(
+                selectedBooksForSync = _books.value.map { it.name }.toSet()
+            )
+        } else {
+            _syncReadingDataState.value = _syncReadingDataState.value.copy(
+                selectedBooksForSync = emptySet()
+            )
+        }
+    }
+
+    fun confirmSyncReadingData() {
+        prefs.edit().putBoolean(FIRST_SYNC_READING_DATA_CONFIRMED_KEY, true).apply()
+        _syncReadingDataState.value = _syncReadingDataState.value.copy(
+            showConfirmDialog = false,
+            showModeDialog = true
+        )
+    }
+
+    fun cancelSyncReadingDataConfirm() {
+        _syncReadingDataState.value = _syncReadingDataState.value.copy(showConfirmDialog = false)
+    }
+
+    fun setSyncModeAndStart(mode: SyncMode) {
+        setSyncModesAndStart(mode, mode)
+    }
+
+    private fun mergeBookmarks(
+        phoneBookmarks: List<BookmarkEntity>,
+        bandBookmarks: List<com.bandbbs.ebook.logic.BookmarkData>?,
+        mode: SyncMode,
+        bookId: Int
+    ): List<BookmarkEntity> {
+        val bandList = bandBookmarks?.map { bm ->
+            BookmarkEntity(
+                bookId = bookId,
+                name = bm.name,
+                chapterIndex = bm.chapterIndex,
+                chapterName = bm.chapterName,
+                offsetInChapter = bm.offsetInChapter, scrollOffset = bm.scrollOffset,
+                time = bm.time
+            )
+        } ?: emptyList()
+
+        return when (mode) {
+            SyncMode.BAND_ONLY -> bandList
+            SyncMode.PHONE_ONLY -> phoneBookmarks
+            SyncMode.AUTO -> {
+                val merged = mutableMapOf<String, BookmarkEntity>()
+                phoneBookmarks.forEach { merged["${it.chapterIndex}_${it.offsetInChapter}"] = it }
+                bandList.forEach { merged["${it.chapterIndex}_${it.offsetInChapter}"] = it }
+                merged.values.toList()
+            }
+        }
+    }
+
+    fun setSyncModesAndStart(
+        progressMode: SyncMode,
+        readingTimeMode: SyncMode,
+        bookmarkMode: SyncMode = SyncMode.AUTO
+    ) {
+        syncReadingDataJob?.cancel()
+
+        syncReadingDataJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val booksToSync =
+                    _books.value.filter { it.name in _syncReadingDataState.value.selectedBooksForSync }
+                val totalBooks = booksToSync.size
+
+                withContext(Dispatchers.Main) {
+                    val statusText = when {
+                        progressMode == SyncMode.BAND_ONLY && readingTimeMode == SyncMode.BAND_ONLY && bookmarkMode == SyncMode.BAND_ONLY -> "正在将手环数据同步到手机..."
+                        progressMode == SyncMode.PHONE_ONLY && readingTimeMode == SyncMode.PHONE_ONLY && bookmarkMode == SyncMode.PHONE_ONLY -> "正在将手机数据推送到手环..."
+                        else -> "正在同步手机与手环数据..."
+                    }
+
+                    _syncReadingDataState.value = _syncReadingDataState.value.copy(
+                        showModeDialog = false,
+                        isSyncing = true,
+                        statusText = statusText,
+                        progress = 0f,
+                        totalBooks = totalBooks,
+                        syncedBooks = 0,
+                        progressSyncMode = progressMode,
+                        readingTimeSyncMode = readingTimeMode,
+                        bookmarkSyncMode = bookmarkMode
+                    )
+                }
+
+                val fileConn = connectionHandler.getFileConnection()
+                var syncedCount = 0
+                val failedBooks = mutableMapOf<String, String>()
+                val changedBooks = mutableListOf<String>()
+
+                if (totalBooks == 0) {
+                    withContext(Dispatchers.Main) {
+                        _syncReadingDataState.value = SyncReadingDataState(
+                            isSyncing = false,
+                            statusText = "没有可同步的书籍",
+                            progress = 1f,
+                            totalBooks = 0,
+                            syncedBooks = 0
+                        )
+                    }
+                    return@launch
+                }
+
+                val needBandSourceData =
+                    progressMode != SyncMode.PHONE_ONLY || readingTimeMode != SyncMode.PHONE_ONLY || bookmarkMode != SyncMode.PHONE_ONLY
+
+                for ((index, book) in booksToSync.withIndex()) {
+                    if (!coroutineContext.isActive) return@launch
+
+                    withContext(Dispatchers.Main) {
+                        _syncReadingDataState.value = _syncReadingDataState.value.copy(
+                            currentBook = book.name,
+                            progress = index.toFloat() / totalBooks,
+                            statusText = "正在同步 (${index + 1}/$totalBooks): ${book.name}"
+                        )
+                    }
+
+                    try {
+                        var bandBookData: SyncReadingData? = null
+                        if (needBandSourceData) {
+                            bandBookData = fileConn.getReadingData(book.name)
+                        }
+
+                        val phoneProgress = getPhoneReadingProgress(book)
+                        val bandProgress = parseProgressJson(bandBookData?.progress)
+
+                        val finalProgress = when (progressMode) {
+                            SyncMode.AUTO -> mergeProgress(phoneProgress, bandProgress)
+                            SyncMode.BAND_ONLY -> bandProgress
+                            SyncMode.PHONE_ONLY -> phoneProgress
+                        }
+
+                        val phoneTime = getPhoneReadingTime(book.name)
+                        val bandTime = parseReadingTimeJson(bandBookData?.readingTime)
+
+                        val finalTime = when (readingTimeMode) {
+                            SyncMode.AUTO -> mergeReadingTime(phoneTime, bandTime)
+                            SyncMode.BAND_ONLY -> bandTime
+                            SyncMode.PHONE_ONLY -> phoneTime
+                        }
+
+                        val phoneBookmarks =
+                            BookmarkManager.getBookmarksForSync(getApplication(), book.id)
+                        val finalBookmarks = mergeBookmarks(
+                            phoneBookmarks,
+                            bandBookData?.bookmarks,
+                            bookmarkMode,
+                            book.id
+                        )
+
+                        if (finalProgress != phoneProgress || finalTime != phoneTime) {
+                            changedBooks.add(book.name)
+                        }
+
+                        savePhoneReadingProgress(book, finalProgress)
+                        savePhoneReadingTime(book.name, finalTime)
+                        BookmarkManager.syncBookmarksFromBand(
+                            getApplication(),
+                            book.id,
+                            finalBookmarks
+                        )
+
+                        val shouldSendReadingData =
+                            progressMode != SyncMode.BAND_ONLY || readingTimeMode != SyncMode.BAND_ONLY
+                        val shouldPushBookmarks = bookmarkMode != SyncMode.BAND_ONLY
+
+                        val progressJson = finalProgress?.let { fp ->
+                            val normalized = HashMap<String, Any?>()
+                            normalized.putAll(fp)
+
+                            val rawOffsetAny = fp["offsetInChapter"]
+                            val rawOffset = when (rawOffsetAny) {
+                                is Number -> rawOffsetAny.toInt()
+                                is String -> rawOffsetAny.toIntOrNull() ?: 0
+                                else -> 0
+                            }
+
+                            var normalizedOffset = if (rawOffset < 0) 0 else rawOffset
+                            if (normalizedOffset % 2 == 1) normalizedOffset =
+                                Math.max(0, normalizedOffset - 1)
+
+                            if (fp.containsKey("offsetInChapter")) {
+                                normalized["offsetInChapter"] = normalizedOffset
+                            }
+                            JSONObject(normalized).toString()
+                        }
+                        val readingTimeJson = finalTime?.let { JSONObject(it).toString() }
+
+                        if (shouldSendReadingData || shouldPushBookmarks) {
+                            val success = fileConn.setReadingData(
+                                SyncReadingData(
+                                    filename = book.name,
+                                    progress = if (progressMode != SyncMode.BAND_ONLY) progressJson else null,
+                                    readingTime = if (readingTimeMode != SyncMode.BAND_ONLY) readingTimeJson else null,
+                                    bookmarks = if (shouldPushBookmarks) {
+                                        finalBookmarks.map {
+                                            com.bandbbs.ebook.logic.BookmarkData(
+                                                name = it.name,
+                                                chapterIndex = it.chapterIndex,
+                                                chapterName = it.chapterName,
+                                                offsetInChapter = it.offsetInChapter,
+                                                scrollOffset = it.scrollOffset,
+                                                time = it.time
+                                            )
+                                        }
+                                    } else {
+                                        emptyList()
+                                    }
+                                )
+                            )
+                            if (!success) {
+                                failedBooks[book.name] = "手环未响应或同步失败"
+                                continue
+                            }
+                        }
+                        syncedCount++
+
+                        withContext(Dispatchers.Main) {
+                            _syncReadingDataState.value = _syncReadingDataState.value.copy(
+                                syncedBooks = syncedCount
+                            )
+                        }
+                    } catch (e: Exception) {
+                        failedBooks[book.name] = e.message ?: "处理失败"
+                    }
+                }
+
+                loadBooks()
+
+                withContext(Dispatchers.Main) {
+                    val statusText = if (failedBooks.isEmpty()) {
+                        "同步完成，共同步 $syncedCount 本书"
+                    } else {
+                        "同步完成，成功 $syncedCount 本，失败 ${failedBooks.size} 本"
+                    }
+                    _syncReadingDataState.value = SyncReadingDataState(
+                        isSyncing = false,
+                        statusText = statusText,
+                        progress = 1f,
+                        totalBooks = totalBooks,
+                        syncedBooks = syncedCount,
+                        failedBooks = failedBooks
+                    )
+
+                    if (changedBooks.isNotEmpty()) {
+                        _syncResultState.value = SyncResultState(
+                            changedBooks = changedBooks,
+                            syncedCount = syncedCount
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    _syncReadingDataState.value = SyncReadingDataState(
+                        isSyncing = false,
+                        statusText = "同步失败: ${e.message}",
+                        progress = 0f
+                    )
+                }
+            } finally {
+                syncReadingDataJob = null
+            }
+        }
+    }
+
+    fun cancelSyncReadingData() {
+        syncReadingDataJob?.cancel()
+        syncReadingDataJob = null
+    }
+
+    fun clearSyncReadingDataState() {
+        _syncReadingDataState.value = SyncReadingDataState()
+    }
+
+    fun dismissSyncResult() {
+        _syncResultState.value = null
+    }
+
+    fun dismissSyncModeDialog() {
+        _syncReadingDataState.value = _syncReadingDataState.value.copy(showModeDialog = false)
+    }
+
+    fun dismissVersionIncompatible() {
+        _versionIncompatibleState.value = null
+    }
+
+    fun clearAllReadingTimeData() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val readingTimePrefs = getApplication<Application>().getSharedPreferences(
+                    "reading_time_prefs",
+                    Context.MODE_PRIVATE
+                )
+                val editor = readingTimePrefs.edit()
+                editor.clear()
+                editor.apply()
+                Log.d("MainViewModel", "Cleared all reading time data")
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "Failed to clear reading time data", e)
+            }
+        }
+    }
+
+    fun cleanDirtyData() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val application = getApplication<Application>()
+                val context = application.applicationContext
+
+                val readingTimePrefs =
+                    application.getSharedPreferences("reading_time_prefs", Context.MODE_PRIVATE)
+                val readerPrefs =
+                    application.getSharedPreferences("chapter_reader_prefs", Context.MODE_PRIVATE)
+
+                val books = db.bookDao().getAllBooks()
+                books.forEach { book ->
+                    val file = File(book.path)
+                    if (!file.exists()) {
+                        try {
+                            ChapterContentManager.deleteBookChapters(context, book.id)
+                        } catch (_: Exception) {
+                        }
+                        try {
+                            db.chapterDao().deleteChaptersByBookId(book.id)
+                        } catch (_: Exception) {
+                        }
+                        try {
+                            val edit = readerPrefs.edit()
+                            edit.remove("last_read_chapter_${book.id}")
+                            edit.remove("last_read_timestamp_${book.id}")
+                            edit.apply()
+                        } catch (_: Exception) {
+                        }
+                        try {
+                            ReadingTimeStorage.clearReadingTime(context, book.name)
+                        } catch (_: Exception) {
+                        }
+                        try {
+                            db.bookDao().delete(book)
+                        } catch (_: Exception) {
+                        }
+                    }
+                }
+
+                val validBooks = db.bookDao().getAllBooks()
+                val validBookIds = validBooks.map { it.id }.toSet()
+                val validBookNames = validBooks.map { it.name }.toSet()
+
+                val validChapterIds = mutableSetOf<Int>()
+                validBooks.forEach { book ->
+                    try {
+                        val chapterInfos = db.chapterDao().getChapterInfoForBook(book.id)
+                        validChapterIds.addAll(chapterInfos.map { it.id })
+                    } catch (_: Exception) {
+                    }
+                }
+
+                val timeKeys = readingTimePrefs.all.keys.toList()
+                timeKeys.forEach { key ->
+                    if (key.endsWith("_total_seconds")) {
+                        val bookName = key.removeSuffix("_total_seconds")
+                        if (!validBookNames.contains(bookName)) {
+                            try {
+                                ReadingTimeStorage.clearReadingTime(context, bookName)
+                            } catch (_: Exception) {
+                            }
+                        }
+                    }
+                }
+
+                val readerAllKeys = readerPrefs.all.keys.toList()
+                val readerEditor = readerPrefs.edit()
+                readerAllKeys.forEach { key ->
+                    if (key.startsWith("last_read_chapter_")) {
+                        val id = key.removePrefix("last_read_chapter_").toIntOrNull()
+                        if (id == null || !validBookIds.contains(id)) {
+                            readerEditor.remove(key)
+                        }
+                    } else if (key.startsWith("last_read_timestamp_")) {
+                        val id = key.removePrefix("last_read_timestamp_").toIntOrNull()
+                        if (id == null || !validBookIds.contains(id)) {
+                            readerEditor.remove(key)
+                        }
+                    } else if (key.startsWith("reading_position_index_")) {
+                        val id = key.removePrefix("reading_position_index_").toIntOrNull()
+                        if (id == null || !validChapterIds.contains(id)) {
+                            readerEditor.remove(key)
+                        }
+                    } else if (key.startsWith("reading_position_offset_")) {
+                        val id = key.removePrefix("reading_position_offset_").toIntOrNull()
+                        if (id == null || !validChapterIds.contains(id)) {
+                            readerEditor.remove(key)
+                        }
+                    }
+                }
+                readerEditor.apply()
+
+                Log.d("MainViewModel", "Cleaned dirty data")
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "Failed to clean dirty data", e)
+            }
+        }
+    }
+
+    fun checkForUpdates(isAutoCheck: Boolean = false) {
+        performUpdateCheck(isAutoCheck)
+    }
+
+    fun autoCheckUpdates() {
+        checkForUpdates(isAutoCheck = true)
+        FIRST_AUTO_CHECK = false
+    }
+
+    fun setBandTransferEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(BAND_TRANSFER_ENABLED_KEY, enabled).apply()
+        _bandTransferEnabled.value = enabled
+        if (!enabled) {
+            _connectionState.value = ConnectionState()
+            _bandStorageInfo.value = BandStorageInfo(isLoading = false)
+            _syncReadingDataState.value = SyncReadingDataState()
+        }
+    }
+
+    fun setShowRecentImport(show: Boolean) {
+        prefs.edit().putBoolean(SHOW_RECENT_IMPORT_KEY, show).apply()
+        _showRecentImport.value = show
+    }
+
+    fun setShowRecentUpdate(show: Boolean) {
+        prefs.edit().putBoolean(SHOW_RECENT_UPDATE_KEY, show).apply()
+        _showRecentUpdate.value = show
+    }
+
+    fun setAutoCheckUpdates(enabled: Boolean) {
+        prefs.edit().putBoolean(AUTO_CHECK_UPDATES_KEY, enabled).apply()
+        _autoCheckUpdates.value = enabled
+    }
+
+    fun setShowConnectionError(show: Boolean) {
+        prefs.edit().putBoolean(SHOW_CONNECTION_ERROR_KEY, show).apply()
+        _showConnectionError.value = show
+    }
+
+    fun setShowSearchBar(show: Boolean) {
+        prefs.edit().putBoolean(SHOW_SEARCH_BAR_KEY, show).apply()
+        _showSearchBar.value = show
+    }
+
+    fun setQuickEditCategory(enabled: Boolean) {
+        prefs.edit().putBoolean(QUICK_EDIT_CATEGORY_KEY, enabled).apply()
+        _quickEditCategoryEnabled.value = enabled
+    }
+
+    fun setThemeMode(mode: ThemeMode) {
+        prefs.edit().putString(THEME_MODE_KEY, mode.name).apply()
+        _themeMode.value = mode
+    }
+
+    fun setAutoMinimizeOnTransfer(enabled: Boolean) {
+        prefs.edit().putBoolean(AUTO_MINIMIZE_ON_TRANSFER_KEY, enabled).apply()
+        _autoMinimizeOnTransfer.value = enabled
+    }
+
+    fun setAutoRetryOnTransferError(enabled: Boolean) {
+        prefs.edit().putBoolean(AUTO_RETRY_ON_TRANSFER_ERROR_KEY, enabled).apply()
+        _autoRetryOnTransferError.value = enabled
+    }
+
+    fun setQuickRenameCategory(enabled: Boolean) {
+        prefs.edit().putBoolean(QUICK_RENAME_CATEGORY_KEY, enabled).apply()
+        _quickRenameCategoryEnabled.value = enabled
+    }
+
+    fun setUseFloatingNavigationBar(enabled: Boolean) {
+        prefs.edit().putBoolean(USE_FLOATING_NAVIGATION_BAR_KEY, enabled).apply()
+        _useFloatingNavigationBar.value = enabled
+    }
+
+    fun setUseBuiltinFileManager(enabled: Boolean) {
+        prefs.edit().putBoolean(USE_BUILTIN_FILE_MANAGER_KEY, enabled).apply()
+        _useBuiltinFileManager.value = enabled
+    }
+
+    fun setAutoDeleteSourceAfterImport(enabled: Boolean) {
+        prefs.edit().putBoolean(AUTO_DELETE_SOURCE_AFTER_IMPORT_KEY, enabled).apply()
+        _autoDeleteSourceAfterImport.value = enabled
+    }
+
+    fun dismissDonateCard() {
+        prefs.edit().putBoolean(SHOW_DONATE_CARD_KEY, false).apply()
+        _showDonateCard.value = false
+    }
+
+    fun renameCategory(oldName: String, newName: String) {
+        categoryHandler.renameCategory(oldName, newName)
+    }
+
+    private fun performUpdateCheck(isAutoCheck: Boolean = false) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val deviceName = connectionHandler.getDeviceName()
+            if (!isAutoCheck) {
+                _updateCheckState.value = UpdateCheckState(
+                    isChecking = true,
+                    deviceName = deviceName,
+                    showSheet = true,
+                    isAutoCheck = isAutoCheck
+                )
+            }
+
+            try {
+                val context = getApplication<Application>().applicationContext
+                val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+
+                @Suppress("DEPRECATION")
+                val currentVersionCode = packageInfo.versionCode
+
+                val androidResult = VersionChecker.checkUpdate(context, currentVersionCode)
+                val updateInfoList = mutableListOf<VersionChecker.UpdateInfo>()
+                var errorMsg: String? = null
+
+                androidResult.fold(
+                    onSuccess = { androidUpdateInfo ->
+                        if (androidUpdateInfo.hasUpdate && androidUpdateInfo.deviceType == "android") {
+                            updateInfoList.add(androidUpdateInfo)
+                        }
+                    },
+                    onFailure = { error ->
+                        errorMsg = "检查手机更新失败: ${error.message}"
+                    }
+                )
+
+                withContext(Dispatchers.Main) {
+                    val hasUpdates = updateInfoList.isNotEmpty()
+                    _updateCheckState.value = UpdateCheckState(
+                        isChecking = false,
+                        updateInfo = updateInfoList.firstOrNull(),
+                        updateInfoList = updateInfoList,
+                        errorMessage = errorMsg,
+                        deviceName = deviceName,
+                        showSheet = !isAutoCheck || hasUpdates,
+                        isAutoCheck = isAutoCheck
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "获取版本信息失败", e)
+                withContext(Dispatchers.Main) {
+                    _updateCheckState.value = UpdateCheckState(
+                        isChecking = false,
+                        errorMessage = "获取版本信息失败: ${e.message}",
+                        deviceName = deviceName,
+                        showSheet = !isAutoCheck,
+                        isAutoCheck = isAutoCheck
+                    )
+                }
+            }
+        }
+    }
+
+    fun dismissUpdateCheck() {
+        _updateCheckState.value = _updateCheckState.value.copy(showSheet = false)
+    }
+
+    fun showUpdateDialog() {
+        _updateCheckState.value = _updateCheckState.value.copy(showSheet = true)
+    }
+
+    private fun checkBandUpdateOnly(bandVersion: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val deviceName = connectionHandler.getDeviceName()
+            if (deviceName == null) {
+                Log.w("MainViewModel", "设备名称为空，无法检查手环更新")
+                return@launch
+            }
+
+            try {
+                val context = getApplication<Application>().applicationContext
+                val bandResult = VersionChecker.checkBandUpdate(context, deviceName, bandVersion)
+
+                bandResult.fold(
+                    onSuccess = { bandUpdateInfo ->
+                        if (bandUpdateInfo.hasUpdate && bandUpdateInfo.deviceType == "band") {
+                            withContext(Dispatchers.Main) {
+                                _updateCheckState.value = UpdateCheckState(
+                                    isChecking = false,
+                                    updateInfo = bandUpdateInfo,
+                                    updateInfoList = listOf(bandUpdateInfo),
+                                    deviceName = deviceName,
+                                    showSheet = true,
+                                    isAutoCheck = true
+                                )
+                            }
+                        }
+                    },
+                    onFailure = { error ->
+                        Log.e("MainViewModel", "检查手环更新失败", error)
+                    }
+                )
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "检查手环更新异常", e)
+            }
+        }
+    }
+
+    private suspend fun getPhoneReadingProgress(book: Book): Map<String, Any>? {
+        val lastReadChapterId = readerPrefs.getInt("last_read_chapter_${book.id}", -1)
+        if (lastReadChapterId == -1) return null
+
+        db.chapterDao().getChapterById(lastReadChapterId) ?: return null
+
+        val allChapters = db.chapterDao().getChapterInfoForBook(book.id)
+        val chapterIndex = allChapters.indexOfFirst { it.id == lastReadChapterId }
+        if (chapterIndex == -1) return null
+
+        readerPrefs.getInt("reading_position_index_$lastReadChapterId", 0)
+        val offset = readerPrefs.getInt("reading_position_offset_$lastReadChapterId", 0)
+        val lastReadTimestamp = readerPrefs.getLong("last_read_timestamp_${book.id}", 0L)
+
+        return mapOf(
+            "chapterIndex" to chapterIndex,
+            "offsetInChapter" to offset,
+            "scrollOffset" to 0,
+            "lastReadTimestamp" to (if (lastReadTimestamp > 0L) lastReadTimestamp else System.currentTimeMillis())
+        )
+    }
+
+    private fun mergeProgress(
+        phoneProgress: Map<String, Any>?,
+        bandProgress: Map<String, Any>?
+    ): Map<String, Any>? {
+        if (phoneProgress == null && bandProgress == null) return null
+        if (phoneProgress == null) return bandProgress
+        if (bandProgress == null) return phoneProgress
+
+        val phoneTimestamp = (phoneProgress["lastReadTimestamp"] as? Number)?.toLong() ?: 0L
+        val bandTimestamp = (bandProgress["lastReadTimestamp"] as? Number)?.toLong() ?: 0L
+
+        return if (phoneTimestamp >= bandTimestamp) phoneProgress else bandProgress
+    }
+
+    private suspend fun savePhoneReadingProgress(book: Book, progress: Map<String, Any>?) {
+        if (progress == null) return
+
+        val chapterIndex = (progress["chapterIndex"] as? Number)?.toInt()
+        if (chapterIndex != null && chapterIndex >= 0) {
+            val allChapters = db.chapterDao().getChapterInfoForBook(book.id)
+            if (chapterIndex < allChapters.size && allChapters.isNotEmpty()) {
+                val chapterId = allChapters[chapterIndex].id
+                val offset = (progress["offsetInChapter"] as? Number)?.toInt() ?: 0
+                val timestamp = (progress["lastReadTimestamp"] as? Number)?.toLong() ?: 0L
+
+                if (timestamp > 0L || chapterIndex > 0 || offset > 0) {
+                    readerPrefs.edit()
+                        .putInt("last_read_chapter_${book.id}", chapterId)
+                        .putInt("reading_position_offset_$chapterId", offset)
+                        .putLong(
+                            "last_read_timestamp_${book.id}",
+                            if (timestamp > 0L) timestamp else System.currentTimeMillis()
+                        )
+                        .apply()
+                }
+            }
+        }
+    }
+
+    private fun getPhoneReadingTime(bookName: String): Map<String, Any>? {
+        val readingTimePrefs = getApplication<Application>().getSharedPreferences(
+            "reading_time_prefs",
+            Context.MODE_PRIVATE
+        )
+        val totalSeconds = readingTimePrefs.getLong("${bookName}_total_seconds", 0L)
+        if (totalSeconds == 0L) {
+            return null
+        }
+        val sessionsJson = readingTimePrefs.getString("${bookName}_sessions", null)
+        val sessions = if (sessionsJson != null) {
+            try {
+                org.json.JSONArray(sessionsJson)
+            } catch (e: Exception) {
+                null
+            }
+        } else null
+
+        val lastReadDate = readingTimePrefs.getString("${bookName}_last_read_date", null) ?: ""
+        val firstReadDate = readingTimePrefs.getString("${bookName}_first_read_date", null) ?: ""
+
+        val sessionList = sessions?.let {
+            (0 until it.length()).map { i ->
+                try {
+                    it.getJSONObject(i)
+                } catch (e: Exception) {
+                    null
+                }
+            }.filterNotNull()
+        } ?: emptyList<Any>()
+
+        return mapOf(
+            "totalSeconds" to totalSeconds,
+            "sessions" to sessionList, "lastReadDate" to lastReadDate,
+            "firstReadDate" to firstReadDate
+        )
+    }
+
+    private fun savePhoneReadingTime(bookName: String, readingTime: Map<String, Any>?) {
+        if (readingTime == null) {
+            return
+        }
+        val readingTimePrefs = getApplication<Application>().getSharedPreferences(
+            "reading_time_prefs",
+            Context.MODE_PRIVATE
+        )
+        val totalSeconds = (readingTime["totalSeconds"] as? Number)?.toLong() ?: 0L
+        val lastReadDate = readingTime["lastReadDate"] as? String ?: ""
+        val firstReadDate = readingTime["firstReadDate"] as? String ?: ""
+
+        val editor = readingTimePrefs.edit()
+        editor.putLong("${bookName}_total_seconds", totalSeconds)
+
+        if (lastReadDate.isNotEmpty()) {
+            editor.putString("${bookName}_last_read_date", lastReadDate)
+        }
+        if (firstReadDate.isNotEmpty()) {
+            editor.putString("${bookName}_first_read_date", firstReadDate)
+        }
+
+        val sessions = readingTime["sessions"]
+        if (sessions is List<*>) {
+            try {
+                val sessionsArray = org.json.JSONArray()
+                sessions.forEach { session ->
+                    if (session is Map<*, *>) {
+                        val sessionObj = JSONObject()
+                        session.forEach { (key, value) ->
+                            when (value) {
+                                is Number -> sessionObj.put(key.toString(), value)
+                                is String -> sessionObj.put(key.toString(), value)
+                                is Boolean -> sessionObj.put(key.toString(), value)
+                                else -> sessionObj.put(key.toString(), value.toString())
+                            }
+                        }
+                        sessionsArray.put(sessionObj)
+                    } else if (session is JSONObject) {
+                        sessionsArray.put(session)
+                    }
+                }
+                editor.putString("${bookName}_sessions", sessionsArray.toString())
+            } catch (e: Exception) {
+            }
+        }
+        editor.apply()
+    }
+
+    private fun mergeReadingTime(
+        phoneReadingTime: Map<String, Any>?,
+        bandReadingTime: Map<String, Any>?
+    ): Map<String, Any>? {
+        if (phoneReadingTime == null && bandReadingTime == null) return null
+        if (phoneReadingTime == null) return bandReadingTime
+        if (bandReadingTime == null) return phoneReadingTime
+
+        val phoneTotalSeconds = (phoneReadingTime["totalSeconds"] as? Number)?.toLong() ?: 0L
+        val bandTotalSeconds = (bandReadingTime["totalSeconds"] as? Number)?.toLong() ?: 0L
+
+        return if (phoneTotalSeconds >= bandTotalSeconds) phoneReadingTime else bandReadingTime
+    }
+
+    private fun loadBooks() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val bookEntities = db.bookDao().getAllBooks()
+            val bookUiModels = bookEntities.map { entity ->
+                val chapterCount = db.chapterDao().getChapterCountForBook(entity.id)
+                val wordCount = db.chapterDao().getTotalWordCountForBook(entity.id) ?: 0
+                val lastReadChapterId = readerPrefs.getInt("last_read_chapter_${entity.id}", -1)
+                var lastReadInfo: String? = null
+                var chapterIndex: Int? = null
+                var chapterProgressPercent: Float = 0f
+
+                if (lastReadChapterId != -1) {
+                    val chapter = db.chapterDao().getChapterById(lastReadChapterId)
+                    if (chapter != null) {
+                        val allChapters = db.chapterDao().getChapterInfoForBook(entity.id)
+                        chapterIndex = allChapters.indexOfFirst { it.id == lastReadChapterId }
+                        if (chapterIndex != -1 && allChapters.isNotEmpty()) {
+                            chapterProgressPercent =
+                                (chapterIndex + 1).toFloat() / allChapters.size * 100f
+                        }
+                        lastReadInfo = "读至：${chapter.name}"
+                    }
+                }
+
+                if (lastReadInfo == null && chapterCount > 0) {
+                    lastReadInfo = "未读"
+                }
+
+                val lastReadTimestamp = readerPrefs.getLong("last_read_timestamp_${entity.id}", 0L)
+
+                Book(
+                    id = entity.id,
+                    name = entity.name,
+                    path = entity.path,
+                    size = entity.size,
+                    format = entity.format,
+                    chapterCount = chapterCount,
+                    wordCount = wordCount,
+                    syncedChapterCount = 0,
+                    coverImagePath = entity.coverImagePath,
+                    localCategory = entity.localCategory,
+                    lastReadInfo = lastReadInfo,
+                    lastReadTimestamp = lastReadTimestamp,
+                    chapterIndex = chapterIndex,
+                    chapterProgressPercent = chapterProgressPercent
+                )
+            }
+
+            val recentUpdatedBook = bookUiModels.maxByOrNull { book ->
+                try {
+                    File(book.path).lastModified()
+                } catch (e: Exception) {
+                    0L
+                }
+            }
+
+            val categories = bookUiModels.map { it.localCategory ?: "未分类" }.toSet()
+
+            withContext(Dispatchers.Main) {
+                if (categories.size == 1) {
+                    _expandedCategories.update { it + categories.first() }
+                }
+                _books.value = bookUiModels.sortedByDescending { it.name }
+                _recentBook.value = bookUiModels.maxByOrNull { it.id }
+                _recentUpdatedBook.value = recentUpdatedBook
+            }
+        }
+    }
+
+    fun backupData(uri: Uri) {
+        viewModelScope.launch {
+            val result = DataBackupManager.backupData(getApplication(), uri, db)
+            _backupRestoreState.value = if (result.isSuccess) {
+                BackupRestoreResult(success = true, message = "备份成功")
+            } else {
+                BackupRestoreResult(
+                    success = false,
+                    message = "备份失败: ${result.exceptionOrNull()?.message}"
+                )
+            }
+        }
+    }
+
+    fun restoreData(uri: Uri) {
+        viewModelScope.launch {
+            val result = DataBackupManager.restoreData(getApplication(), uri, db)
+            if (result.isSuccess) {
+                loadBooks()
+                _backupRestoreState.value =
+                    BackupRestoreResult(success = true, message = "恢复成功")
+            } else {
+                _backupRestoreState.value = BackupRestoreResult(
+                    success = false,
+                    message = "恢复失败: ${result.exceptionOrNull()?.message}"
+                )
+            }
+        }
+    }
+
+    fun clearBackupRestoreState() {
+        _backupRestoreState.value = null
+    }
+
+    fun loadBandSettings() {
+        if (!requireBandReadyOrShowDialog()) return
+        _globalLoadingState.value =
+            GlobalLoadingState(isLoading = true, message = "正在加载手环设置...")
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val conn = connectionHandler.getFileConnection()
+                val settings = conn.getSettings(
+                    listOf(
+                        "EBOOK_FONT", "EBOOK_OPACITY", "EBOOK_BOLD_ENABLED",
+                        "EBOOK_VERTICAL_MARGIN", "EBOOK_TIME_FORMAT", "EBOOK_READ_MODE",
+                        "EBOOK_TXTSZPAGE", "EBOOK_SHOW_PROGRESS_BAR",
+                        "EBOOK_SHOW_PROGRESS_BAR_PERCENT", "EBOOK_PROGRESS_BAR_OPACITY",
+                        "EBOOK_PROGRESS_BAR_HEIGHT", "EBOOK_PREVENT_PARAGRAPH_SPLITTING",
+                        "EBOOK_BRIGHTNESS",
+                        "EBOOK_BRIGHTNESS_FOLLOW_SYSTEM", "EBOOK_ALWAYS_SHOW_TIME",
+                        "EBOOK_ALWAYS_SHOW_BATTERY", "EBOOK_ALWAYS_SHOW_TIME_SENSITIVITY",
+                        "EBOOK_CHAPTER_START_EMPTY_LINES", "EBOOK_CHAPTER_START_NUMBER",
+                        "EBOOK_CHAPTER_START_NAME", "EBOOK_CHAPTER_START_WORD_COUNT",
+                        "EBOOK_CHAPTER_SWITCH_STYLE", "EBOOK_CHAPTER_SWITCH_HEIGHT",
+                        "EBOOK_CHAPTER_SWITCH_SENSITIVITY", "EBOOK_CHAPTER_SWITCH_SHOW_INFO",
+                        "EBOOK_SWIPE_SENSITIVITY", "EBOOK_SWIPE", "EBOOK_AUTO",
+                        "EBOOK_AUTO_READ_DISTANCE", "EBOOK_GESTURE",
+                        "EBOOK_PROGRESS_SAVE_MODE", "EBOOK_PROGRESS_SAVE_INTERVAL",
+                        "EBOOK_SHELF_MARQUEE_ENABLED", "EBOOK_BOOKMARK_MARQUEE_ENABLED",
+                        "EBOOK_BOOKINFO_MARQUEE_ENABLED", "EBOOK_CHAPTER_LIST_MARQUEE_ENABLED",
+                        "EBOOK_TEXT_READER_MARQUEE_ENABLED", "EBOOK_DETAIL_MARQUEE_ENABLED",
+                        "EBOOK_DETAIL_PROGRESS_MARQUEE_ENABLED", "EBOOK_NOSTALGIC_PAGE_TURN_MODE",
+                        "EBOOK_TEACHER_SCREEN_ENABLED"
+                    )
+                )
+
+                val autoReadData = try {
+                    settings["EBOOK_AUTO"]?.takeIf { it.isNotEmpty() }?.let { json ->
+                        val jsonObj = JSONObject(json)
+                        Pair(jsonObj.optBoolean("enable", false), jsonObj.optInt("speed", 10))
+                    } ?: Pair(false, 10)
+                } catch (e: Exception) {
+                    Pair(false, 10)
+                }
+
+                withContext(Dispatchers.Main) {
+                    _bandSettingsState.value = BandSettingsState(
+                        fontSize = settings["EBOOK_FONT"]?.takeIf { it.isNotEmpty() }?.toIntOrNull()
+                            ?: 30,
+                        opacity = settings["EBOOK_OPACITY"]?.takeIf { it.isNotEmpty() }
+                            ?.toIntOrNull() ?: 100,
+                        boldEnabled = settings["EBOOK_BOLD_ENABLED"]?.takeIf { it.isNotEmpty() }
+                            ?.let { it != "false" } ?: true,
+                        verticalMargin = settings["EBOOK_VERTICAL_MARGIN"]?.takeIf { it.isNotEmpty() }
+                            ?.toIntOrNull() ?: 10,
+                        timeFormat = settings["EBOOK_TIME_FORMAT"]?.takeIf { it.isNotEmpty() }
+                            ?: "24h",
+                        readMode = settings["EBOOK_READ_MODE"]?.takeIf { it.isNotEmpty() }
+                            ?: "scroll",
+                        txtSizePage = settings["EBOOK_TXTSZPAGE"]?.takeIf { it.isNotEmpty() }
+                            ?.toIntOrNull() ?: 400,
+                        showProgressBar = settings["EBOOK_SHOW_PROGRESS_BAR"]?.takeIf { it.isNotEmpty() }
+                            ?.let { it == "true" } ?: true,
+                        showProgressBarPercent = settings["EBOOK_SHOW_PROGRESS_BAR_PERCENT"]?.takeIf { it.isNotEmpty() } == "true",
+                        progressBarOpacity = settings["EBOOK_PROGRESS_BAR_OPACITY"]?.takeIf { it.isNotEmpty() }
+                            ?.toIntOrNull() ?: 100,
+                        progressBarHeight = settings["EBOOK_PROGRESS_BAR_HEIGHT"]?.takeIf { it.isNotEmpty() }
+                            ?.toIntOrNull() ?: 8,
+                        preventParagraphSplitting = settings["EBOOK_PREVENT_PARAGRAPH_SPLITTING"]?.takeIf { it.isNotEmpty() } == "true",
+                        brightness = settings["EBOOK_BRIGHTNESS"]?.takeIf { it.isNotEmpty() }
+                            ?.toIntOrNull() ?: 128,
+                        brightnessFollowSystem = settings["EBOOK_BRIGHTNESS_FOLLOW_SYSTEM"]?.takeIf { it.isNotEmpty() }
+                            ?.let { it != "false" } ?: true,
+                        alwaysShowTime = settings["EBOOK_ALWAYS_SHOW_TIME"]?.takeIf { it.isNotEmpty() } == "true",
+                        alwaysShowBattery = settings["EBOOK_ALWAYS_SHOW_BATTERY"]?.takeIf { it.isNotEmpty() }
+                            ?.let { it != "false" } ?: true,
+                        alwaysShowTimeSensitivity = settings["EBOOK_ALWAYS_SHOW_TIME_SENSITIVITY"]?.takeIf { it.isNotEmpty() }
+                            ?.toIntOrNull() ?: 200,
+                        chapterStartEmptyLines = settings["EBOOK_CHAPTER_START_EMPTY_LINES"]?.takeIf { it.isNotEmpty() } == "true",
+                        chapterStartNumber = settings["EBOOK_CHAPTER_START_NUMBER"]?.takeIf { it.isNotEmpty() } == "true",
+                        chapterStartName = settings["EBOOK_CHAPTER_START_NAME"]?.takeIf { it.isNotEmpty() } == "true",
+                        chapterStartWordCount = settings["EBOOK_CHAPTER_START_WORD_COUNT"]?.takeIf { it.isNotEmpty() } == "true",
+                        chapterSwitchStyle = settings["EBOOK_CHAPTER_SWITCH_STYLE"]?.takeIf { it.isNotEmpty() }
+                            ?: "button",
+                        chapterSwitchHeight = settings["EBOOK_CHAPTER_SWITCH_HEIGHT"]?.takeIf { it.isNotEmpty() }
+                            ?.toIntOrNull() ?: 80,
+                        chapterSwitchSensitivity = settings["EBOOK_CHAPTER_SWITCH_SENSITIVITY"]?.takeIf { it.isNotEmpty() }
+                            ?.toIntOrNull() ?: 50,
+                        chapterSwitchShowInfo = settings["EBOOK_CHAPTER_SWITCH_SHOW_INFO"]?.takeIf { it.isNotEmpty() } == "true",
+                        swipeSensitivity = settings["EBOOK_SWIPE_SENSITIVITY"]?.takeIf { it.isNotEmpty() }
+                            ?.toIntOrNull() ?: 80,
+                        swipe = settings["EBOOK_SWIPE"]?.takeIf { it.isNotEmpty() } ?: "column",
+                        autoReadEnabled = autoReadData.first,
+                        autoReadSpeed = autoReadData.second,
+                        autoReadDistance = settings["EBOOK_AUTO_READ_DISTANCE"]?.takeIf { it.isNotEmpty() }
+                            ?.toIntOrNull() ?: 100,
+                        gesture = settings["EBOOK_GESTURE"]?.takeIf { it.isNotEmpty() } ?: "single",
+                        progressSaveMode = settings["EBOOK_PROGRESS_SAVE_MODE"]?.takeIf { it.isNotEmpty() }
+                            ?: "exit",
+                        progressSaveInterval = settings["EBOOK_PROGRESS_SAVE_INTERVAL"]?.takeIf { it.isNotEmpty() }
+                            ?.toIntOrNull() ?: 10,
+                        shelfMarqueeEnabled = settings["EBOOK_SHELF_MARQUEE_ENABLED"]?.takeIf { it.isNotEmpty() } == "true",
+                        bookmarkMarqueeEnabled = settings["EBOOK_BOOKMARK_MARQUEE_ENABLED"]?.takeIf { it.isNotEmpty() } == "true",
+                        bookinfoMarqueeEnabled = settings["EBOOK_BOOKINFO_MARQUEE_ENABLED"]?.takeIf { it.isNotEmpty() }
+                            ?.let { it == "true" } ?: true,
+                        chapterListMarqueeEnabled = settings["EBOOK_CHAPTER_LIST_MARQUEE_ENABLED"]?.takeIf { it.isNotEmpty() } == "true",
+                        textReaderMarqueeEnabled = settings["EBOOK_TEXT_READER_MARQUEE_ENABLED"]?.takeIf { it.isNotEmpty() } == "true",
+                        detailMarqueeEnabled = settings["EBOOK_DETAIL_MARQUEE_ENABLED"]?.takeIf { it.isNotEmpty() } == "true",
+                        detailProgressMarqueeEnabled = settings["EBOOK_DETAIL_PROGRESS_MARQUEE_ENABLED"]?.takeIf { it.isNotEmpty() } == "true",
+                        nostalgicPageTurnMode = settings["EBOOK_NOSTALGIC_PAGE_TURN_MODE"]?.takeIf { it.isNotEmpty() }
+                            ?: "topBottomClick",
+                        teacherScreenEnabled = settings["EBOOK_TEACHER_SCREEN_ENABLED"]?.takeIf { it.isNotEmpty() } == "true"
+                    )
+                    _globalLoadingState.value = GlobalLoadingState(isLoading = false)
+                }
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "Error loading band settings", e)
+                withContext(Dispatchers.Main) {
+                    _globalLoadingState.value = GlobalLoadingState(isLoading = false)
+                }
+            }
+        }
+    }
+
+    fun updateBandSetting(key: String, value: String) {
+        if (!requireBandReadyOrShowDialog()) return
+        _bandSettingsState.value?.let { current ->
+            _bandSettingsState.value = when (key) {
+                "EBOOK_FONT" -> current.copy(fontSize = value.toInt())
+                "EBOOK_OPACITY" -> current.copy(opacity = value.toInt())
+                "EBOOK_BOLD_ENABLED" -> current.copy(boldEnabled = value.toBoolean())
+                "EBOOK_VERTICAL_MARGIN" -> current.copy(verticalMargin = value.toInt())
+                "EBOOK_TIME_FORMAT" -> current.copy(timeFormat = value)
+                "EBOOK_READ_MODE" -> current.copy(readMode = value)
+                "EBOOK_TXTSZPAGE" -> current.copy(txtSizePage = value.toInt())
+                "EBOOK_SHOW_PROGRESS_BAR" -> current.copy(showProgressBar = value.toBoolean())
+                "EBOOK_SHOW_PROGRESS_BAR_PERCENT" -> current.copy(showProgressBarPercent = value.toBoolean())
+                "EBOOK_PROGRESS_BAR_OPACITY" -> current.copy(progressBarOpacity = value.toInt())
+                "EBOOK_PREVENT_PARAGRAPH_SPLITTING" -> current.copy(preventParagraphSplitting = value.toBoolean())
+                "EBOOK_BRIGHTNESS" -> current.copy(brightness = value.toInt())
+                "EBOOK_BRIGHTNESS_FOLLOW_SYSTEM" -> current.copy(brightnessFollowSystem = value.toBoolean())
+                "EBOOK_ALWAYS_SHOW_TIME" -> current.copy(alwaysShowTime = value.toBoolean())
+                "EBOOK_ALWAYS_SHOW_BATTERY" -> current.copy(alwaysShowBattery = value.toBoolean())
+                "EBOOK_ALWAYS_SHOW_TIME_SENSITIVITY" -> current.copy(alwaysShowTimeSensitivity = value.toInt())
+                "EBOOK_CHAPTER_START_EMPTY_LINES" -> current.copy(chapterStartEmptyLines = value.toBoolean())
+                "EBOOK_CHAPTER_START_NUMBER" -> current.copy(chapterStartNumber = value.toBoolean())
+                "EBOOK_CHAPTER_START_NAME" -> current.copy(chapterStartName = value.toBoolean())
+                "EBOOK_CHAPTER_START_WORD_COUNT" -> current.copy(chapterStartWordCount = value.toBoolean())
+                "EBOOK_CHAPTER_SWITCH_STYLE" -> current.copy(chapterSwitchStyle = value)
+                "EBOOK_CHAPTER_SWITCH_HEIGHT" -> current.copy(chapterSwitchHeight = value.toInt())
+                "EBOOK_CHAPTER_SWITCH_SENSITIVITY" -> current.copy(chapterSwitchSensitivity = value.toInt())
+                "EBOOK_CHAPTER_SWITCH_SHOW_INFO" -> current.copy(chapterSwitchShowInfo = value.toBoolean())
+                "EBOOK_SWIPE_SENSITIVITY" -> current.copy(swipeSensitivity = value.toInt())
+                "EBOOK_SWIPE" -> current.copy(swipe = value)
+                "EBOOK_AUTO_READ_DISTANCE" -> current.copy(autoReadDistance = value.toInt())
+                "EBOOK_PROGRESS_BAR_HEIGHT" -> current.copy(progressBarHeight = value.toInt())
+                "EBOOK_GESTURE" -> current.copy(gesture = value)
+                "EBOOK_PROGRESS_SAVE_MODE" -> current.copy(progressSaveMode = value)
+                "EBOOK_PROGRESS_SAVE_INTERVAL" -> current.copy(progressSaveInterval = value.toInt())
+                "EBOOK_SHELF_MARQUEE_ENABLED" -> current.copy(shelfMarqueeEnabled = value.toBoolean())
+                "EBOOK_BOOKMARK_MARQUEE_ENABLED" -> current.copy(bookmarkMarqueeEnabled = value.toBoolean())
+                "EBOOK_BOOKINFO_MARQUEE_ENABLED" -> current.copy(bookinfoMarqueeEnabled = value.toBoolean())
+                "EBOOK_CHAPTER_LIST_MARQUEE_ENABLED" -> current.copy(chapterListMarqueeEnabled = value.toBoolean())
+                "EBOOK_TEXT_READER_MARQUEE_ENABLED" -> current.copy(textReaderMarqueeEnabled = value.toBoolean())
+                "EBOOK_DETAIL_MARQUEE_ENABLED" -> current.copy(detailMarqueeEnabled = value.toBoolean())
+                "EBOOK_DETAIL_PROGRESS_MARQUEE_ENABLED" -> current.copy(detailProgressMarqueeEnabled = value.toBoolean())
+                "EBOOK_NOSTALGIC_PAGE_TURN_MODE" -> current.copy(nostalgicPageTurnMode = value)
+                "EBOOK_TEACHER_SCREEN_ENABLED" -> current.copy(teacherScreenEnabled = value.toBoolean())
+                else -> current
+            }
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            withContext(Dispatchers.Main) {
+                _globalLoadingState.value =
+                    GlobalLoadingState(isLoading = true, message = "正在保存设置...")
+            }
+            try {
+                withTimeout(5000L) {
+                    val conn = connectionHandler.getFileConnection()
+                    val success = conn.setSettings(mapOf(key to value))
+                    if (!success) {
+                        throw Exception("设备返回失败")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "Error updating band setting", e)
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        getApplication(),
+                        "保存超时或失败: ${e.message}",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+                loadBandSettings()
+            } finally {
+                withContext(Dispatchers.Main) {
+                    _globalLoadingState.value = GlobalLoadingState(isLoading = false)
+                }
+            }
+        }
+    }
+
+    fun updateAutoReadSetting(enabled: Boolean, speed: Int) {
+        if (!requireBandReadyOrShowDialog()) return
+        _bandSettingsState.value?.let { current ->
+            _bandSettingsState.value =
+                current.copy(autoReadEnabled = enabled, autoReadSpeed = speed)
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            withContext(Dispatchers.Main) {
+                _globalLoadingState.value =
+                    GlobalLoadingState(isLoading = true, message = "正在保存设置...")
+            }
+            try {
+                withTimeout(5000L) {
+                    val conn = connectionHandler.getFileConnection()
+                    val autoValue = JSONObject().apply {
+                        put("enable", enabled)
+                        put("speed", speed)
+                    }.toString()
+                    val success = conn.setSettings(mapOf("EBOOK_AUTO" to autoValue))
+                    if (!success) {
+                        throw Exception("设备返回失败")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "Error updating auto read setting", e)
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        getApplication(),
+                        "保存超时或失败: ${e.message}",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+                loadBandSettings()
+            } finally {
+                withContext(Dispatchers.Main) {
+                    _globalLoadingState.value = GlobalLoadingState(isLoading = false)
+                }
+            }
+        }
+    }
+
+    fun clearBandSettings() {
+        _bandSettingsState.value = null
+    }
+}

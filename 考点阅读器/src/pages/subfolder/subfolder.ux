@@ -1,0 +1,192 @@
+<template>
+  <div class="page" style="flex-direction: column;" @swipe="onSwipe">
+
+    <!-- 空状态：文件夹为空 -->
+    <div if="{{allItems.length == 0}}" style="position: absolute; width: 336px; height: 480px; flex-direction: column; justify-content: center; align-items: center;">
+      <img static src="/common/images/empty_state.png" style="width: 128px; height: 128px;" />
+      <text static style="line-height: 42px; font-weight: bold; font-size: 28px; color: rgba(255,255,255,0.6); text-align: center; margin-top: 24px;">没有文件</text>
+    </div>
+
+    <!-- 文件夹/考点列表 -->
+    <list class="list" if="{{allItems.length > 0}}" id="subList">
+      <list-item for="{{visibleItems}}" tid="id" class="item" type="item" @click="onItemClick($item)" @longpress="onLongPress($item)">
+        <div class="item-content">
+          <text class="itemtext">{{$item.name}}</text>
+          <text class="itemtext2">{{$item.type === 'folder' ? '文件夹' : '考点'}}</text>
+        </div>
+        <img static src="/common/images/enter.png" class="arrow" />
+      </list-item>
+    </list>
+
+    <!-- 顶部栏 -->
+    <img static src="/common/images/hd.png" style="position: absolute; left: 0px; top: 0px; width: 336px; height: 102px;" />
+    <img static src="/common/images/back.png" @click="goBack" style="position: absolute; left: 6px; top: 6px; width: 72px; height: 72px;" />
+    <img static src="/common/images/more.png" @click="goSettings" style="position: absolute; left: 258px; top: 6px; width: 72px; height: 72px;" />
+    <text style="position: absolute; left: 78px; top: 6px; width: 180px; line-height: 30px; font-weight: bold; font-size: 24px; color: rgba(255,255,255,0.6); text-align: center;">{{nowTime}}</text>
+    <text style="position: absolute; left: 78px; top: 36px; width: 180px; line-height: 42px; font-weight: bold; font-size: 32px; color: white; text-align: center; lines: 1; text-overflow: ellipsis;">{{pageName}}</text>
+
+  </div>
+</template>
+
+<script>
+import router from '@system.router'
+import dataManager from '../../common/utils/dataManager.js'
+import { getNowTime } from '../../common/utils/timeUtil.js'
+
+export default {
+  private: {
+    nowTime: '00:00',
+    timer: null,
+    pageName: '',
+    allItems: [],
+    visibleItems: [],
+    currentPage: 0,
+    totalPages: 1,
+    totalItems: 0,
+    pageSize: 3,
+    isNavigating: false,
+    longPressTriggered: false
+  },
+  protected: {
+    path: ''
+  },
+
+  onInit() {
+    this.nowTime = getNowTime()
+    this.timer = setInterval(() => {
+      if (this.$valid) {
+        this.nowTime = getNowTime()
+      }
+    }, 60000)
+    // 设置页面名称为当前文件夹名
+    this.pageName = dataManager.getNodeName(this.path) || '文件夹'
+  },
+
+  onShow() {
+    this.isNavigating = false
+    this.longPressTriggered = false
+    this.currentPage = 0
+    this.loadData()
+  },
+
+  onDestroy() {
+    if (this.timer) {
+      clearInterval(this.timer)
+      this.timer = null
+    }
+  },
+
+  async loadData() {
+    const children = await dataManager.getVisibleChildren(this.path)
+    if (!this.$valid) return
+    this.allItems = children || []
+    this.totalItems = this.allItems.length
+    this.loadPage(this.currentPage)
+  },
+
+  loadPage(page) {
+    this.totalPages = Math.ceil(this.allItems.length / this.pageSize) || 1
+    let safePage = Math.max(0, Math.min(page, this.totalPages - 1))
+    const start = safePage * this.pageSize
+    this.visibleItems = this.allItems.slice(start, start + this.pageSize)
+    this.currentPage = safePage
+  },
+
+  onItemClick(item) {
+    if (this.isNavigating) return
+    // 如果长按刚刚触发，阻止click事件
+    if (this.longPressTriggered) {
+      this.longPressTriggered = false
+      return
+    }
+    this.isNavigating = true
+
+    // 蓝牙传输文件夹：直接用 item.id 作为路径
+    if (this.path === 'bt') {
+      if (item.type === 'folder') {
+        router.push({ uri: '/pages/subfolder', params: { path: item.id } })
+      } else {
+        router.push({ uri: '/pages/reader', params: { path: item.id } })
+      }
+      return
+    }
+
+    // 内置内容：用 path + index
+    const index = this.allItems.indexOf(item)
+    const childPath = this.path + ',' + index
+
+    if (item.type === 'folder') {
+      // 进入子文件夹
+      router.push({
+        uri: '/pages/subfolder',
+        params: { path: childPath }
+      })
+    } else {
+      // 进入考点阅读页
+      router.push({
+        uri: '/pages/reader',
+        params: { path: childPath }
+      })
+    }
+  },
+
+  goSettings() {
+    router.push({ uri: '/pages/globalSettings' })
+  },
+
+  onLongPress(item) {
+    if (this.isNavigating) return
+    // 标记长按已触发，阻止后续click事件
+    this.longPressTriggered = true
+    this.isNavigating = true
+
+    // 蓝牙传输文件夹：用 item.id 作为路径
+    if (this.path === 'bt') {
+      router.push({
+        uri: '/pages/deleteConfirm',
+        params: {
+          action: item.type === 'folder' ? 'deleteFolder' : 'deleteContent',
+          path: item.id,
+          name: item.name
+        }
+      })
+      return
+    }
+
+    const index = this.allItems.indexOf(item)
+    const childPath = this.path + ',' + index
+    router.push({
+      uri: '/pages/deleteConfirm',
+      params: {
+        action: item.type === 'folder' ? 'deleteFolder' : 'deleteContent',
+        path: childPath,
+        name: item.name
+      }
+    })
+  },
+
+  goBack() {
+    router.back()
+  },
+
+  onSwipe(e) {
+    if (e.direction === 'right') {
+      router.back()
+    }
+  },
+
+  onBackPress() {
+    router.back()
+    return true
+  }
+}
+</script>
+
+<style>
+  @import '../../common/style.css';
+  .list {
+    height: 394px;
+    top: 86px;
+    padding: 0px 6px;
+  }
+</style>

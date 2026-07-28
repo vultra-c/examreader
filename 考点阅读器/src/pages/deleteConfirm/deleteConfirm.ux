@@ -1,0 +1,124 @@
+<template>
+  <div class="page" style="flex-direction: column;" @swipe="onSwipe">
+
+    <!-- 顶部栏（完全复刻弦电子书 confirm.ux） -->
+    <img static src="/common/images/hd.png" style="position: absolute; left: 0px; top: 0px; width: 336px; height: 102px;" />
+    <img static src="/common/images/back.png" @click="back" style="position: absolute; left: 6px; top: 6px; width: 72px; height: 72px;" />
+    <img static if="{{action!=='versionError'}}" src="/common/images/delete.png" @click="confirmAction" style="position: absolute; left: 258px; top: 6px; width: 72px; height: 72px;" />
+    <text style="position: absolute; left: 78px; top: 7px; width: 180px; line-height: 32px; font-weight: bold; font-size: 24px; color: rgba(255,255,255,0.6); text-align: center;">{{nowTime}}</text>
+    <text static style="position: absolute; left: 78px; top: 35px; width: 180px; line-height: 42px; font-weight: bold; font-size: 32px; color: white; text-align: center; lines: 1; text-overflow: ellipsis;">{{pageName}}</text>
+
+    <!-- 中间内容（完全复刻弦电子书 confirm.ux 布局）
+         confirmText 保持简短（一行），避免与 subText 重叠 -->
+    <img static src="/common/images/bin.png" style="position: absolute; left: 104px; top: 146px; width: 128px; height: 128px;" />
+    <text style="position: absolute; left: 0px; top: 290px; width: 336px; line-height: 42px; font-weight: bold; font-size: 32px; color: white; text-align: center;">{{confirmText}}</text>
+    <text style="position: absolute; left: 0px; top: 352px; width: 336px; line-height: 32px; font-weight: bold; font-size: 24px; color: rgba(255,255,255,0.6); text-align: center; padding: 0 20px;">{{subText}}</text>
+
+  </div>
+</template>
+
+<script>
+import router from '@system.router'
+import prompt from '@system.prompt'
+import app from '@system.app'
+import dataManager from '../../common/utils/dataManager.js'
+import { getNowTime } from '../../common/utils/timeUtil.js'
+import appState from '../../common/utils/appState.js'
+
+export default {
+  private: {
+    nowTime: '00:00',
+    timer: null
+  },
+  protected: {
+    action: '',
+    path: '',
+    name: '',
+    pageName: '删除文件',
+    confirmText: '确认删除吗？',
+    subText: '删除后不可恢复'
+  },
+
+  onInit() {
+    this.nowTime = getNowTime()
+    this.timer = setInterval(() => {
+      if (this.$valid) {
+        this.nowTime = getNowTime()
+      }
+    }, 60000)
+
+    // 根据 action 设置显示内容
+    // confirmText 保持简短（一行），避免与 subText 重叠
+    // 文件名显示在顶部标题栏 pageName 中
+    if (this.action === 'versionError') {
+      // 版本不兼容页面，pageName/confirmText/subText 已由路由参数传入
+      return
+    } else if (this.action === 'deleteAll') {
+      this.pageName = '删除全部'
+      this.confirmText = '确认删除全部吗？'
+      this.subText = '删除后不可恢复'
+    } else if (this.action === 'deleteFolder') {
+      this.pageName = this.name || '删除文件夹'
+      this.confirmText = '确认删除吗？'
+      this.subText = '删除后不可恢复'
+    } else {
+      this.pageName = this.name || '删除文件'
+      this.confirmText = '确认删除吗？'
+      this.subText = '删除后不可恢复'
+    }
+  },
+
+  onDestroy() {
+    if (this.timer) {
+      clearInterval(this.timer)
+      this.timer = null
+    }
+  },
+
+  back() {
+    if (this.action === 'versionError') {
+      return app.terminate()
+    }
+    router.back()
+  },
+
+  async confirmAction() {
+    if (this.action === 'versionError') {
+      return app.terminate()
+    }
+    if (this.action === 'deleteAll') {
+      await dataManager.deleteAll()
+      if (!this.$valid) return
+      prompt.showToast({ message: '已删除所有考点', duration: 1500 })
+      router.back()
+    } else if (this.action === 'deleteFolder') {
+      await dataManager.deleteFolder(this.path)
+      if (!this.$valid) return
+      prompt.showToast({ message: '已删除文件夹', duration: 1000 })
+      router.back()
+    } else if (this.action === 'deleteContent') {
+      await dataManager.deleteContent(this.path)
+      if (!this.$valid) return
+      prompt.showToast({ message: '删除成功', duration: 1000 })
+      appState.refreshReader = true
+      appState.needBackToReader = true
+      router.back()
+    }
+  },
+
+  onSwipe(e) {
+    if (e.direction === 'right') {
+      this.back()
+    }
+  },
+
+  onBackPress() {
+    this.back()
+    return true
+  }
+}
+</script>
+
+<style>
+  @import '../../common/style.css';
+</style>

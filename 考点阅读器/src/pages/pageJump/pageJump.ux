@@ -1,0 +1,131 @@
+<template>
+  <div class="page" style="flex-direction: column;">
+
+    <!-- 预览框 -->
+    <div class="preview-item" style="height: 108px; top: 86px;">
+      <text style="font-size: 36px; font-weight: bold; color: white; width: 100%; text-align: center;">{{inputPage}} / {{totalPages}}</text>
+      <text style="font-size: 24px; font-weight: bold; color: rgba(255,255,255,0.6); width: 100%; text-align: center;">输入跳转页码</text>
+    </div>
+
+    <!-- 数字键盘 -->
+    <div class="num-row" style="top: 206px;">
+      <img static class="num-key" src="/common/images/num_pad/7.png" @click="onClick('7')" />
+      <img static class="num-key" src="/common/images/num_pad/8.png" @click="onClick('8')" />
+      <img static class="num-key" src="/common/images/num_pad/9.png" @click="onClick('9')" />
+    </div>
+    <div class="num-row" style="top: 273px;">
+      <img static class="num-key" src="/common/images/num_pad/4.png" @click="onClick('4')" />
+      <img static class="num-key" src="/common/images/num_pad/5.png" @click="onClick('5')" />
+      <img static class="num-key" src="/common/images/num_pad/6.png" @click="onClick('6')" />
+    </div>
+    <div class="num-row" style="top: 340px;">
+      <img static class="num-key" src="/common/images/num_pad/1.png" @click="onClick('1')" />
+      <img static class="num-key" src="/common/images/num_pad/2.png" @click="onClick('2')" />
+      <img static class="num-key" src="/common/images/num_pad/3.png" @click="onClick('3')" />
+    </div>
+    <!-- 底行：0在中间，del在右侧，使用绝对定位确保位置正确 -->
+    <img static class="num-key" src="/common/images/num_pad/0.png" @click="onClick('0')"
+         style="position: absolute; left: 115px; top: 407px;" />
+    <img static class="num-key" src="/common/images/num_pad/del.png" @click="onClick('del')"
+         style="position: absolute; left: 224px; top: 407px;" />
+
+    <!-- 顶部栏 -->
+    <img static src="/common/images/hd.png" style="position: absolute; left: 0px; top: 0px; width: 336px; height: 102px;" />
+    <img static src="/common/images/back.png" @click="goBack" style="position: absolute; left: 6px; top: 6px; width: 72px; height: 72px;" />
+    <img static src="/common/images/conform.png" @click="onClick('conform')" style="position: absolute; left: 258px; top: 6px; width: 72px; height: 72px;" />
+    <text style="position: absolute; left: 78px; top: 7px; width: 180px; line-height: 32px; font-weight: bold; font-size: 24px; color: rgba(255,255,255,0.6); text-align: center;">{{nowTime}}</text>
+    <text static style="position: absolute; left: 78px; top: 35px; width: 180px; line-height: 42px; font-weight: bold; font-size: 32px; color: white; text-align: center;">页数跳转</text>
+
+  </div>
+</template>
+
+<script>
+import router from '@system.router'
+import prompt from '@system.prompt'
+import dataManager from '../../common/utils/dataManager.js'
+import { getNowTime } from '../../common/utils/timeUtil.js'
+import appState from '../../common/utils/appState.js'
+
+export default {
+  private: {
+    nowTime: '00:00',
+    timer: null,
+    inputPage: '1',
+    totalPages: 1,
+    contentPath: ''
+  },
+  protected: {
+    path: ''
+  },
+
+  async onInit() {
+    this.nowTime = getNowTime()
+    this.timer = setInterval(() => {
+      if (this.$valid) {
+        this.nowTime = getNowTime()
+      }
+    }, 60000)
+    this.contentPath = this.path
+    // 加载总页数
+    const pages = await dataManager.getReaderPages(this.path)
+    if (!this.$valid) return
+    this.totalPages = pages.length
+    if (this.totalPages < 1) {
+      this.totalPages = 1
+    }
+    // 默认显示当前页码
+    if (appState.readerPage != null && appState.readerPage !== undefined) {
+      this.inputPage = (appState.readerPage + 1).toString()
+    }
+  },
+
+  onDestroy() {
+    if (this.timer) {
+      clearInterval(this.timer)
+      this.timer = null
+    }
+  },
+
+  onClick(num) {
+    if (num === 'del') {
+      this.inputPage = this.inputPage.length > 1 ? this.inputPage.slice(0, -1) : '1'
+      return
+    }
+
+    if (num === 'conform') {
+      let targetPage = parseInt(this.inputPage)
+      if (isNaN(targetPage) || targetPage < 1 || targetPage > this.totalPages) {
+        prompt.showToast({ message: '页数不存在，无法跳转', duration: 2000 })
+        return
+      }
+      // 设置跳转目标页（转为0索引）
+      appState.jumpToPage = targetPage - 1
+      appState.needBackToReader = true
+      router.back()
+      return
+    }
+
+    // 数字输入
+    const currentVal = this.inputPage === '1' ? '' : this.inputPage
+    const newValStr = currentVal + num
+    if (parseInt(newValStr) > this.totalPages) {
+      prompt.showToast({ message: '最大页数为 ' + this.totalPages, duration: 1000 })
+    } else {
+      this.inputPage = newValStr
+    }
+  },
+
+  goBack() {
+    router.back()
+  },
+
+  onBackPress() {
+    router.back()
+    return true
+  }
+}
+</script>
+
+<style>
+  @import '../../common/style.css';
+</style>

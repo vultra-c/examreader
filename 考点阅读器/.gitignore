@@ -1,0 +1,14 @@
+# Vela app
+node_modules/
+build/
+dist/
+.temp_*/
+.DS_Store
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/captures/
+android/.idea/

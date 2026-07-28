@@ -1,0 +1,77 @@
+{
+  "package": "com.bandbbs.ebook.plus",
+  "name": "考点阅读器",
+  "versionName": "V26.4.4.BAND",
+  "versionCode": 260520,
+  "minPlatformVersion": 1100,
+  "icon": "/common/images/icon.png",
+  "deviceTypeList": [
+    "watch"
+  ],
+  "features": [
+    {
+      "name": "system.router"
+    },
+    {
+      "name": "system.storage"
+    },
+    {
+      "name": "system.prompt"
+    },
+    {
+      "name": "system.device"
+    },
+    {
+      "name": "system.brightness"
+    },
+    {
+      "name": "system.app"
+    },
+    {
+      "name": "system.interconnect"
+    },
+    {
+      "name": "system.file"
+    }
+  ],
+  "config": {
+    "logLevel": "log",
+    "designWidth": 336
+  },
+  "router": {
+    "entry": "pages/index",
+    "pages": {
+      "pages/index": {
+        "component": "index",
+        "launchMode": "singleTask"
+      },
+      "pages/subfolder": {
+        "component": "subfolder"
+      },
+      "pages/reader": {
+        "component": "reader"
+      },
+      "pages/globalSettings": {
+        "component": "globalSettings"
+      },
+      "pages/readerSettings": {
+        "component": "readerSettings"
+      },
+      "pages/pageJump": {
+        "component": "pageJump"
+      },
+      "pages/percentJump": {
+        "component": "percentJump"
+      },
+      "pages/deleteConfirm": {
+        "component": "deleteConfirm"
+      },
+      "pages/push": {
+        "component": "push"
+      }
+    }
+  },
+  "display": {
+    "backgroundColor": "#000000"
+  }
+}
