@@ -1,2 +1,0 @@
-# examreader
-ai code
