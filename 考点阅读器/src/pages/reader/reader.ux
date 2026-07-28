@@ -2,16 +2,16 @@
   <div class="page" @swipe="onSwipe">
 
     <!-- 考点内容（全屏滚动区域，复刻弦电子书 detail.ux 布局）
-         scroll 覆盖全屏，顶部/底部遮罩栏叠加在上方
-         showSetting=true 时通过 padding 将文字推到遮罩栏之间
-         showSetting=false 时 padding 减小，文字占满更多屏幕
+         scroll 覆盖全屏，文字始终铺满全屏
+         顶部/底部遮罩栏叠加在文字上方（半透明渐变）
+         padding 固定不变，无论 showSetting 状态如何，文字位置始终一致
          注意：text 必须加 lines: -1 否则内容会被截断 -->
     <scroll id="contentScroll" scroll-y="{{true}}"
             @click="onTxtClick"
             @scroll="onScroll"
             @scrollbottom="onReachBottom"
             style="position: absolute; left: 0px; top: 0px; width: 336px; height: 480px;">
-      <div style="width: 336px; flex-direction: column; padding-top: {{showSetting ? 102 : 10}}px; padding-bottom: {{showSetting ? 102 : 10}}px;">
+      <div style="width: 336px; flex-direction: column; padding-top: 10px; padding-bottom: 10px;">
         <text style="width: 296px; margin-left: 20px; text-align: left; color: #FFFFFF; font-size: {{fontSize}}px; font-weight: bold; line-height: {{lineHeight}}px; lines: -1;">{{currentPageContent}}</text>
       </div>
     </scroll>
