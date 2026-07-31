@@ -3,17 +3,32 @@
 <template>
   <div class="page" style="flex-direction: column;" @swipe="onSwipe">
 
-    <!-- Search input display area (tap to toggle the keyboard) -->
-    <div class="search-box" style="left: 6px; top: 108px; width: 240px;" @click="toggleKeyboard">
-      <text class="search-text" show="{{searchText.length > 0}}">{{searchText}}</text>
-      <text class="search-ph" show="{{searchText.length == 0}}">输入要搜索的内容</text>
+    <!-- Search box (pill-shaped, tap to toggle keyboard) -->
+    <div class="search-box" @click="toggleKeyboard">
+      <img static src="/common/images/search.png" class="search-icon" />
+      <div style="flex: 1; height: 54px; justify-content: center; align-items: center;">
+        <text class="search-text" show="{{searchText.length > 0}}">{{searchText}}</text>
+        <text class="search-ph" show="{{searchText.length == 0}}">输入要搜索的内容</text>
+      </div>
     </div>
 
-    <!-- Search button -->
-    <text class="search-btn" @click="doSearch">搜索</text>
+    <!-- Clear button (separate element to avoid click conflicts) -->
+    <div class="clear-btn" show="{{searchText.length > 0}}" @click="clearSearch">
+      <text class="clear-icon" static>×</text>
+    </div>
 
-    <!-- Results list (hidden while the keyboard is open) -->
-    <list class="result-list" show="{{!showKeyboard}}">
+    <!-- History search section (shown when no search performed and keyboard hidden) -->
+    <div class="history-section" show="{{!hasSearched && !showKeyboard && historyList.length > 0}}">
+      <text class="history-title" static>历史搜索</text>
+      <div class="history-chips">
+        <div class="history-chip" for="{{item in historyList}}" @click="onHistoryClick($item)">
+          <text class="chip-text">{{$item}}</text>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results list (hidden while keyboard is open) -->
+    <list class="result-list" show="{{hasSearched && !showKeyboard}}">
       <list-item class="result-item" type="result" for="{{results}}" tid="path" @click="onResultClick($item)">
         <div class="result-content">
           <text class="result-name">{{$item.name}}</text>
@@ -25,10 +40,10 @@
     <!-- No results hint -->
     <text class="empty-hint" show="{{hasSearched && results.length == 0 && !showKeyboard}}">无结果</text>
 
-    <!-- Input method keyboard (visibility controlled by the hide prop) -->
+    <!-- Input method keyboard -->
     <input-method hide="{{!showKeyboard}}" keyboardtype="QWERTY" screentype="rect" maxlength="5" @complete="onComplete" @delete="onDelete"></input-method>
 
-    <!-- Top bar -->
+    <!-- Top bar (unchanged) -->
     <img static src="/common/images/hd.png" style="position: absolute; left: 0px; top: 0px; width: 336px; height: 102px;" />
     <img static src="/common/images/back.png" @click="goBack" style="position: absolute; left: 6px; top: 6px; width: 72px; height: 72px;" />
     <text style="position: absolute; left: 78px; top: 7px; width: 180px; line-height: 32px; font-weight: bold; font-size: 24px; color: rgba(255,255,255,0.6); text-align: center;">{{nowTime}}</text>
@@ -40,32 +55,33 @@
 <script>
 import router from '@system.router'
 import prompt from '@system.prompt'
+import storage from '@system.storage'
 import dataManager from '../../common/utils/dataManager.js'
 import { getNowTime } from '../../common/utils/timeUtil.js'
 import appState from '../../common/utils/appState.js'
+
+const STORAGE_KEY_HISTORY = 'KD_SEARCH_HISTORY'
+const MAX_HISTORY = 6
 
 export default {
   private: {
     nowTime: '00:00',
     timer: null,
-    // Accumulated search text entered through the input method
     searchText: '',
-    // Controls whether the on-screen keyboard is visible
     showKeyboard: false,
-    // Search results, each item: { name, path, snippet }
     results: [],
-    // Whether a search has been performed (drives the "无结果" hint)
-    hasSearched: false
+    hasSearched: false,
+    historyList: []
   },
 
   onInit() {
     this.nowTime = getNowTime()
-    // Refresh the clock once per minute while the page is alive
     this.timer = setInterval(() => {
       if (this.$valid) {
         this.nowTime = getNowTime()
       }
     }, 60000)
+    this.loadHistory()
   },
 
   onDestroy() {
@@ -75,13 +91,55 @@ export default {
     }
   },
 
-  // Toggle the on-screen keyboard when tapping the search input area
+  onShow() {
+    if (this.$valid) {
+      this.loadHistory()
+    }
+  },
+
+  // Load search history from storage
+  loadHistory() {
+    storage.get({
+      key: STORAGE_KEY_HISTORY,
+      success: (data) => {
+        if (!this.$valid) return
+        if (data) {
+          try {
+            this.historyList = JSON.parse(data) || []
+          } catch (e) {
+            this.historyList = []
+          }
+        } else {
+          this.historyList = []
+        }
+      },
+      fail: () => {
+        if (!this.$valid) return
+        this.historyList = []
+      }
+    })
+  },
+
+  // Save a keyword to history (dedup, move to front, cap at MAX_HISTORY)
+  saveHistory(keyword) {
+    let list = this.historyList.filter(item => item !== keyword)
+    list.unshift(keyword)
+    if (list.length > MAX_HISTORY) {
+      list = list.slice(0, MAX_HISTORY)
+    }
+    this.historyList = list
+    storage.set({
+      key: STORAGE_KEY_HISTORY,
+      value: JSON.stringify(list)
+    })
+  },
+
+  // Toggle the on-screen keyboard
   toggleKeyboard() {
     this.showKeyboard = !this.showKeyboard
   },
 
-  // Append a character (or chunk) emitted by the input method.
-  // Pressing space triggers a search instead of inserting a space.
+  // Append a character from the input method; space triggers search
   onComplete(e) {
     const content = e.detail.content
     if (content === ' ') {
@@ -93,23 +151,36 @@ export default {
     this.searchText = this.searchText + content
   },
 
-  // Remove the last character emitted by the input method
+  // Remove the last character from the input
   onDelete() {
     if (this.searchText.length > 0) {
       this.searchText = this.searchText.slice(0, -1)
     }
   },
 
-  // Run a content search and display the matching results
+  // Clear the search text and reset state
+  clearSearch() {
+    this.searchText = ''
+    this.hasSearched = false
+    this.results = []
+  },
+
+  // Click a history chip: fill the search box and search immediately
+  onHistoryClick(keyword) {
+    this.searchText = keyword
+    this.doSearch()
+  },
+
+  // Run a content search and display results
   async doSearch() {
     const keyword = this.searchText.trim()
     if (keyword.length === 0) {
       prompt.showToast({ message: '请输入搜索内容', duration: 2000 })
       return
     }
-    // Hide the keyboard so the results list is fully visible
     this.showKeyboard = false
     this.hasSearched = true
+    this.saveHistory(keyword)
     const list = await dataManager.searchContent(keyword)
     if (!this.$valid) return
     this.results = list || []
@@ -129,7 +200,6 @@ export default {
     router.back()
   },
 
-  // Right swipe to go back
   onSwipe(e) {
     if (e.direction === 'right') {
       router.back()
@@ -146,20 +216,25 @@ export default {
 <style>
   @import '../../common/style.css';
 
-  /* Search input display box */
+  /* Search input box - pill-shaped, no border */
   .search-box {
     position: absolute;
+    left: 6px;
+    top: 108px;
+    width: 324px;
     height: 54px;
-    background-color: #262626;
-    border-radius: 18px;
-    border: 3px solid #333333;
-    flex-direction: column;
-    justify-content: center;
+    background-color: #1C1C1E;
+    border-radius: 27px;
+    flex-direction: row;
     align-items: center;
-    padding: 0px 12px;
+    padding: 0px 10px;
   }
+  .search-icon {
+    width: 34px;
+    height: 34px;
+  }
+  /* Both placeholder and input text use the same font-size for consistent vertical alignment */
   .search-text {
-    width: 100%;
     font-size: 24px;
     font-weight: bold;
     color: #FFFFFF;
@@ -168,26 +243,65 @@ export default {
     text-overflow: ellipsis;
   }
   .search-ph {
-    width: 100%;
-    font-size: 22px;
+    font-size: 24px;
     color: rgba(255, 255, 255, 0.3);
     text-align: center;
     lines: 1;
   }
 
-  /* Search button */
-  .search-btn {
+  /* Clear button - circular, positioned over the right side of the search box */
+  .clear-btn {
     position: absolute;
-    left: 252px;
-    top: 108px;
-    width: 78px;
-    height: 54px;
-    line-height: 54px;
-    background-color: #0D6EFF;
-    border-radius: 18px;
-    color: #FFFFFF;
-    font-size: 26px;
+    left: 286px;
+    top: 112px;
+    width: 46px;
+    height: 46px;
+    background-color: #333333;
+    border-radius: 23px;
+    justify-content: center;
+    align-items: center;
+  }
+  .clear-icon {
+    font-size: 30px;
+    color: rgba(255, 255, 255, 0.6);
+    text-align: center;
+  }
+
+  /* History search section */
+  .history-section {
+    position: absolute;
+    left: 0px;
+    top: 172px;
+    width: 336px;
+    flex-direction: column;
+    padding: 0px 6px;
+  }
+  .history-title {
+    font-size: 22px;
     font-weight: bold;
+    color: rgba(255, 255, 255, 0.4);
+    margin-bottom: 12px;
+    margin-left: 10px;
+  }
+  .history-chips {
+    flex-direction: row;
+    flex-wrap: wrap;
+    padding: 0px 6px;
+  }
+  .history-chip {
+    height: 40px;
+    padding: 0px 16px;
+    margin-right: 8px;
+    margin-bottom: 8px;
+    background-color: #1C1C1E;
+    border-radius: 20px;
+    justify-content: center;
+    align-items: center;
+  }
+  .chip-text {
+    font-size: 20px;
+    font-weight: bold;
+    color: #FFFFFF;
     text-align: center;
   }
 
@@ -195,9 +309,9 @@ export default {
   .result-list {
     position: absolute;
     left: 6px;
-    top: 170px;
+    top: 172px;
     width: 324px;
-    height: 310px;
+    height: 308px;
   }
 
   /* Result item card */

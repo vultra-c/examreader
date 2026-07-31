@@ -2,18 +2,6 @@
   <div class="page" style="flex-direction: column;">
 
     <list class="list">
-      <!-- Toolbox entry (topmost) -->
-      <list-item class="item" style="padding: 7px 16px; height: 50px;" type="tip">
-        <text class="section-title" static>工具</text>
-      </list-item>
-      <list-item class="item" @click="goToolbox" type="item">
-        <div class="item-content">
-          <text class="itemtext" static>工具箱</text>
-          <text class="itemtext2" static>学科工具集合</text>
-        </div>
-        <img static src="/common/images/enter.png" class="arrow" />
-      </list-item>
-
       <!-- 显示设置分区 -->
       <list-item class="item" style="padding: 7px 16px; height: 50px;" type="tip">
         <text class="section-title" static>显示设置</text>
@@ -236,10 +224,6 @@ export default {
       uri: '/pages/deleteConfirm',
       params: { action: 'deleteAll' }
     })
-  },
-
-  goToolbox() {
-    router.push({ uri: '/pages/toolbox/toolbox' })
   },
 
   goBack() {

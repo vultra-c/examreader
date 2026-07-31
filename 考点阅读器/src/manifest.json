@@ -74,21 +74,6 @@
       },
       "pages/search": {
         "component": "search"
-      },
-      "pages/toolbox/toolbox": {
-        "component": "toolbox"
-      },
-      "pages/toolbox/chemTools": {
-        "component": "chemTools"
-      },
-      "pages/toolbox/chemBalance": {
-        "component": "chemBalance"
-      },
-      "pages/toolbox/chemMolar": {
-        "component": "chemMolar"
-      },
-      "pages/toolbox/chemReference": {
-        "component": "chemReference"
       }
     }
   },
