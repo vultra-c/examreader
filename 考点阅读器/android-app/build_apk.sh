@@ -13,14 +13,16 @@ AAR_EXTRACT=$PROJECT/aar-extract
 # Tools from Debian android-sdk-build-tools (29.0.3)
 BT=$ANDROID_HOME/build-tools/debian
 AAPT2=$BT/aapt2
-DX=$BT/dx
 ZIPALIGN=$BT/zipalign
 APKSIGNER=$BT/apksigner
 ANDROID_JAR=$ANDROID_HOME/platforms/android-23/android.jar
 
+# d8 from r8.jar (properly desugars Java 8 lambdas)
+D8="java -cp /tmp/r8.jar com.android.tools.r8.D8"
+
 echo "=== 0. Check tools ==="
-echo "aapt2:  $AAPT2"
-echo "dx:     $DX"
+echo "aapt2:    $AAPT2"
+echo "d8:       $D8"
 echo "zipalign: $ZIPALIGN"
 echo "apksigner: $APKSIGNER"
 echo "android.jar: $ANDROID_JAR"
@@ -52,18 +54,21 @@ GEN_SOURCES=$(find $BUILD/gen -name "*.java" 2>/dev/null)
 
 CLASSPATH="$BUILD/libs/wearable-sdk.jar:$ANDROID_JAR"
 
-# Use Java 8 source/target for dx compatibility
 $JAVA_HOME/bin/javac -source 1.8 -target 1.8 \
   -classpath $CLASSPATH \
   -d $BUILD/obj \
   $SOURCES $GEN_SOURCES 2>&1
 
-echo "=== 6. Convert to DEX (dx) ==="
-# dx converts .class files and .jar files into classes.dex
-$DX --dex \
-  --output=$BUILD/classes.dex \
-  --min-sdk-version=26 \
-  $BUILD/obj \
+echo "=== 6. Convert to DEX (d8 - desugars lambdas) ==="
+# d8 properly desugars Java 8 lambdas into anonymous inner classes
+# Collect all .class files (including inner classes)
+CLASS_FILES=$(find $BUILD/obj -name "*.class")
+
+$D8 \
+  --output $BUILD \
+  --lib $ANDROID_JAR \
+  --min-api 26 \
+  $CLASS_FILES \
   $BUILD/libs/wearable-sdk.jar 2>&1
 
 echo "=== 7. Package APK ==="
