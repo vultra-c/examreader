@@ -32,6 +32,9 @@
     },
     {
       "name": "system.file"
+    },
+    {
+      "name": "system.vibrator"
     }
   ],
   "config": {

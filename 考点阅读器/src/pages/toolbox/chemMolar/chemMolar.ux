@@ -38,7 +38,7 @@
 
 <script>
 import router from '@system.router'
-import { getNowTime } from '../../common/utils/timeUtil.js'
+import { getNowTime } from '../../../common/utils/timeUtil.js'
 
 // Atomic masses in g/mol for the supported elements
 var ATOMIC_MASS = {
@@ -220,7 +220,7 @@ export default {
 </script>
 
 <style>
-  @import '../../common/style.css';
+  @import '../../../common/style.css';
 
   /* Formula / result boxes */
   .io-box {
