@@ -2,6 +2,18 @@
   <div class="page" style="flex-direction: column;">
 
     <list class="list">
+      <!-- 搜索分区（最上方） -->
+      <list-item class="item" style="padding: 7px 16px; height: 50px;" type="tip">
+        <text class="section-title" static>搜索</text>
+      </list-item>
+      <list-item class="item" @click="goSearch" type="item">
+        <div class="item-content">
+          <text class="itemtext" static>搜索考点</text>
+          <text class="itemtext2" static>搜索全部内容</text>
+        </div>
+        <img static src="/common/images/enter.png" class="arrow" />
+      </list-item>
+
       <!-- 阅读导航分区 -->
       <list-item class="item" style="padding: 7px 16px; height: 50px;" type="tip">
         <text class="section-title" static>阅读导航</text>
@@ -107,7 +119,7 @@ export default {
       }
     }, 60000)
     this.contentPath = this.path
-    const name = dataManager.getNodeName(this.path)
+    const name = dataManager.getUnifiedNodeName(this.path)
     if (name) {
       this.contentName = name
     }
@@ -198,6 +210,10 @@ export default {
       uri: '/pages/pageJump',
       params: { path: this.contentPath }
     })
+  },
+
+  goSearch() {
+    router.push({ uri: '/pages/search' })
   },
 
   goPercentJump() {

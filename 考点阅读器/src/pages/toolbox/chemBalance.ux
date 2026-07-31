@@ -1,0 +1,529 @@
+<template>
+  <div class="page" style="flex-direction: column;" @swipe="onSwipe">
+
+    <!-- Equation input box -->
+    <div class="io-box" style="left: 6px; top: 108px; width: 240px;">
+      <text class="io-text" show="{{equation.length > 0}}">{{equation}}</text>
+      <text class="io-ph" show="{{equation.length == 0}}">输入方程式</text>
+    </div>
+
+    <!-- Balance button -->
+    <text class="balance-btn" @click="doBalance">配平</text>
+
+    <!-- Result box -->
+    <div class="io-box" style="left: 6px; top: 170px; width: 324px;">
+      <text class="io-text" show="{{hasResult}}" style="color: {{resultColor}};">{{resultText}}</text>
+      <text class="io-ph" show="{{!hasResult}}">配平结果</text>
+    </div>
+
+    <!-- Example equations (tap to load and balance) -->
+    <scroll scroll-x="{{true}}" style="position: absolute; left: 6px; top: 232px; width: 324px; height: 42px;">
+      <div style="flex-direction: row; align-items: center; height: 42px;">
+        <text class="ex-chip" for="{{examples}}" @click="onExample($item)">{{$item}}</text>
+      </div>
+    </scroll>
+
+    <!-- Custom formula keypad -->
+    <div style="position: absolute; left: 6px; top: 282px; width: 324px; height: 198px; flex-direction: column; justify-content: space-between;">
+
+      <!-- Element tokens (horizontally scrollable) -->
+      <scroll scroll-x="{{true}}" style="width: 324px; height: 46px;">
+        <div style="flex-direction: row; align-items: center; height: 46px;">
+          <text class="kp-el" for="{{elements}}" @click="onKey($item)">{{$item}}</text>
+        </div>
+      </scroll>
+
+      <!-- Digit row 1 -->
+      <div class="kp-row" style="height: 46px;">
+        <text class="kp-key" for="{{digits1}}" @click="onKey($item)">{{$item}}</text>
+      </div>
+
+      <!-- Digit row 2 -->
+      <div class="kp-row" style="height: 46px;">
+        <text class="kp-key" for="{{digits2}}" @click="onKey($item)">{{$item}}</text>
+      </div>
+
+      <!-- Symbol row -->
+      <div class="kp-row" style="height: 46px;">
+        <text class="kp-sym" for="{{symbols}}" @click="onSym($item)">{{$item.label}}</text>
+      </div>
+
+    </div>
+
+    <!-- Top bar -->
+    <img static src="/common/images/hd.png" style="position: absolute; left: 0px; top: 0px; width: 336px; height: 102px;" />
+    <img static src="/common/images/back.png" @click="goBack" style="position: absolute; left: 6px; top: 6px; width: 72px; height: 72px;" />
+    <text static style="position: absolute; left: 78px; top: 35px; width: 180px; line-height: 42px; font-weight: bold; font-size: 24px; color: white; text-align: center;">化学方程式配平</text>
+
+  </div>
+</template>
+
+<script>
+import router from '@system.router'
+import prompt from '@system.prompt'
+
+/* ------------------------------------------------------------------ *
+ * Exact rational arithmetic (fractions as [num, den], den > 0)
+ * Used to avoid floating point errors during Gaussian elimination.
+ * ------------------------------------------------------------------ */
+function gcdInt(a, b) {
+  a = Math.abs(a)
+  b = Math.abs(b)
+  while (b) {
+    var t = a % b
+    a = b
+    b = t
+  }
+  return a || 1
+}
+
+function frac(n, d) {
+  if (d === undefined) d = 1
+  if (d < 0) { n = -n; d = -d }
+  if (n === 0) return [0, 1]
+  var g = gcdInt(n, d)
+  return [n / g, d / g]
+}
+function fadd(a, b) { return frac(a[0] * b[1] + b[0] * a[1], a[1] * b[1]) }
+function fsub(a, b) { return frac(a[0] * b[1] - b[0] * a[1], a[1] * b[1]) }
+function fmul(a, b) { return frac(a[0] * b[0], a[1] * b[1]) }
+function fdiv(a, b) { return frac(a[0] * b[1], a[1] * b[0]) }
+function fneg(a) { return [-a[0], a[1]] }
+function fiszero(a) { return a[0] === 0 }
+
+/* ------------------------------------------------------------------ *
+ * Parse a chemical formula into a map { element: count }.
+ * Supports nested parentheses () and brackets [], e.g. Ca(OH)2,
+ * Al2(SO4)3. Returns null when the formula is malformed.
+ * ------------------------------------------------------------------ */
+function parseFormula(s) {
+  var counts = {}
+  var stack = [counts]
+  var i = 0
+  var n = s.length
+  while (i < n) {
+    var ch = s.charAt(i)
+    if (ch === '(' || ch === '[') {
+      stack.push({})
+      i++
+    } else if (ch === ')' || ch === ']') {
+      if (stack.length <= 1) return null
+      i++
+      var num = 0
+      while (i < n && s.charAt(i) >= '0' && s.charAt(i) <= '9') {
+        num = num * 10 + (s.charCodeAt(i) - 48)
+        i++
+      }
+      if (num === 0) num = 1
+      var top = stack.pop()
+      var cur = stack[stack.length - 1]
+      for (var e in top) {
+        cur[e] = (cur[e] || 0) + top[e] * num
+      }
+    } else if (ch >= 'A' && ch <= 'Z') {
+      var elem = ch
+      i++
+      while (i < n && s.charAt(i) >= 'a' && s.charAt(i) <= 'z') {
+        elem += s.charAt(i)
+        i++
+      }
+      var num2 = 0
+      while (i < n && s.charAt(i) >= '0' && s.charAt(i) <= '9') {
+        num2 = num2 * 10 + (s.charCodeAt(i) - 48)
+        i++
+      }
+      if (num2 === 0) num2 = 1
+      var cur2 = stack[stack.length - 1]
+      cur2[elem] = (cur2[elem] || 0) + num2
+    } else {
+      // Unexpected character
+      return null
+    }
+  }
+  if (stack.length !== 1) return null
+  return counts
+}
+
+/* ------------------------------------------------------------------ *
+ * Balance a chemical equation using the matrix (null-space) method.
+ *
+ * 1. Split into reactants / products by '='.
+ * 2. Build a matrix A where each row is an element and each column a
+ *    species; reactant counts are positive, product counts negative.
+ * 3. The balancing coefficients are the null space of A (A * c = 0).
+ * 4. Solve via exact Gaussian elimination to reduced row echelon form,
+ *    take the (single) free variable = 1, clear denominators with the
+ *    LCM, then divide by the GCD for the smallest integer solution.
+ *
+ * Returns { ok: true, display } on success, otherwise { ok: false }.
+ * ------------------------------------------------------------------ */
+function balance(eq) {
+  if (!eq) return { ok: false }
+  var clean = eq.replace(/\s+/g, '')
+  if (!clean) return { ok: false }
+  // Allow letters, digits, parentheses/brackets, '+' and '=' only
+  if (/[^A-Za-z0-9()\[\]+=]/.test(clean)) return { ok: false }
+
+  var parts = clean.split('=')
+  if (parts.length !== 2) return { ok: false }
+
+  var leftRaw = parts[0].split('+')
+  var rightRaw = parts[1].split('+')
+  var left = []
+  var right = []
+  var i
+  for (i = 0; i < leftRaw.length; i++) {
+    if (leftRaw[i] === '') return { ok: false }
+    left.push(leftRaw[i])
+  }
+  for (i = 0; i < rightRaw.length; i++) {
+    if (rightRaw[i] === '') return { ok: false }
+    right.push(rightRaw[i])
+  }
+  if (left.length === 0 || right.length === 0) return { ok: false }
+
+  var species = left.concat(right)
+  var nLeft = left.length
+  var nCols = species.length
+
+  // Parse every species and collect the element set
+  var maps = []
+  var elemSet = {}
+  for (i = 0; i < species.length; i++) {
+    var m = parseFormula(species[i])
+    if (!m) return { ok: false }
+    var hasAny = false
+    for (var k in m) { hasAny = true; break }
+    if (!hasAny) return { ok: false }
+    maps.push(m)
+    for (var e2 in m) elemSet[e2] = true
+  }
+  var elements = []
+  for (var e3 in elemSet) elements.push(e3)
+  elements.sort()
+  var nRows = elements.length
+
+  // Build the element-by-species matrix (reactants positive, products negative)
+  var A = []
+  for (var r = 0; r < nRows; r++) {
+    var row = []
+    for (var c = 0; c < nCols; c++) {
+      var cnt = maps[c][elements[r]] || 0
+      var sign = c < nLeft ? 1 : -1
+      row.push(frac(cnt * sign, 1))
+    }
+    A.push(row)
+  }
+
+  // Gaussian elimination to reduced row echelon form (exact fractions)
+  var pivotCols = []
+  var pr = 0
+  for (var cc = 0; cc < nCols && pr < nRows; cc++) {
+    var pivRow = -1
+    for (var rr = pr; rr < nRows; rr++) {
+      if (!fiszero(A[rr][cc])) { pivRow = rr; break }
+    }
+    if (pivRow === -1) continue // free column
+    var tmp = A[pr]; A[pr] = A[pivRow]; A[pivRow] = tmp
+    var piv = A[pr][cc]
+    for (var j = 0; j < nCols; j++) A[pr][j] = fdiv(A[pr][j], piv)
+    for (var rr2 = 0; rr2 < nRows; rr2++) {
+      if (rr2 !== pr && !fiszero(A[rr2][cc])) {
+        var factor = A[rr2][cc]
+        for (var j2 = 0; j2 < nCols; j2++) {
+          A[rr2][j2] = fsub(A[rr2][j2], fmul(factor, A[pr][j2]))
+        }
+      }
+    }
+    pivotCols.push(cc)
+    pr++
+  }
+
+  // Determine free columns (null space dimension)
+  var pivotSet = {}
+  for (i = 0; i < pivotCols.length; i++) pivotSet[pivotCols[i]] = true
+  var freeCols = []
+  for (var c2 = 0; c2 < nCols; c2++) {
+    if (!pivotSet[c2]) freeCols.push(c2)
+  }
+  // Only uniquely-balanceable equations (nullity == 1) are handled
+  if (freeCols.length !== 1) return { ok: false }
+
+  var fc = freeCols[0]
+  var vec = []
+  for (i = 0; i < nCols; i++) vec.push(frac(0, 1))
+  vec[fc] = frac(1, 1)
+  // Back substitution: vec[pc] = -sum( A[row][free] * vec[free] )
+  for (i = 0; i < pivotCols.length; i++) {
+    var pc = pivotCols[i]
+    var s = frac(0, 1)
+    for (var fi = 0; fi < freeCols.length; fi++) {
+      var f = freeCols[fi]
+      s = fadd(s, fmul(A[i][f], vec[f]))
+    }
+    vec[pc] = fneg(s)
+  }
+
+  // Clear denominators with the LCM to obtain integers
+  var l = 1
+  for (i = 0; i < nCols; i++) l = l / gcdInt(l, vec[i][1]) * vec[i][1]
+  var intVec = []
+  for (i = 0; i < nCols; i++) intVec.push(vec[i][0] * (l / vec[i][1]))
+
+  // A zero coefficient means a listed species does not participate
+  for (i = 0; i < nCols; i++) if (intVec[i] === 0) return { ok: false }
+
+  // Coefficients must share the same sign; flip to positive if needed
+  var neg = 0
+  var pos = 0
+  for (i = 0; i < nCols; i++) {
+    if (intVec[i] < 0) neg++
+    else pos++
+  }
+  if (neg > 0 && pos > 0) return { ok: false } // mixed signs: not balanceable
+  if (neg > 0) {
+    for (i = 0; i < nCols; i++) intVec[i] = -intVec[i]
+  }
+
+  // Reduce to the smallest integer solution
+  var g = 0
+  for (i = 0; i < nCols; i++) g = gcdInt(g, intVec[i])
+  if (g > 1) {
+    for (i = 0; i < nCols; i++) intVec[i] = intVec[i] / g
+  }
+
+  // Rebuild the display string (coefficient 1 is omitted)
+  function fmt(formula, coef) {
+    return (coef === 1 ? '' : String(coef)) + formula
+  }
+  var leftParts = []
+  for (i = 0; i < nLeft; i++) leftParts.push(fmt(left[i], intVec[i]))
+  var rightParts = []
+  for (i = 0; i < right.length; i++) rightParts.push(fmt(right[i], intVec[nLeft + i]))
+  var display = leftParts.join('+') + '=' + rightParts.join('+')
+
+  return { ok: true, display: display, coefficients: intVec }
+}
+
+export default {
+  private: {
+    equation: '',
+    resultText: '',
+    resultColor: '#34D399',
+    hasResult: false,
+    // Common element tokens (covers the requested set and other common elements)
+    elements: [
+      'H', 'C', 'O', 'N', 'Cl', 'S', 'Na', 'K', 'Ca', 'Mg',
+      'Fe', 'Cu', 'Al', 'Zn', 'Ag', 'Ba', 'P', 'F', 'Br', 'I',
+      'Li', 'Si', 'Au', 'Hg', 'Pb', 'Sn', 'Mn', 'Cr', 'Ni', 'Ti'
+    ],
+    digits1: ['1', '2', '3', '4', '5'],
+    digits2: ['6', '7', '8', '9', '0'],
+    symbols: [
+      { label: '+', value: '+' },
+      { label: '=', value: '=' },
+      { label: '(', value: '(' },
+      { label: ')', value: ')' },
+      { label: '删', value: 'back' },
+      { label: '清', value: 'clear' }
+    ],
+    examples: [
+      'H2+O2=H2O',
+      'C3H8+O2=CO2+H2O',
+      'Fe+O2=Fe2O3',
+      'Al+HCl=AlCl3+H2'
+    ]
+  },
+
+  // Append a token (element symbol, digit, or operator) to the equation
+  onKey(ch) {
+    this.equation = this.equation + ch
+    this.hasResult = false
+    this.resultText = ''
+  },
+
+  // Handle symbol keys (operators, backspace, clear)
+  onSym(item) {
+    if (item.value === 'back') {
+      this.onBackspace()
+    } else if (item.value === 'clear') {
+      this.onClear()
+    } else {
+      this.onKey(item.value)
+    }
+  },
+
+  onBackspace() {
+    if (this.equation.length > 0) {
+      this.equation = this.equation.slice(0, -1)
+    }
+    this.hasResult = false
+    this.resultText = ''
+  },
+
+  onClear() {
+    this.equation = ''
+    this.hasResult = false
+    this.resultText = ''
+  },
+
+  // Load an example equation and balance it immediately
+  onExample(eq) {
+    this.equation = eq
+    this.hasResult = false
+    this.resultText = ''
+    this.doBalance()
+  },
+
+  // Run the balancer and show the result (or an error message)
+  doBalance() {
+    var res = balance(this.equation)
+    if (res && res.ok) {
+      this.resultText = res.display
+      this.resultColor = '#34D399'
+      this.hasResult = true
+      return
+    }
+
+    // Build a specific hint for malformed input, show "无法配平" otherwise
+    var clean = (this.equation || '').replace(/\s+/g, '')
+    var msg = '无法配平'
+    if (!clean) {
+      msg = '请输入方程式'
+    } else if (clean.indexOf('=') < 0 || clean.split('=').length !== 2) {
+      msg = '方程式需含一个等号'
+    } else if (/[^A-Za-z0-9()\[\]+=]/.test(clean)) {
+      msg = '含有非法字符'
+    }
+    this.resultText = '无法配平'
+    this.resultColor = '#FF6B6B'
+    this.hasResult = true
+    prompt.showToast({ message: msg, duration: 2000 })
+  },
+
+  goBack() {
+    router.back()
+  },
+
+  // Right swipe to go back
+  onSwipe(e) {
+    if (e.direction === 'right') {
+      router.back()
+    }
+  },
+
+  onBackPress() {
+    router.back()
+    return true
+  }
+}
+</script>
+
+<style>
+  @import '../../common/style.css';
+
+  /* Equation input / result boxes */
+  .io-box {
+    position: absolute;
+    height: 54px;
+    background-color: #262626;
+    border-radius: 18px;
+    border: 3px solid #333333;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 0px 12px;
+  }
+  .io-text {
+    width: 100%;
+    font-size: 24px;
+    font-weight: bold;
+    color: #FFFFFF;
+    text-align: center;
+    lines: 1;
+    text-overflow: ellipsis;
+  }
+  .io-ph {
+    width: 100%;
+    font-size: 22px;
+    color: rgba(255, 255, 255, 0.3);
+    text-align: center;
+    lines: 1;
+  }
+
+  /* Balance button */
+  .balance-btn {
+    position: absolute;
+    left: 252px;
+    top: 108px;
+    width: 78px;
+    height: 54px;
+    line-height: 54px;
+    background-color: #0D6EFF;
+    border-radius: 18px;
+    color: #FFFFFF;
+    font-size: 26px;
+    font-weight: bold;
+    text-align: center;
+  }
+
+  /* Example chips */
+  .ex-chip {
+    padding: 0px 14px;
+    height: 36px;
+    line-height: 36px;
+    background-color: #1A1A1A;
+    border: 2px solid #333333;
+    border-radius: 999px;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 20px;
+    font-weight: bold;
+    text-align: center;
+    margin-right: 8px;
+  }
+
+  /* Keypad rows */
+  .kp-row {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    width: 324px;
+  }
+  .kp-el {
+    width: 52px;
+    height: 40px;
+    line-height: 40px;
+    background-color: #262626;
+    border: 2px solid #333333;
+    border-radius: 20px;
+    color: #FFFFFF;
+    font-size: 20px;
+    font-weight: bold;
+    text-align: center;
+    margin-right: 6px;
+  }
+  .kp-key {
+    width: 60px;
+    height: 40px;
+    line-height: 40px;
+    background-color: #262626;
+    border: 2px solid #333333;
+    border-radius: 20px;
+    color: #FFFFFF;
+    font-size: 24px;
+    font-weight: bold;
+    text-align: center;
+  }
+  .kp-sym {
+    width: 50px;
+    height: 40px;
+    line-height: 40px;
+    background-color: #1A1A1A;
+    border: 2px solid #333333;
+    border-radius: 20px;
+    color: #0D84FF;
+    font-size: 22px;
+    font-weight: bold;
+    text-align: center;
+  }
+</style>

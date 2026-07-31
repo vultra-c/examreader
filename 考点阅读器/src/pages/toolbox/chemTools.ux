@@ -1,0 +1,64 @@
+<template>
+  <div class="page" style="flex-direction: column;" @swipe="onSwipe">
+
+    <!-- Chemistry tools list -->
+    <list class="list">
+      <list-item class="item" type="chem" for="{{chemTools}}" tid="id" @click="onItemClick($item)">
+        <div class="item-content">
+          <text class="itemtext">{{$item.name}}</text>
+          <text class="itemtext2">{{$item.subtitle}}</text>
+        </div>
+        <img static src="/common/images/enter.png" class="arrow" />
+      </list-item>
+    </list>
+
+    <!-- Top bar -->
+    <img static src="/common/images/hd.png" style="position: absolute; left: 0px; top: 0px; width: 336px; height: 102px;" />
+    <img static src="/common/images/back.png" @click="goBack" style="position: absolute; left: 6px; top: 6px; width: 72px; height: 72px;" />
+    <text static style="position: absolute; left: 78px; top: 35px; width: 180px; line-height: 42px; font-weight: bold; font-size: 32px; color: white; text-align: center;">化学工具</text>
+
+  </div>
+</template>
+
+<script>
+import router from '@system.router'
+
+export default {
+  private: {
+    chemTools: [
+      { id: 'balance', name: '化学方程式配平', subtitle: '自动配平方程式', uri: '/pages/toolbox/chemBalance' },
+      { id: 'reference', name: '常见化学式', subtitle: '常用化学式查询', uri: '/pages/toolbox/chemReference' },
+      { id: 'molar', name: '摩尔质量计算', subtitle: '计算摩尔质量', uri: '/pages/toolbox/chemMolar' }
+    ]
+  },
+
+  onItemClick(item) {
+    router.push({ uri: item.uri })
+  },
+
+  goBack() {
+    router.back()
+  },
+
+  // Right swipe to go back
+  onSwipe(e) {
+    if (e.direction === 'right') {
+      router.back()
+    }
+  },
+
+  onBackPress() {
+    router.back()
+    return true
+  }
+}
+</script>
+
+<style>
+  @import '../../common/style.css';
+  .list {
+    top: 86px;
+    height: 394px;
+    padding: 0px 6px;
+  }
+</style>

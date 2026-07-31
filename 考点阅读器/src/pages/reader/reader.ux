@@ -124,10 +124,10 @@ export default {
 
   async loadContent() {
     this.pagesLoaded = false
-    this.pages = await dataManager.getReaderPages(this.path)
+    this.pages = await dataManager.getReaderPagesUnified(this.path)
     if (!this.$valid) return
     this.totalPages = this.pages.length
-    const name = dataManager.getNodeName(this.path)
+    const name = dataManager.getUnifiedNodeName(this.path)
     if (name) {
       this.contentName = name
       this.pageName = name

@@ -1,5 +1,5 @@
 {
-  "package": "com.bandbbs.ebook.plus",
+  "package": "com.silenthong.kdreader",
   "name": "考点阅读器",
   "versionName": "V26.4.4.BAND",
   "versionCode": 260520,
@@ -68,6 +68,24 @@
       },
       "pages/push": {
         "component": "push"
+      },
+      "pages/search": {
+        "component": "search"
+      },
+      "pages/toolbox/toolbox": {
+        "component": "toolbox"
+      },
+      "pages/toolbox/chemTools": {
+        "component": "chemTools"
+      },
+      "pages/toolbox/chemBalance": {
+        "component": "chemBalance"
+      },
+      "pages/toolbox/chemMolar": {
+        "component": "chemMolar"
+      },
+      "pages/toolbox/chemReference": {
+        "component": "chemReference"
       }
     }
   },

@@ -1,0 +1,246 @@
+<import name="input-method" src="../../components/InputMethod/InputMethod.ux"></import>
+
+<template>
+  <div class="page" style="flex-direction: column;" @swipe="onSwipe">
+
+    <!-- Search input display area (tap to toggle the keyboard) -->
+    <div class="search-box" style="left: 6px; top: 108px; width: 240px;" @click="toggleKeyboard">
+      <text class="search-text" show="{{searchText.length > 0}}">{{searchText}}</text>
+      <text class="search-ph" show="{{searchText.length == 0}}">输入要搜索的内容</text>
+    </div>
+
+    <!-- Search button -->
+    <text class="search-btn" @click="doSearch">搜索</text>
+
+    <!-- Results list (hidden while the keyboard is open) -->
+    <list class="result-list" show="{{!showKeyboard}}">
+      <list-item class="result-item" type="result" for="{{results}}" tid="path" @click="onResultClick($item)">
+        <div class="result-content">
+          <text class="result-name">{{$item.name}}</text>
+          <text class="result-snippet">{{$item.snippet}}</text>
+        </div>
+      </list-item>
+    </list>
+
+    <!-- No results hint -->
+    <text class="empty-hint" show="{{hasSearched && results.length == 0 && !showKeyboard}}">无结果</text>
+
+    <!-- Input method keyboard (visibility controlled by the hide prop) -->
+    <input-method hide="{{!showKeyboard}}" keyboardtype="QWERTY" screentype="rect" maxlength="5" @complete="onComplete" @delete="onDelete"></input-method>
+
+    <!-- Top bar -->
+    <img static src="/common/images/hd.png" style="position: absolute; left: 0px; top: 0px; width: 336px; height: 102px;" />
+    <img static src="/common/images/back.png" @click="goBack" style="position: absolute; left: 6px; top: 6px; width: 72px; height: 72px;" />
+    <text style="position: absolute; left: 78px; top: 7px; width: 180px; line-height: 32px; font-weight: bold; font-size: 24px; color: rgba(255,255,255,0.6); text-align: center;">{{nowTime}}</text>
+    <text static style="position: absolute; left: 78px; top: 35px; width: 180px; line-height: 42px; font-weight: bold; font-size: 32px; color: white; text-align: center;">搜索</text>
+
+  </div>
+</template>
+
+<script>
+import router from '@system.router'
+import prompt from '@system.prompt'
+import dataManager from '../../common/utils/dataManager.js'
+import { getNowTime } from '../../common/utils/timeUtil.js'
+import appState from '../../common/utils/appState.js'
+
+export default {
+  private: {
+    nowTime: '00:00',
+    timer: null,
+    // Accumulated search text entered through the input method
+    searchText: '',
+    // Controls whether the on-screen keyboard is visible
+    showKeyboard: false,
+    // Search results, each item: { name, path, snippet }
+    results: [],
+    // Whether a search has been performed (drives the "无结果" hint)
+    hasSearched: false
+  },
+
+  onInit() {
+    this.nowTime = getNowTime()
+    // Refresh the clock once per minute while the page is alive
+    this.timer = setInterval(() => {
+      if (this.$valid) {
+        this.nowTime = getNowTime()
+      }
+    }, 60000)
+  },
+
+  onDestroy() {
+    if (this.timer) {
+      clearInterval(this.timer)
+      this.timer = null
+    }
+  },
+
+  // Toggle the on-screen keyboard when tapping the search input area
+  toggleKeyboard() {
+    this.showKeyboard = !this.showKeyboard
+  },
+
+  // Append a character (or chunk) emitted by the input method.
+  // Pressing space triggers a search instead of inserting a space.
+  onComplete(e) {
+    const content = e.detail.content
+    if (content === ' ') {
+      if (this.searchText.length > 0) {
+        this.doSearch()
+      }
+      return
+    }
+    this.searchText = this.searchText + content
+  },
+
+  // Remove the last character emitted by the input method
+  onDelete() {
+    if (this.searchText.length > 0) {
+      this.searchText = this.searchText.slice(0, -1)
+    }
+  },
+
+  // Run a content search and display the matching results
+  async doSearch() {
+    const keyword = this.searchText.trim()
+    if (keyword.length === 0) {
+      prompt.showToast({ message: '请输入搜索内容', duration: 2000 })
+      return
+    }
+    // Hide the keyboard so the results list is fully visible
+    this.showKeyboard = false
+    this.hasSearched = true
+    const list = await dataManager.searchContent(keyword)
+    if (!this.$valid) return
+    this.results = list || []
+  },
+
+  // Open a result in the reader page
+  onResultClick(item) {
+    appState.jumpToPage = 0
+    appState.readerPath = item.path
+    router.push({
+      uri: '/pages/reader',
+      params: { path: item.path }
+    })
+  },
+
+  goBack() {
+    router.back()
+  },
+
+  // Right swipe to go back
+  onSwipe(e) {
+    if (e.direction === 'right') {
+      router.back()
+    }
+  },
+
+  onBackPress() {
+    router.back()
+    return true
+  }
+}
+</script>
+
+<style>
+  @import '../../common/style.css';
+
+  /* Search input display box */
+  .search-box {
+    position: absolute;
+    height: 54px;
+    background-color: #262626;
+    border-radius: 18px;
+    border: 3px solid #333333;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 0px 12px;
+  }
+  .search-text {
+    width: 100%;
+    font-size: 24px;
+    font-weight: bold;
+    color: #FFFFFF;
+    text-align: center;
+    lines: 1;
+    text-overflow: ellipsis;
+  }
+  .search-ph {
+    width: 100%;
+    font-size: 22px;
+    color: rgba(255, 255, 255, 0.3);
+    text-align: center;
+    lines: 1;
+  }
+
+  /* Search button */
+  .search-btn {
+    position: absolute;
+    left: 252px;
+    top: 108px;
+    width: 78px;
+    height: 54px;
+    line-height: 54px;
+    background-color: #0D6EFF;
+    border-radius: 18px;
+    color: #FFFFFF;
+    font-size: 26px;
+    font-weight: bold;
+    text-align: center;
+  }
+
+  /* Results list */
+  .result-list {
+    position: absolute;
+    left: 6px;
+    top: 170px;
+    width: 324px;
+    height: 310px;
+  }
+
+  /* Result item card */
+  .result-item {
+    width: 100%;
+    height: 80px;
+    padding: 10px 16px;
+    margin-bottom: 8px;
+    background-color: #262626;
+    border-radius: 24px;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .result-content {
+    flex-direction: column;
+    justify-content: center;
+    flex: 1;
+    height: 100%;
+    overflow: hidden;
+  }
+  .result-name {
+    font-size: 26px;
+    font-weight: bold;
+    color: white;
+    lines: 1;
+    text-overflow: ellipsis;
+  }
+  .result-snippet {
+    font-size: 20px;
+    color: rgba(255, 255, 255, 0.5);
+    lines: 1;
+    text-overflow: ellipsis;
+    margin-top: 4px;
+  }
+
+  /* Empty hint shown when a search returns nothing */
+  .empty-hint {
+    position: absolute;
+    left: 0px;
+    top: 220px;
+    width: 336px;
+    font-size: 24px;
+    color: rgba(255, 255, 255, 0.4);
+    text-align: center;
+  }
+</style>

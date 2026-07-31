@@ -1,0 +1,66 @@
+<template>
+  <div class="page" style="flex-direction: column;" @swipe="onSwipe">
+
+    <!-- Tool category list -->
+    <list class="list">
+      <list-item class="item" type="tool" for="{{tools}}" tid="id" @click="onItemClick($item)">
+        <div class="item-content">
+          <text class="itemtext">{{$item.name}}</text>
+          <text class="itemtext2">{{$item.subtitle}}</text>
+        </div>
+        <img static src="/common/images/enter.png" class="arrow" />
+      </list-item>
+    </list>
+
+    <!-- Top bar -->
+    <img static src="/common/images/hd.png" style="position: absolute; left: 0px; top: 0px; width: 336px; height: 102px;" />
+    <img static src="/common/images/back.png" @click="goBack" style="position: absolute; left: 6px; top: 6px; width: 72px; height: 72px;" />
+    <text static style="position: absolute; left: 78px; top: 35px; width: 180px; line-height: 42px; font-weight: bold; font-size: 32px; color: white; text-align: center;">工具箱</text>
+
+    <!-- Bottom decorative bar -->
+    <img static src="/common/images/bt.png" style="position: absolute; left: 0px; top: 378px; width: 336px; height: 102px;" />
+
+  </div>
+</template>
+
+<script>
+import router from '@system.router'
+
+export default {
+  private: {
+    // Currently only the Chemistry category is available
+    tools: [
+      { id: 'chem', name: '化学', subtitle: '化学工具集', uri: '/pages/toolbox/chemTools' }
+    ]
+  },
+
+  onItemClick(item) {
+    router.push({ uri: item.uri })
+  },
+
+  goBack() {
+    router.back()
+  },
+
+  // Right swipe to go back
+  onSwipe(e) {
+    if (e.direction === 'right') {
+      router.back()
+    }
+  },
+
+  onBackPress() {
+    router.back()
+    return true
+  }
+}
+</script>
+
+<style>
+  @import '../../common/style.css';
+  .list {
+    top: 86px;
+    height: 292px;
+    padding: 0px 6px;
+  }
+</style>

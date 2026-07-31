@@ -1,0 +1,300 @@
+<template>
+  <div class="page" style="flex-direction: column;" @swipe="onSwipe">
+
+    <!-- Formula display -->
+    <div class="io-box" style="top: 104px; height: 50px;">
+      <text class="io-text" show="{{formula.length > 0}}">{{formula}}</text>
+      <text class="io-ph" show="{{formula.length == 0}}">输入化学式</text>
+    </div>
+
+    <!-- Result display -->
+    <div class="io-box" style="top: 158px; height: 44px;">
+      <text class="io-text" show="{{hasResult}}" style="color: {{resultColor}};">{{resultText}}</text>
+      <text class="io-ph" show="{{!hasResult}}">摩尔质量</text>
+    </div>
+
+    <!-- Custom keypad (scrollable if it overflows) -->
+    <scroll scroll-y="{{true}}" class="keypad">
+      <div style="flex-direction: column; width: 324px;">
+        <div class="key-row" for="{{row in keyRows}}">
+          <text class="key-btn" for="{{key in row}}" @click="onKeyClick(key)">{{key.l}}</text>
+        </div>
+        <!-- Control row: backspace and clear (wider buttons) -->
+        <div class="key-row" style="margin-top: 6px;">
+          <text class="key-btn-wide" @click="onBackspace">←</text>
+          <text class="key-btn-wide" @click="onClear">清</text>
+        </div>
+      </div>
+    </scroll>
+
+    <!-- Top bar -->
+    <img static src="/common/images/hd.png" style="position: absolute; left: 0px; top: 0px; width: 336px; height: 102px;" />
+    <img static src="/common/images/back.png" @click="goBack" style="position: absolute; left: 6px; top: 6px; width: 72px; height: 72px;" />
+    <text style="position: absolute; left: 78px; top: 7px; width: 180px; line-height: 32px; font-weight: bold; font-size: 24px; color: rgba(255,255,255,0.6); text-align: center;">{{nowTime}}</text>
+    <text static style="position: absolute; left: 78px; top: 35px; width: 180px; line-height: 42px; font-weight: bold; font-size: 32px; color: white; text-align: center;">摩尔质量计算</text>
+
+  </div>
+</template>
+
+<script>
+import router from '@system.router'
+import { getNowTime } from '../../common/utils/timeUtil.js'
+
+// Atomic masses in g/mol for the supported elements
+var ATOMIC_MASS = {
+  H: 1.008, C: 12.01, N: 14.01, O: 16.00, S: 32.06, Cl: 35.45,
+  Na: 22.99, K: 39.10, Ca: 40.08, Mg: 24.31, Fe: 55.85, Cu: 63.55,
+  Al: 26.98, Zn: 65.38, Ag: 107.87, Ba: 137.33
+}
+
+/* ------------------------------------------------------------------ *
+ * Parse a chemical formula into a map { element: count }.
+ * Supports nested parentheses, e.g. Ca(OH)2, Al2(SO4)3.
+ * Returns null when the formula is malformed or references an
+ * element that is not in the ATOMIC_MASS table.
+ * ------------------------------------------------------------------ */
+function parseFormula(s) {
+  var counts = {}
+  var stack = [counts]
+  var i = 0
+  var n = s.length
+  while (i < n) {
+    var ch = s.charAt(i)
+    if (ch === '(') {
+      // Open a new group scope
+      stack.push({})
+      i++
+    } else if (ch === ')') {
+      // Closing a group requires an open group on the stack
+      if (stack.length <= 1) return null
+      i++
+      var num = 0
+      while (i < n && s.charAt(i) >= '0' && s.charAt(i) <= '9') {
+        num = num * 10 + (s.charCodeAt(i) - 48)
+        i++
+      }
+      if (num === 0) num = 1
+      var top = stack.pop()
+      var cur = stack[stack.length - 1]
+      for (var e in top) {
+        // Reject unknown elements early
+        if (!(e in ATOMIC_MASS)) return null
+        cur[e] = (cur[e] || 0) + top[e] * num
+      }
+    } else if (ch >= 'A' && ch <= 'Z') {
+      // Element symbol: one uppercase letter followed by lowercase letters
+      var elem = ch
+      i++
+      while (i < n && s.charAt(i) >= 'a' && s.charAt(i) <= 'z') {
+        elem += s.charAt(i)
+        i++
+      }
+      // Reject unknown elements early
+      if (!(elem in ATOMIC_MASS)) return null
+      var num2 = 0
+      while (i < n && s.charAt(i) >= '0' && s.charAt(i) <= '9') {
+        num2 = num2 * 10 + (s.charCodeAt(i) - 48)
+        i++
+      }
+      if (num2 === 0) num2 = 1
+      var cur2 = stack[stack.length - 1]
+      cur2[elem] = (cur2[elem] || 0) + num2
+    } else {
+      // Unexpected character
+      return null
+    }
+  }
+  // Unbalanced parentheses
+  if (stack.length !== 1) return null
+  return counts
+}
+
+/* Compute the molar mass of a formula string. Returns null on failure. */
+function computeMass(s) {
+  var counts = parseFormula(s)
+  if (!counts) return null
+  var mass = 0
+  for (var e in counts) {
+    if (!(e in ATOMIC_MASS)) return null
+    mass += ATOMIC_MASS[e] * counts[e]
+  }
+  return mass
+}
+
+export default {
+  private: {
+    nowTime: '00:00',
+    timer: null,
+    // The formula currently being entered (e.g. "H2SO4")
+    formula: '',
+    // Result display state
+    resultText: '',
+    resultColor: '#34D399',
+    hasResult: false,
+    // Keypad rows: each row is an array of keys.
+    // A key is { l: label, v: value } for insertable tokens.
+    keyRows: [
+      [{ l: 'H', v: 'H' }, { l: 'C', v: 'C' }, { l: 'N', v: 'N' }, { l: 'O', v: 'O' }],
+      [{ l: 'S', v: 'S' }, { l: 'Cl', v: 'Cl' }, { l: 'Na', v: 'Na' }, { l: 'K', v: 'K' }],
+      [{ l: 'Ca', v: 'Ca' }, { l: 'Mg', v: 'Mg' }, { l: 'Fe', v: 'Fe' }, { l: 'Cu', v: 'Cu' }],
+      [{ l: 'Al', v: 'Al' }, { l: 'Zn', v: 'Zn' }, { l: 'Ag', v: 'Ag' }, { l: 'Ba', v: 'Ba' }],
+      [{ l: '1', v: '1' }, { l: '2', v: '2' }, { l: '3', v: '3' }, { l: '4', v: '4' }],
+      [{ l: '5', v: '5' }, { l: '6', v: '6' }, { l: '7', v: '7' }, { l: '8', v: '8' }],
+      [{ l: '9', v: '9' }, { l: '0', v: '0' }, { l: '(', v: '(' }, { l: ')', v: ')' }]
+    ]
+  },
+
+  onInit() {
+    this.nowTime = getNowTime()
+    // Refresh the clock once per minute while the page is alive
+    this.timer = setInterval(() => {
+      if (this.$valid) {
+        this.nowTime = getNowTime()
+      }
+    }, 60000)
+  },
+
+  onDestroy() {
+    if (this.timer) {
+      clearInterval(this.timer)
+      this.timer = null
+    }
+  },
+
+  // Handle a keypad tap: insert a token, backspace, or clear
+  onKeyClick(key) {
+    this.formula = this.formula + key.v
+    this.updateResult()
+  },
+
+  // Remove the last character of the formula
+  onBackspace() {
+    if (this.formula.length > 0) {
+      this.formula = this.formula.slice(0, -1)
+    }
+    this.updateResult()
+  },
+
+  // Clear the whole formula and the result
+  onClear() {
+    this.formula = ''
+    this.resultText = ''
+    this.hasResult = false
+  },
+
+  // Recompute the molar mass (or show "无效公式") after every change
+  updateResult() {
+    if (this.formula.length === 0) {
+      this.hasResult = false
+      this.resultText = ''
+      return
+    }
+    var mass = computeMass(this.formula)
+    if (mass === null) {
+      this.hasResult = true
+      this.resultText = '无效公式'
+      this.resultColor = '#FF6B6B'
+    } else {
+      this.hasResult = true
+      this.resultText = mass.toFixed(2) + ' g/mol'
+      this.resultColor = '#34D399'
+    }
+  },
+
+  goBack() {
+    router.back()
+  },
+
+  // Right swipe to go back
+  onSwipe(e) {
+    if (e.direction === 'right') {
+      router.back()
+    }
+  },
+
+  onBackPress() {
+    router.back()
+    return true
+  }
+}
+</script>
+
+<style>
+  @import '../../common/style.css';
+
+  /* Formula / result boxes */
+  .io-box {
+    position: absolute;
+    left: 6px;
+    width: 324px;
+    background-color: #262626;
+    border-radius: 18px;
+    border: 3px solid #333333;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 0px 12px;
+  }
+  .io-text {
+    width: 100%;
+    font-size: 26px;
+    font-weight: bold;
+    color: #FFFFFF;
+    text-align: center;
+    lines: 1;
+    text-overflow: ellipsis;
+  }
+  .io-ph {
+    width: 100%;
+    font-size: 22px;
+    color: rgba(255, 255, 255, 0.3);
+    text-align: center;
+    lines: 1;
+  }
+
+  /* Keypad scroll area */
+  .keypad {
+    position: absolute;
+    left: 6px;
+    top: 206px;
+    width: 324px;
+    height: 274px;
+  }
+
+  /* Keypad row */
+  .key-row {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    width: 324px;
+    margin-bottom: 6px;
+  }
+
+  /* Standard keypad key (4 per row) */
+  .key-btn {
+    width: 76px;
+    height: 34px;
+    line-height: 34px;
+    background-color: #262626;
+    border: 2px solid #333333;
+    border-radius: 17px;
+    color: #FFFFFF;
+    font-size: 22px;
+    font-weight: bold;
+    text-align: center;
+  }
+
+  /* Wider control key (backspace / clear) */
+  .key-btn-wide {
+    width: 159px;
+    height: 34px;
+    line-height: 34px;
+    background-color: #1A1A1A;
+    border: 2px solid #333333;
+    border-radius: 17px;
+    color: #0D84FF;
+    font-size: 22px;
+    font-weight: bold;
+    text-align: center;
+  }
+</style>

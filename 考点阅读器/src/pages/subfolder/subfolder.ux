@@ -111,6 +111,12 @@ export default {
       return
     }
 
+    // 内置示例文件夹：直接用 item.id 作为路径
+    if (this.path === 'builtin') {
+      router.push({ uri: '/pages/reader', params: { path: item.id } })
+      return
+    }
+
     // 内置内容：用 path + index
     const index = this.allItems.indexOf(item)
     const childPath = this.path + ',' + index
@@ -136,6 +142,12 @@ export default {
 
   onLongPress(item) {
     if (this.isNavigating) return
+
+    // Built-in examples cannot be deleted
+    if (this.path === 'builtin') {
+      return
+    }
+
     // 标记长按已触发，阻止后续click事件
     this.longPressTriggered = true
     this.isNavigating = true

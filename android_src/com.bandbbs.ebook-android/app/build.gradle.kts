@@ -18,7 +18,7 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.bandbbs.ebook.plus"
+        applicationId = "com.silenthong.kdreader"
         minSdk = 23
         targetSdk = 35
         versionCode = 126430

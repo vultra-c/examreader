@@ -81,12 +81,23 @@ export default {
     // 添加知识树文件夹
     if (folders) {
       folders.forEach((folder, index) => {
+        let subtitle = '文件夹'
+        let path = index.toString()
+
+        if (folder.id === 'bt_folder') {
+          subtitle = '蓝牙传输'
+          path = 'bt'
+        } else if (folder.id === 'builtin_folder') {
+          subtitle = '示例'
+          path = 'builtin'
+        }
+
         items.push({
           id: folder.id,
           name: folder.name,
-          subtitle: folder.id === 'bt_folder' ? '蓝牙传输' : '文件夹',
+          subtitle: subtitle,
           type: 'folder',
-          path: folder.id === 'bt_folder' ? 'bt' : index.toString()
+          path: path
         })
       })
     }
@@ -121,6 +132,10 @@ export default {
 
   onLongPress(item) {
     if (this.isNavigating) return
+
+    // The built-in examples folder cannot be deleted
+    if (item.path === 'builtin') return
+
     // 标记长按已触发，阻止后续click事件
     this.longPressTriggered = true
     this.isNavigating = true

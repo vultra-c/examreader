@@ -1,0 +1,168 @@
+<template>
+  <div class="page" style="flex-direction: column;" @swipe="onSwipe">
+
+    <!-- Scrollable list of common chemical formulas grouped by category -->
+    <list class="ref-list">
+      <list-item class="ref-row" type="ref" for="{{items}}">
+        <div class="cat-header" if="{{$item.kind === 'header'}}">
+          <text class="cat-title">{{$item.name}}</text>
+        </div>
+        <div class="compound" if="{{$item.kind === 'item'}}">
+          <text class="formula">{{$item.formula}}</text>
+          <text class="cname">{{$item.name}}</text>
+        </div>
+      </list-item>
+    </list>
+
+    <!-- Top bar -->
+    <img static src="/common/images/hd.png" style="position: absolute; left: 0px; top: 0px; width: 336px; height: 102px;" />
+    <img static src="/common/images/back.png" @click="goBack" style="position: absolute; left: 6px; top: 6px; width: 72px; height: 72px;" />
+    <text style="position: absolute; left: 78px; top: 7px; width: 180px; line-height: 32px; font-weight: bold; font-size: 24px; color: rgba(255,255,255,0.6); text-align: center;">{{nowTime}}</text>
+    <text static style="position: absolute; left: 78px; top: 35px; width: 180px; line-height: 42px; font-weight: bold; font-size: 32px; color: white; text-align: center;">常见化学式</text>
+
+    <!-- Bottom decorative bar -->
+    <img static src="/common/images/bt.png" style="position: absolute; left: 0px; top: 378px; width: 336px; height: 102px;" />
+
+  </div>
+</template>
+
+<script>
+import router from '@system.router'
+import { getNowTime } from '../../common/utils/timeUtil.js'
+
+export default {
+  private: {
+    nowTime: '00:00',
+    timer: null,
+    // Flat list of category headers and compound rows.
+    // Each entry is either { kind: 'header', name } or { kind: 'item', formula, name }.
+    items: [
+      // Metals
+      { kind: 'header', name: '金属' },
+      { kind: 'item', formula: 'NaCl', name: '氯化钠' },
+      { kind: 'item', formula: 'NaOH', name: '氢氧化钠' },
+      { kind: 'item', formula: 'Na2CO3', name: '碳酸钠' },
+      { kind: 'item', formula: 'NaHCO3', name: '碳酸氢钠' },
+      { kind: 'item', formula: 'KOH', name: '氢氧化钾' },
+      { kind: 'item', formula: 'CaO', name: '氧化钙' },
+      { kind: 'item', formula: 'Ca(OH)2', name: '氢氧化钙' },
+      { kind: 'item', formula: 'CaCO3', name: '碳酸钙' },
+      { kind: 'item', formula: 'Fe2O3', name: '氧化铁' },
+      { kind: 'item', formula: 'Fe3O4', name: '四氧化三铁' },
+      { kind: 'item', formula: 'CuO', name: '氧化铜' },
+      { kind: 'item', formula: 'CuSO4', name: '硫酸铜' },
+      { kind: 'item', formula: 'Al2O3', name: '氧化铝' },
+      { kind: 'item', formula: 'ZnSO4', name: '硫酸锌' },
+      { kind: 'item', formula: 'AgCl', name: '氯化银' },
+      { kind: 'item', formula: 'BaSO4', name: '硫酸钡' },
+      // Non-metals
+      { kind: 'header', name: '非金属' },
+      { kind: 'item', formula: 'CO2', name: '二氧化碳' },
+      { kind: 'item', formula: 'CO', name: '一氧化碳' },
+      { kind: 'item', formula: 'SO2', name: '二氧化硫' },
+      { kind: 'item', formula: 'SO3', name: '三氧化硫' },
+      { kind: 'item', formula: 'H2SO4', name: '硫酸' },
+      { kind: 'item', formula: 'HCl', name: '盐酸' },
+      { kind: 'item', formula: 'HNO3', name: '硝酸' },
+      { kind: 'item', formula: 'H2CO3', name: '碳酸' },
+      { kind: 'item', formula: 'H3PO4', name: '磷酸' },
+      { kind: 'item', formula: 'NH3', name: '氨气' },
+      { kind: 'item', formula: 'NH4Cl', name: '氯化铵' },
+      { kind: 'item', formula: 'P2O5', name: '五氧化二磷' },
+      // Organic compounds
+      { kind: 'header', name: '有机物' },
+      { kind: 'item', formula: 'CH4', name: '甲烷' },
+      { kind: 'item', formula: 'C2H5OH', name: '乙醇' },
+      { kind: 'item', formula: 'CH3COOH', name: '醋酸' },
+      { kind: 'item', formula: 'C6H12O6', name: '葡萄糖' }
+    ]
+  },
+
+  onInit() {
+    this.nowTime = getNowTime()
+    // Refresh the clock once per minute while the page is alive
+    this.timer = setInterval(() => {
+      if (this.$valid) {
+        this.nowTime = getNowTime()
+      }
+    }, 60000)
+  },
+
+  onDestroy() {
+    if (this.timer) {
+      clearInterval(this.timer)
+      this.timer = null
+    }
+  },
+
+  goBack() {
+    router.back()
+  },
+
+  // Right swipe to go back
+  onSwipe(e) {
+    if (e.direction === 'right') {
+      router.back()
+    }
+  },
+
+  onBackPress() {
+    router.back()
+    return true
+  }
+}
+</script>
+
+<style>
+  @import '../../common/style.css';
+
+  /* Reference list (between the header and the bottom bar) */
+  .ref-list {
+    position: absolute;
+    top: 86px;
+    left: 0px;
+    width: 336px;
+    height: 292px;
+    padding: 0px 6px;
+  }
+
+  .ref-row {
+    width: 100%;
+  }
+
+  /* Category header row */
+  .cat-header {
+    width: 100%;
+    height: 40px;
+    padding-left: 10px;
+    flex-direction: row;
+    align-items: center;
+  }
+  .cat-title {
+    font-size: 22px;
+    font-weight: bold;
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  /* Compound row: formula on the left, name on the right */
+  .compound {
+    width: 100%;
+    height: 44px;
+    padding: 0px 16px;
+    margin-bottom: 4px;
+    background-color: #1A1A1A;
+    border-radius: 14px;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .formula {
+    font-size: 24px;
+    font-weight: bold;
+    color: #FFFFFF;
+  }
+  .cname {
+    font-size: 22px;
+    color: rgba(255, 255, 255, 0.7);
+  }
+</style>

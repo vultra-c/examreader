@@ -3,6 +3,8 @@
  * 处理知识点树导航、分页、删除等功能
  */
 import { knowledgeTree } from './knowledgeData.js'
+import { builtinExamples } from './builtinData.js'
+import { parseContent, isSubjectSpecific, formatForDisplay } from './subjectParser.js'
 import storage from '@system.storage'
 
 const STORAGE_KEY_DELETED = 'KD_DATA_DELETED'
@@ -15,29 +17,68 @@ const STORAGE_KEY_BT_CONTENT = 'KD_BT_CONTENT'  // 蓝牙传输内容存储键
 // 适当留余量，取 99
 const CHARS_PER_PAGE = 99
 
-// 获取已删除内容的ID集合
+// ---------------------------------------------------------------------------
+// Pre-computed cache for built-in example pages.
+// Built-in examples never change, so their formatted + paginated content is
+// computed once at module load time instead of on every access.
+// ---------------------------------------------------------------------------
+const _builtinPagesCache = {}
+const _builtinNameCache = {}
+const _builtinFormattedCache = {}
+
+function _precomputeBuiltinExamples() {
+  for (let i = 0; i < builtinExamples.length; i++) {
+    const item = builtinExamples[i]
+    _builtinNameCache[item.id] = item.name
+    let formatted = item.content
+    if (isSubjectSpecific(item.content)) {
+      const parsed = parseContent(item.content)
+      formatted = formatForDisplay(parsed)
+    }
+    _builtinFormattedCache[item.id] = formatted
+    _builtinPagesCache[item.id] = splitContentIntoPages(formatted)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// getDeletedSet: read the deleted-ID set from storage once, then cache it
+// in memory to avoid repeated storage reads on every list / search call.
+// ---------------------------------------------------------------------------
+let _deletedSetCache = null
+
+// 获取已删除内容的ID集合（memory-cached after first read）
 function getDeletedSet() {
+  if (_deletedSetCache) {
+    return Promise.resolve(_deletedSetCache)
+  }
   return new Promise((resolve) => {
     storage.get({
       key: STORAGE_KEY_DELETED,
       success: (data) => {
+        let result
         if (data) {
           try {
-            resolve(new Set(JSON.parse(data)))
+            result = new Set(JSON.parse(data))
           } catch (e) {
-            resolve(new Set())
+            result = new Set()
           }
         } else {
-          resolve(new Set())
+          result = new Set()
         }
+        _deletedSetCache = result
+        resolve(result)
       },
-      fail: () => resolve(new Set())
+      fail: () => {
+        _deletedSetCache = new Set()
+        resolve(_deletedSetCache)
+      }
     })
   })
 }
 
-// 保存已删除内容ID集合
+// 保存已删除内容ID集合（updates cache）
 function saveDeletedSet(deletedSet) {
+  _deletedSetCache = deletedSet
   return new Promise((resolve) => {
     storage.set({
       key: STORAGE_KEY_DELETED,
@@ -50,29 +91,42 @@ function saveDeletedSet(deletedSet) {
 
 // ==================== 蓝牙传输内容存储 ====================
 
-// 获取所有蓝牙传输内容
+// Memory cache for bluetooth content to avoid repeated storage reads.
+let _btContentCache = null
+
+// 获取所有蓝牙传输内容（memory-cached after first read）
 function getBluetoothContent() {
+  if (_btContentCache) {
+    return Promise.resolve(_btContentCache)
+  }
   return new Promise((resolve) => {
     storage.get({
       key: STORAGE_KEY_BT_CONTENT,
       success: (data) => {
+        let result
         if (data) {
           try {
-            resolve(JSON.parse(data))
+            result = JSON.parse(data)
           } catch (e) {
-            resolve([])
+            result = []
           }
         } else {
-          resolve([])
+          result = []
         }
+        _btContentCache = result
+        resolve(result)
       },
-      fail: () => resolve([])
+      fail: () => {
+        _btContentCache = []
+        resolve(_btContentCache)
+      }
     })
   })
 }
 
-// 保存蓝牙传输内容列表
+// 保存蓝牙传输内容列表（updates cache）
 function saveBluetoothContentList(list) {
+  _btContentCache = list
   return new Promise((resolve) => {
     storage.set({
       key: STORAGE_KEY_BT_CONTENT,
@@ -190,6 +244,11 @@ function splitContentIntoPages(content) {
   return pages.length > 0 ? pages : ['无内容']
 }
 
+// Pre-compute built-in example pages and names at module load time.
+// This runs once when the module is first imported and caches the results
+// so that subsequent reader / search calls return instantly.
+_precomputeBuiltinExamples()
+
 export default {
   /**
    * 初始化数据
@@ -218,6 +277,15 @@ export default {
     return new Promise((resolve) => {
       getDeletedSet().then((deletedSet) => {
         const visible = knowledgeTree.filter(child => !deletedSet.has(child.id))
+
+        // Add the built-in examples folder so the user can browse and
+        // verify the subject-specific formatting from the main page.
+        visible.push({
+          id: 'builtin_folder',
+          name: '内置示例',
+          type: 'folder',
+          children: []
+        })
 
         // 检查是否有蓝牙传输内容
         getBluetoothContent().then((btList) => {
@@ -255,6 +323,18 @@ export default {
         return
       }
 
+      // 内置示例文件夹
+      if (pathStr === 'builtin') {
+        const items = builtinExamples.map(item => ({
+          id: item.id,
+          name: item.name,
+          type: 'content',
+          content: item.content
+        }))
+        resolve(items)
+        return
+      }
+
       // 内置文件夹
       const node = getNodeByPathStr(pathStr)
       if (!node || node.type !== 'folder' || !node.children) {
@@ -279,6 +359,7 @@ export default {
    */
   getNodeName(pathStr) {
     if (pathStr === 'bt') return '蓝牙传输'
+    if (pathStr === 'builtin') return '内置示例'
     const node = getNodeByPathStr(pathStr)
     return node ? node.name : ''
   },
@@ -324,6 +405,12 @@ export default {
    */
   deleteContent(pathStr) {
     return new Promise((resolve) => {
+      // Built-in examples cannot be deleted
+      if (pathStr && pathStr.startsWith('builtin_')) {
+        resolve(false)
+        return
+      }
+
       // 蓝牙传输内容
       if (pathStr && pathStr.startsWith('bt_')) {
         getBluetoothContent().then((btList) => {
@@ -355,6 +442,12 @@ export default {
       // 蓝牙传输文件夹：清空所有蓝牙内容
       if (pathStr === 'bt') {
         saveBluetoothContentList([]).then(() => resolve(true))
+        return
+      }
+
+      // 内置示例文件夹：不允许删除
+      if (pathStr === 'builtin') {
+        resolve(false)
         return
       }
 
@@ -583,5 +676,179 @@ export default {
         resolve(btList ? btList.length : 0)
       })
     })
+  },
+
+  // ==================== Built-in Examples ====================
+
+  /**
+   * Get built-in example data entries
+   */
+  getBuiltinExamples() {
+    return builtinExamples
+  },
+
+  /**
+   * Get reader pages for a built-in example
+   */
+  getBuiltinReaderPages(id) {
+    // Return pre-computed pages from cache (computed at module load)
+    if (_builtinPagesCache[id]) {
+      return _builtinPagesCache[id]
+    }
+    // Fallback: compute on demand (should not normally happen)
+    const item = builtinExamples.find(e => e.id === id)
+    if (item) {
+      if (isSubjectSpecific(item.content)) {
+        const parsed = parseContent(item.content)
+        const formatted = formatForDisplay(parsed)
+        const pages = splitContentIntoPages(formatted)
+        _builtinPagesCache[id] = pages
+        return pages
+      }
+      const pages = splitContentIntoPages(item.content)
+      _builtinPagesCache[id] = pages
+      return pages
+    }
+    return ['内容不存在']
+  },
+
+  /**
+   * Get built-in example name by id
+   */
+  getBuiltinName(id) {
+    if (_builtinNameCache[id]) {
+      return _builtinNameCache[id]
+    }
+    const item = builtinExamples.find(e => e.id === id)
+    return item ? item.name : ''
+  },
+
+  // ==================== Search ====================
+
+  /**
+   * Search all content (built-in tree + bluetooth + builtin examples)
+   * @param {string} keyword - search keyword
+   * @returns {Promise<Array>} array of {name, path, snippet, type}
+   */
+  searchContent(keyword) {
+    return new Promise((resolve) => {
+      if (!keyword || keyword.trim().length === 0) {
+        resolve([])
+        return
+      }
+      const kw = keyword.trim().toLowerCase()
+      const results = []
+
+      // Search built-in knowledge tree
+      getDeletedSet().then((deletedSet) => {
+        function searchTree(node, path) {
+          if (deletedSet.has(node.id)) return
+          if (node.type === 'content') {
+            const content = (node.content || '').toLowerCase()
+            const name = (node.name || '').toLowerCase()
+            if (content.includes(kw) || name.includes(kw)) {
+              const idx = content.indexOf(kw)
+              let snippet = ''
+              if (idx >= 0) {
+                const start = Math.max(0, idx - 10)
+                const end = Math.min(content.length, idx + kw.length + 20)
+                snippet = (start > 0 ? '...' : '') + content.substring(start, end) + (end < content.length ? '...' : '')
+              }
+              results.push({
+                name: node.name,
+                path: path,
+                snippet: snippet,
+                type: 'builtin'
+              })
+            }
+          } else if (node.type === 'folder' && node.children) {
+            for (let i = 0; i < node.children.length; i++) {
+              searchTree(node.children[i], path + ',' + i)
+            }
+          }
+        }
+        knowledgeTree.forEach((node, i) => searchTree(node, String(i)))
+
+        // Search bluetooth content
+        getBluetoothContent().then((btList) => {
+          if (btList) {
+            btList.forEach(item => {
+              const content = (item.content || '').toLowerCase()
+              const name = (item.name || '').toLowerCase()
+              if (content.includes(kw) || name.includes(kw)) {
+                const idx = content.indexOf(kw)
+                let snippet = ''
+                if (idx >= 0) {
+                  const start = Math.max(0, idx - 10)
+                  const end = Math.min(content.length, idx + kw.length + 20)
+                  snippet = (start > 0 ? '...' : '') + content.substring(start, end) + (end < content.length ? '...' : '')
+                }
+                results.push({
+                  name: item.name,
+                  path: item.id,
+                  snippet: snippet,
+                  type: 'bluetooth'
+                })
+              }
+            })
+          }
+
+          // Search built-in examples (use pre-computed formatted content
+          // so the snippet matches what the user sees in the reader)
+          builtinExamples.forEach(item => {
+            const formatted = _builtinFormattedCache[item.id] || item.content
+            const content = formatted.toLowerCase()
+            const name = (item.name || '').toLowerCase()
+            if (content.includes(kw) || name.includes(kw)) {
+              const idx = content.indexOf(kw)
+              let snippet = ''
+              if (idx >= 0) {
+                const start = Math.max(0, idx - 10)
+                const end = Math.min(content.length, idx + kw.length + 20)
+                snippet = (start > 0 ? '...' : '') + content.substring(start, end) + (end < content.length ? '...' : '')
+              }
+              results.push({
+                name: item.name,
+                path: item.id,
+                snippet: snippet,
+                type: 'example'
+              })
+            }
+          })
+
+          resolve(results)
+        })
+      })
+    })
+  },
+
+  /**
+   * Get reader pages by path (supports builtin_ prefix for examples)
+   */
+  getReaderPagesUnified(pathStr) {
+    return new Promise((resolve) => {
+      // Built-in examples
+      if (pathStr && pathStr.startsWith('builtin_')) {
+        resolve(this.getBuiltinReaderPages(pathStr))
+        return
+      }
+      // Bluetooth content
+      if (pathStr && pathStr.startsWith('bt_')) {
+        this.getReaderPages(pathStr).then(resolve)
+        return
+      }
+      // Built-in knowledge tree
+      this.getReaderPages(pathStr).then(resolve)
+    })
+  },
+
+  /**
+   * Get node name by path (supports builtin_ prefix)
+   */
+  getUnifiedNodeName(pathStr) {
+    if (pathStr && pathStr.startsWith('builtin_')) {
+      return this.getBuiltinName(pathStr)
+    }
+    return this.getNodeName(pathStr)
   }
 }
