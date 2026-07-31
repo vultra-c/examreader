@@ -1,52 +1,70 @@
 <template>
   <div class="page" style="flex-direction: column;width: 336px;">
 
-      <div style="flex-direction: column;margin-top: 46px;width: 336px;" if="{{state == 'wait'}}">
-        <img static src="/common/images/connect.png" style="margin-left: 104px;margin-bottom:24px;margin-top:100px" />
-        <text static style="width: 336px;font-size: 32px;font-weight:bold;color: white;text-align: center;margin-top: 0px;">
-          等待客户端连接
-        </text>
-        <text static style="width: 286px;left:25px;font-size: 24px;font-weight:bold;color: rgb(153, 153, 153);text-align: left;margin-top: 10px;padding: 10px;">
-          请下载安装《考点传输》专用手机客户端，在客户端中连接手环。
-        </text>
-      </div>
-
-      <div style="flex-direction: column;margin-top: 46px;width: 336px;" if="{{state == 'ready'}}">
-        <img static src="/common/images/choose.png" style="margin-left: 104px;margin-bottom:24px;margin-top:100px" />
-        <text static style="width: 336px;font-size: 32px;font-weight:bold;color: white;text-align: center;margin-top: 0px;">
-          等待选择文本
-        </text>
-        <text static style="width: 286px;left:25px;font-size: 24px;font-weight:bold;color: rgb(153, 153, 153);text-align: left;margin-top: 10px;padding: 10px;">
-          连接成功，请在手机端选择考点文件后点击发送。
-        </text>
-      </div>
-
-      <div style="flex-direction: column;margin-top: 46px;width: 336px;" if="{{state == 'upload'}}">
-        <img if="{{state2 == 'ing'}}" static src="/common/images/download.png" style="margin-left: 104px;margin-bottom:24px;margin-top:100px" />
-        <text if="{{state2 == 'ing'}}" static style="width: 336px;font-size: 32px;font-weight:bold;color: white;text-align: center;margin-bottom:36px;">
-          正在接收
-        </text>
-        <img if="{{state2 == 'error'}}" static src="/common/images/error.png" style="margin-left: 104px;margin-bottom:24px;margin-top:100px" />
-        <text if="{{state2 == 'error'}}" static style="width: 336px;font-size: 32px;font-weight:bold;color: white;text-align: center;margin-bottom:36px;">
-          接收失败
-        </text>
-        <img if="{{state2 == 'succ'}}" static src="/common/images/succ.png" style="margin-left: 104px;margin-bottom:24px;margin-top:100px" />
-        <text if="{{state2 == 'succ'}}" static style="width: 336px;font-size: 32px;font-weight:bold;color: white;text-align: center;margin-bottom:36px;">
-          接收成功
-        </text>
-        <div class="item">
-          <text class="itemtext" style="flex:1" static>文件内容</text>
-          <text class="itemtext" style="color:rgb(168, 168, 168)">{{persent}}%</text>
-        </div>
-      </div>
-
-      <img static src="/common/images/back.png" @click="back" style="position: absolute;left: 6px;top: 6px;width: 72px;height: 72px;"/>
-      <text style="position: absolute;left: 78px;top: 7px;width: 180px;line-height: 32px;font-weight:bold;font-size:24px;color:rgba(255,255,255,0.6);text-align:center;">
-        {{nowTime}}
+    <!-- State: waiting for connection -->
+    <div style="flex-direction: column;margin-top: 46px;width: 336px;" if="{{state == 'wait'}}">
+      <img static src="/common/images/connect.png" style="margin-left: 104px;margin-bottom:24px;margin-top:100px" />
+      <text static style="width: 336px;font-size: 32px;font-weight:bold;color: white;text-align: center;margin-top: 0px;">
+        等待连接
       </text>
-      <text static style="position: absolute;left: 78px;top: 35px;width: 180px;line-height: 42px;font-weight:bold;font-size:32px;color:white;text-align:center;">
-        考点传输
+      <text static style="width: 286px;left:25px;font-size: 24px;font-weight:bold;color: rgb(153, 153, 153);text-align: left;margin-top: 10px;padding: 10px;">
+        请在手机端打开《考点传输》并连接手环。
       </text>
+    </div>
+
+    <!-- State: connected, waiting for file -->
+    <div style="flex-direction: column;margin-top: 46px;width: 336px;" if="{{state == 'ready'}}">
+      <img static src="/common/images/choose.png" style="margin-left: 104px;margin-bottom:24px;margin-top:100px" />
+      <text static style="width: 336px;font-size: 32px;font-weight:bold;color: white;text-align: center;margin-top: 0px;">
+        连接成功
+      </text>
+      <text static style="width: 286px;left:25px;font-size: 24px;font-weight:bold;color: rgb(153, 153, 153);text-align: left;margin-top: 10px;padding: 10px;">
+        请在手机端选择考点文件并发送。
+      </text>
+    </div>
+
+    <!-- State: receiving -->
+    <div style="flex-direction: column;margin-top: 46px;width: 336px;" if="{{state == 'receiving'}}">
+      <img static src="/common/images/download.png" style="margin-left: 104px;margin-bottom:24px;margin-top:60px" />
+      <text static style="width: 336px;font-size: 32px;font-weight:bold;color: white;text-align: center;margin-bottom:36px;">
+        正在接收
+      </text>
+      <div class="item">
+        <text class="itemtext" style="flex:1" static>{{fileName}}</text>
+        <text class="itemtext" style="color:rgb(168, 168, 168)">{{percent}}%</text>
+      </div>
+    </div>
+
+    <!-- State: saved successfully -->
+    <div style="flex-direction: column;margin-top: 46px;width: 336px;" if="{{state == 'saved'}}">
+      <img static src="/common/images/succ.png" style="margin-left: 104px;margin-bottom:24px;margin-top:100px" />
+      <text static style="width: 336px;font-size: 32px;font-weight:bold;color: white;text-align: center;margin-bottom:36px;">
+        接收成功
+      </text>
+      <text static style="width: 286px;left:25px;font-size: 24px;font-weight:bold;color: rgb(153, 153, 153);text-align: center;margin-top: 10px;padding: 10px;">
+        {{fileName}} 已保存到蓝牙传输
+      </text>
+    </div>
+
+    <!-- State: error -->
+    <div style="flex-direction: column;margin-top: 46px;width: 336px;" if="{{state == 'error'}}">
+      <img static src="/common/images/error.png" style="margin-left: 104px;margin-bottom:24px;margin-top:100px" />
+      <text static style="width: 336px;font-size: 32px;font-weight:bold;color: white;text-align: center;margin-bottom:36px;">
+        接收失败
+      </text>
+      <text static style="width: 286px;left:25px;font-size: 24px;font-weight:bold;color: rgb(153, 153, 153);text-align: center;margin-top: 10px;padding: 10px;">
+        {{errorMsg}}
+      </text>
+    </div>
+
+    <!-- Top bar -->
+    <img static src="/common/images/back.png" @click="back" style="position: absolute;left: 6px;top: 6px;width: 72px;height: 72px;"/>
+    <text style="position: absolute;left: 78px;top: 7px;width: 180px;line-height: 32px;font-weight:bold;font-size:24px;color:rgba(255,255,255,0.6);text-align:center;">
+      {{nowTime}}
+    </text>
+    <text static style="position: absolute;left: 78px;top: 35px;width: 180px;line-height: 42px;font-weight:bold;font-size:32px;color:white;text-align:center;">
+      考点传输
+    </text>
   </div>
 </template>
 
@@ -54,99 +72,76 @@
 import router from '@system.router'
 import brightness from '@system.brightness'
 import { getNowTime } from '../../common/utils/timeUtil.js'
+import interconnectManager from '../../common/utils/interconnectManager.js'
 
 export default {
   private: {
-      persent: 0,
-      state: 'wait',
-      state2: 'ing',
-      nowTime: '00:00',
-      timer: null
-  },
-
-  updateConnState() {
-    if (this.state === 'upload') return;
-    const connected = !!(globalThis.conn && globalThis.conn.connected);
-    if (connected) {
-      this.state = 'ready';
-    } else {
-      this.state = 'wait';
-    }
+    state: 'wait',
+    percent: 0,
+    fileName: '',
+    errorMsg: '',
+    nowTime: '00:00',
+    timer: null
   },
 
   onInit() {
-    this.nowTime = getNowTime();
+    this.nowTime = getNowTime()
     this.timer = setInterval(() => {
-      if (!this.$valid) return;
-      this.nowTime = getNowTime();
-      this.updateConnState();
-    }, 1000);
+      if (!this.$valid) return
+      this.nowTime = getNowTime()
+    }, 60000)
 
-    this.updateConnState();
-
-    // 监听连接事件
-    this.eventlistener = globalThis.conn.addEventListener((data) => {
-      if (!this.$valid) return;
-      if (data !== 'open') {
-        if (this.state !== 'upload') this.state = 'wait';
+    // Set up interconnect callbacks
+    interconnectManager.setCallbacks(
+      // State callback
+      (newState) => {
+        if (!this.$valid) return
+        this.state = newState
+        if (newState === 'receiving' && !this.fileName) {
+          this.fileName = ''
+        }
+      },
+      // Progress callback
+      (percent, received, total, message, fileName) => {
+        if (!this.$valid) return
+        this.percent = percent
+        if (fileName) {
+          this.fileName = fileName
+        }
       }
-    });
+    )
 
-    // 监听文件传输回调（完全复刻弦电子书 push.ux 回调逻辑）
-    globalThis.connfile.setCallback((data) => {
-      if (!this.$valid) return;
-      switch (data.msg) {
-        case 'next':
-          this.state = 'upload';
-          this.state2 = 'ing';
-          this.persent = (data.progress * 100).toFixed(0);
-          break;
-        case 'error':
-          if (this.state === 'upload') {
-            this.state2 = 'error';
-          } else {
-            this.updateConnState();
-          }
-          break;
-        case 'success':
-          if (this.state === 'upload') {
-            this.state2 = 'succ';
-          }
-          break;
-        case 'cancel':
-          this.state = 'ready';
-          break;
-        default:
-          break;
-      }
-    });
+    // Initialize the interconnect connection
+    interconnectManager.init()
+
+    // Set initial state
+    this.state = interconnectManager.getState()
   },
 
   onShow() {
     brightness.setKeepScreenOn({
       keepScreenOn: true,
-    });
-    this.updateConnState();
+    })
+    // Refresh connection state
+    this.state = interconnectManager.getState()
   },
 
   onHide() {
     brightness.setKeepScreenOn({
       keepScreenOn: false,
-    });
+    })
   },
 
   back() {
-    router.back();
+    router.back()
   },
 
   onDestroy() {
     if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
+      clearInterval(this.timer)
+      this.timer = null
     }
-    if (globalThis.conn) {
-      globalThis.conn.removeEventListener(this.eventlistener);
-    }
+    interconnectManager.destroy()
   }
 }
 </script>

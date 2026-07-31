@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     package="com.silenthong.kdreader">
 
     <!-- 权限声明（与弦电子书一致） -->
@@ -10,16 +11,11 @@
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
-    <!-- 关键：声明可查询的宿主应用包名
-         XMS Wearable SDK 通过 IPC 与以下两个宿主应用通信来发现手环设备：
-         - com.xiaomi.wearable (小米穿戴)
-         - com.mi.health (小米运动健康)
-         在 Android 11+ (API 30+) 上，如果没有此 <queries> 声明，
-         nodeApi.connectedNodes 会静默返回空列表，导致"设备找不到" -->
-    <queries>
-        <package android:name="com.xiaomi.wearable" />
-        <package android:name="com.mi.health" />
-    </queries>
+    <!-- 包可见性权限：XMS Wearable SDK 需要通过 IPC 与小米穿戴/小米运动健康通信来发现手环设备。
+         正式发布时建议改用 <queries> 声明指定包名（需 build-tools 30+），
+         调试构建使用 QUERY_ALL_PACKAGES 以兼容旧版 build-tools。 -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
 
     <application
         android:allowBackup="true"

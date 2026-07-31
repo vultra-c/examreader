@@ -14,154 +14,105 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * TXT 文件传输处理器 — 严格复刻弦电子书 "file" 协议。
+ * TXT file transfer handler - a straightforward chunked transfer protocol that
+ * matches the watch-side implementation.
  *
- * 消息路由 tag = "file"
+ * <p>All messages are JSON objects identified by their {@code "type"} field.
  *
- * 手机 → 手环（使用 "stat" 字段标识动作）：
- *   1. startTransfer    : {stat:"startTransfer", filename, total, wordCount, startFrom}
- *   2. d (数据片)        : {stat:"d", count, data}
- *                          data 为 JSON 字符串：{index, name, content, wordCount, chunkNum, totalChunks}
- *   3. chapter_complete : {stat:"chapter_complete", count}
- *   4. transfer_complete: {stat:"transfer_complete"}
- *   5. cancel            : {stat:"cancel"}
+ * <h3>Happy path</h3>
+ * <pre>
+ *   Android -&gt; Watch : {"type":"start","name":"filename","totalChunks":N,"wordCount":N}
+ *   Watch    -&gt; Android : {"type":"ready"}
+ *   Android -&gt; Watch : {"type":"chunk","index":0,"content":"text_chunk"}
+ *   Watch    -&gt; Android : {"type":"ack","index":0}
+ *   ... repeat for each chunk ...
+ *   Android -&gt; Watch : {"type":"end"}
+ *   Watch    -&gt; Android : {"type":"saved","name":"filename"}
+ * </pre>
  *
- * 手环 → 手机（使用 "type" 字段标识事件）：
- *   ready / next_chunk / chapter_chunk_complete / chapter_saved /
- *   transfer_finished / error / cancel
+ * <h3>Error / cancel</h3>
+ * <pre>
+ *   Android -&gt; Watch : {"type":"cancel"}
+ *   Watch    -&gt; Android : {"type":"error","message":"..."}
+ *   Watch    -&gt; Android : {"type":"cancelled"}
+ * </pre>
  *
- * 传输流程（单文件，total=1）：
- *   startTransfer → ready
- *   → [d × N 片, 由 next_chunk 驱动逐片发送]
- *   → chapter_chunk_complete → chapter_complete
- *   → chapter_saved → transfer_complete
- *   → transfer_finished
+ * <h3>Message routing</h3>
+ * The {@link WearableManager} routes incoming messages by their {@code "tag"} field
+ * (see {@code msg.optString("tag", "")}). Watch-side messages use {@code "type"} and
+ * carry no {@code "tag"}, so they fall through to the handler registered with the empty
+ * tag {@code ""}. Outgoing messages are sent with {@link WearableManager#sendRawMessageWithCallback}
+ * so the exact protocol payload is delivered without an injected {@code tag} field.
  */
 public class TxtTransferHandler {
 
     private static final String TAG = "TxtTransfer";
-    private static final String TAG_MSG = "file";            // 弦电子书协议 tag（非 "txt"）
-    private static final int CHUNK_SIZE = 10 * 1024;         // 10KB，与弦电子书一致
-    private static final long RESPONSE_TIMEOUT = 15000L;     // 单步响应超时 15 秒
 
-    // 单文件传输固定只有 1 个章节
-    private static final int CHAPTER_INDEX = 0;
-    private static final int TOTAL_CHAPTERS = 1;
+    /** Characters per chunk - must match the watch side. */
+    private static final int CHUNK_SIZE = 8000;
 
-    // 手机 → 手环 stat
-    private static final String STAT_START_TRANSFER = "startTransfer";
-    private static final String STAT_DATA = "d";
-    private static final String STAT_CHAPTER_COMPLETE = "chapter_complete";
-    private static final String STAT_TRANSFER_COMPLETE = "transfer_complete";
-    private static final String STAT_CANCEL = "cancel";
+    /** Per-step response timeout (start/chunk/end). */
+    private static final long RESPONSE_TIMEOUT = 15000L;
 
-    // 手环 → 手机 type
-    private static final String TYPE_READY = "ready";
-    private static final String TYPE_NEXT_CHUNK = "next_chunk";
-    private static final String TYPE_CHAPTER_CHUNK_COMPLETE = "chapter_chunk_complete";
-    private static final String TYPE_CHAPTER_SAVED = "chapter_saved";
-    private static final String TYPE_TRANSFER_FINISHED = "transfer_finished";
-    private static final String TYPE_ERROR = "error";
-    private static final String TYPE_CANCEL = "cancel";
+    // Message types (shared with the watch)
+    private static final String TYPE_START     = "start";
+    private static final String TYPE_READY     = "ready";
+    private static final String TYPE_CHUNK     = "chunk";
+    private static final String TYPE_ACK       = "ack";
+    private static final String TYPE_END       = "end";
+    private static final String TYPE_SAVED     = "saved";
+    private static final String TYPE_CANCEL    = "cancel";
+    private static final String TYPE_ERROR     = "error";
+    private static final String TYPE_CANCELLED = "cancelled";
 
     private final WearableManager conn;
 
-    // 传输上下文
+    // Transfer context
     private String pendingFileName;
     private int pendingWordCount;
-    private int currentChunkIndex;       // 当前要发送的分片序号（0-based）
-    private int totalChunks;             // 总分片数
-    private List<String> chunkList;      // 分片缓存
+    private int currentChunkIndex;   // 0-based index of the chunk currently in flight
+    private int totalChunks;
+    private List<String> chunkList;
     private TransferProgressListener progressListener;
     private Runnable responseTimeoutRunnable;
     private boolean transferring = false;
 
+    /** Progress callback for the UI layer. */
     public interface TransferProgressListener {
         void onProgress(int sent, int total, String message);
         void onSuccess(String message);
         void onError(String error);
     }
 
-    public interface TreeReceivedCallback {
-        void onTreeReceived(List<FolderNode> tree);
-        void onError(String error);
-    }
-
-    // ==================== 数据模型 ====================
-
-    public static class FolderNode {
-        public String id;
-        public String name;
-        public String type; // "folder" or "content"
-        public List<FolderNode> children = new ArrayList<>();
-
-        public void collectFolders(List<FolderNode> out, String prefix) {
-            if ("folder".equals(type)) {
-                FolderNode copy = new FolderNode();
-                copy.id = id;
-                copy.name = prefix.isEmpty() ? name : prefix + " / " + name;
-                copy.type = type;
-                out.add(copy);
-                for (FolderNode child : children) {
-                    child.collectFolders(out, copy.name);
-                }
-            }
-        }
-    }
-
-    // ==================== 构造与初始化 ====================
+    // ==================== Construction ====================
 
     public TxtTransferHandler(WearableManager conn) {
         this.conn = conn;
 
-        // 注册消息处理器 — tag="file"，与弦电子书一致
-        conn.addListener(TAG_MSG, message -> {
+        // Watch messages use "type" (no "tag"), so they are routed to the "" handler.
+        conn.addListener("", message -> {
             try {
                 JSONObject msg = new JSONObject(message);
                 String type = msg.optString("type", "");
-                handleBraceletMessage(type, msg);
+                handleWatchMessage(type, msg);
             } catch (Exception e) {
                 Log.e(TAG, "Message parse error", e);
             }
         });
     }
 
-    // ==================== 文件夹树（简化） ====================
+    // ==================== Public entry point ====================
 
     /**
-     * 弦电子书协议中不存在文件夹树请求；这里直接返回一个虚拟文件夹"蓝牙传输"（id=bt），
-     * 不向手环发送任何消息。
-     */
-    public void requestFolderTree(TreeReceivedCallback callback) {
-        List<FolderNode> tree = new ArrayList<>();
-        FolderNode root = new FolderNode();
-        root.id = "bt";
-        root.name = "蓝牙传输";
-        root.type = "folder";
-        tree.add(root);
-
-        if (callback != null) {
-            callback.onTreeReceived(tree);
-        }
-    }
-
-    // ==================== TXT 文件发送（弦电子书 file 协议） ====================
-
-    /**
-     * 发送 txt 文件内容到手环。
+     * Send a TXT file's content to the watch using the chunked transfer protocol.
      *
-     * 协议流程（单文件，total=1）：
-     *   startTransfer → ready → [d × N] → chapter_chunk_complete
-     *   → chapter_complete → chapter_saved → transfer_complete → transfer_finished
-     *
-     * @param fileName     文件名（不含 .txt 后缀）
-     * @param content      文件正文
-     * @param targetFolder 目标文件夹 ID（弦电子书协议未使用，保留以兼容调用方）
-     * @param listener     进度回调
+     * @param fileName file name without extension
+     * @param content  full text content
+     * @param listener progress callback (may be null)
      */
-    public void sendTxtFile(String fileName, String content, String targetFolder, TransferProgressListener listener) {
+    public void sendTxtFile(String fileName, String content, TransferProgressListener listener) {
         this.progressListener = listener;
-        this.pendingFileName = fileName;
+        this.pendingFileName = fileName != null ? fileName : "untitled";
         this.pendingWordCount = content != null ? content.length() : 0;
         this.chunkList = splitContent(content, CHUNK_SIZE);
         this.totalChunks = chunkList.size();
@@ -169,162 +120,108 @@ public class TxtTransferHandler {
         this.transferring = true;
 
         if (listener != null) {
-            listener.onProgress(0, totalChunks, "开始传输: " + fileName + "（共 " + totalChunks + " 片）");
+            listener.onProgress(0, totalChunks,
+                    "Starting transfer: " + pendingFileName + " (" + totalChunks + " chunks)");
         }
 
-        // 1. 发送 startTransfer
-        sendStartTransfer();
+        // Step 1: send "start" and wait for "ready".
+        sendStart();
     }
 
+    // ==================== Outgoing messages ====================
+
     /**
-     * 1. 发送 startTransfer：{stat:"startTransfer", filename, total, wordCount, startFrom}
+     * Send {"type":"start",...} and wait for the watch's "ready" response.
      */
-    private void sendStartTransfer() {
+    private void sendStart() {
         JSONObject payload = new JSONObject();
         try {
-            payload.put("stat", STAT_START_TRANSFER);
-            payload.put("filename", pendingFileName);
-            payload.put("total", TOTAL_CHAPTERS);
+            payload.put("type", TYPE_START);
+            payload.put("name", pendingFileName);
+            payload.put("totalChunks", totalChunks);
             payload.put("wordCount", pendingWordCount);
-            payload.put("startFrom", CHAPTER_INDEX);
         } catch (Exception e) {
-            fail("构建 startTransfer 失败: " + e.getMessage());
+            fail("Failed to build start message: " + e.getMessage());
             return;
         }
 
-        Log.d(TAG, ">>> startTransfer: " + pendingFileName + " wordCount=" + pendingWordCount);
-        conn.sendMessage(TAG_MSG, payload, new WearableManager.SendCallback() {
-            @Override
-            public void onSuccess() {
-                startResponseTimeout("等待手环 ready 响应超时");
-            }
-
-            @Override
-            public void onError(String error) {
-                fail("发送 startTransfer 失败: " + error);
-            }
-        });
+        Log.d(TAG, ">>> start: " + pendingFileName
+                + " chunks=" + totalChunks + " words=" + pendingWordCount);
+        sendRaw(payload, "Failed to send start message", "Timed out waiting for ready");
     }
 
     /**
-     * 2. 发送数据片：{stat:"d", count, data}
-     *    data 为 JSON 字符串 {index, name, content, wordCount, chunkNum, totalChunks}
+     * Send {"type":"chunk","index":index,"content":...} and wait for the matching "ack".
      */
-    private void sendChunk(int chunkNum) {
-        if (chunkNum >= totalChunks) {
+    private void sendChunk(int index) {
+        if (index >= totalChunks) {
             return;
         }
-        this.currentChunkIndex = chunkNum;
-        String chunkContent = chunkList.get(chunkNum);
-
-        // 构造 data 字段（JSON 字符串）
-        JSONObject dataObj = new JSONObject();
-        try {
-            dataObj.put("index", CHAPTER_INDEX);
-            dataObj.put("name", pendingFileName);
-            dataObj.put("content", chunkContent);
-            dataObj.put("wordCount", pendingWordCount);
-            dataObj.put("chunkNum", chunkNum);
-            dataObj.put("totalChunks", totalChunks);
-        } catch (Exception e) {
-            fail("构建分片数据失败: " + e.getMessage());
-            return;
-        }
+        this.currentChunkIndex = index;
+        String chunkContent = chunkList.get(index);
 
         JSONObject payload = new JSONObject();
         try {
-            payload.put("stat", STAT_DATA);
-            payload.put("count", CHAPTER_INDEX);
-            payload.put("data", dataObj.toString());
+            payload.put("type", TYPE_CHUNK);
+            payload.put("index", index);
+            payload.put("content", chunkContent);
         } catch (Exception e) {
-            fail("构建 d 消息失败: " + e.getMessage());
+            fail("Failed to build chunk message: " + e.getMessage());
             return;
         }
 
-        Log.d(TAG, ">>> d chunk " + (chunkNum + 1) + "/" + totalChunks);
+        int percent = (int) (index * 100f / Math.max(1, totalChunks));
+        Log.d(TAG, ">>> chunk " + (index + 1) + "/" + totalChunks);
         if (progressListener != null) {
-            int percent = (int) (chunkNum * 100f / Math.max(1, totalChunks));
-            progressListener.onProgress(chunkNum, totalChunks,
-                    "传输中 " + percent + "% (" + (chunkNum + 1) + "/" + totalChunks + ")");
+            progressListener.onProgress(index, totalChunks,
+                    "Transferring " + percent + "% (" + (index + 1) + "/" + totalChunks + ")");
         }
 
-        conn.sendMessage(TAG_MSG, payload, new WearableManager.SendCallback() {
-            @Override
-            public void onSuccess() {
-                startResponseTimeout("等待分片响应超时");
-            }
-
-            @Override
-            public void onError(String error) {
-                fail("发送分片 " + (chunkNum + 1) + " 失败: " + error);
-            }
-        });
+        sendRaw(payload, "Failed to send chunk " + (index + 1), "Timed out waiting for ack");
     }
 
     /**
-     * 3. 发送 chapter_complete：{stat:"chapter_complete", count}
+     * Send {"type":"end"} and wait for the watch's "saved" response.
      */
-    private void sendChapterComplete() {
+    private void sendEnd() {
         JSONObject payload = new JSONObject();
         try {
-            payload.put("stat", STAT_CHAPTER_COMPLETE);
-            payload.put("count", CHAPTER_INDEX);
+            payload.put("type", TYPE_END);
         } catch (Exception e) {
-            fail("构建 chapter_complete 失败: " + e.getMessage());
+            fail("Failed to build end message: " + e.getMessage());
             return;
         }
 
-        Log.d(TAG, ">>> chapter_complete");
+        Log.d(TAG, ">>> end");
         if (progressListener != null) {
-            progressListener.onProgress(totalChunks, totalChunks, "章节传输完成，等待手环保存...");
+            progressListener.onProgress(totalChunks, totalChunks,
+                    "Transfer complete, waiting for watch to save...");
         }
 
-        conn.sendMessage(TAG_MSG, payload, new WearableManager.SendCallback() {
-            @Override
-            public void onSuccess() {
-                startResponseTimeout("等待 chapter_saved 响应超时");
-            }
-
-            @Override
-            public void onError(String error) {
-                fail("发送 chapter_complete 失败: " + error);
-            }
-        });
+        sendRaw(payload, "Failed to send end message", "Timed out waiting for saved");
     }
 
     /**
-     * 4. 发送 transfer_complete：{stat:"transfer_complete"}
+     * Send a raw JSON payload via the WearableManager and arm the per-step timeout
+     * once the SDK confirms the bytes were handed off.
      */
-    private void sendTransferComplete() {
-        JSONObject payload = new JSONObject();
-        try {
-            payload.put("stat", STAT_TRANSFER_COMPLETE);
-        } catch (Exception e) {
-            fail("构建 transfer_complete 失败: " + e.getMessage());
-            return;
-        }
-
-        Log.d(TAG, ">>> transfer_complete");
-        if (progressListener != null) {
-            progressListener.onProgress(totalChunks, totalChunks, "传输完成，等待手环确认...");
-        }
-
-        conn.sendMessage(TAG_MSG, payload, new WearableManager.SendCallback() {
+    private void sendRaw(JSONObject payload, String sendErrorMsg, String timeoutMsg) {
+        conn.sendRawMessageWithCallback(payload.toString(), new WearableManager.SendCallback() {
             @Override
             public void onSuccess() {
-                startResponseTimeout("等待 transfer_finished 响应超时");
+                startResponseTimeout(timeoutMsg);
             }
 
             @Override
             public void onError(String error) {
-                fail("发送 transfer_complete 失败: " + error);
+                fail(sendErrorMsg + ": " + error);
             }
         });
     }
 
-    // ==================== 手环消息处理（type 字段） ====================
+    // ==================== Incoming message handling ====================
 
-    private void handleBraceletMessage(String type, JSONObject msg) {
+    private void handleWatchMessage(String type, JSONObject msg) {
         if (!transferring) {
             return;
         }
@@ -333,130 +230,88 @@ public class TxtTransferHandler {
             case TYPE_READY:
                 handleReady(msg);
                 break;
-            case TYPE_NEXT_CHUNK:
-                handleNextChunk(msg);
+            case TYPE_ACK:
+                handleAck(msg);
                 break;
-            case TYPE_CHAPTER_CHUNK_COMPLETE:
-                handleChapterChunkComplete(msg);
-                break;
-            case TYPE_CHAPTER_SAVED:
-                handleChapterSaved(msg);
-                break;
-            case TYPE_TRANSFER_FINISHED:
-                handleTransferFinished(msg);
+            case TYPE_SAVED:
+                handleSaved(msg);
                 break;
             case TYPE_ERROR:
                 handleErrorMsg(msg);
                 break;
-            case TYPE_CANCEL:
-                handleCancelMsg(msg);
+            case TYPE_CANCELLED:
+                handleCancelledMsg(msg);
                 break;
             default:
-                Log.w(TAG, "Unknown bracelet message type: " + type);
+                Log.w(TAG, "Unknown watch message type: " + type);
                 break;
         }
     }
 
-    /**
-     * ready：手环就绪，开始发送指定章节
-     */
+    /** ready: the watch is ready; begin streaming chunks from index 0. */
     private void handleReady(JSONObject msg) {
         cancelResponseTimeout();
-        int count = msg.optInt("count", CHAPTER_INDEX);
-        Log.d(TAG, "<<< ready, count=" + count + " usage=" + msg.optString("usage", ""));
-        // count 即待发送的章节序号；单文件仅 0
+        Log.d(TAG, "<<< ready");
         sendChunk(0);
     }
 
-    /**
-     * next_chunk：发送当前章节的下一片
-     */
-    private void handleNextChunk(JSONObject msg) {
+    /** ack: the watch acknowledged a chunk; send the next one or finish. */
+    private void handleAck(JSONObject msg) {
         cancelResponseTimeout();
-        Log.d(TAG, "<<< next_chunk");
+        int index = msg.optInt("index", currentChunkIndex);
+        Log.d(TAG, "<<< ack index=" + index);
         int next = currentChunkIndex + 1;
         if (next >= totalChunks) {
-            // 异常情况：已无更多分片，但手环仍要求下一片，直接收尾
-            Log.w(TAG, "next_chunk received but no more chunks; sending chapter_complete");
-            sendChapterComplete();
-            return;
+            // All chunks acknowledged - finalize the transfer.
+            sendEnd();
+        } else {
+            sendChunk(next);
         }
-        sendChunk(next);
     }
 
-    /**
-     * chapter_chunk_complete：当前章节所有分片接收完毕，发送 chapter_complete
-     */
-    private void handleChapterChunkComplete(JSONObject msg) {
-        cancelResponseTimeout();
-        Log.d(TAG, "<<< chapter_chunk_complete");
-        sendChapterComplete();
-    }
-
-    /**
-     * chapter_saved：章节已保存，发送 transfer_complete（单文件即结束）
-     */
-    private void handleChapterSaved(JSONObject msg) {
-        cancelResponseTimeout();
-        int count = msg.optInt("count", CHAPTER_INDEX);
-        int syncedCount = msg.optInt("syncedCount", TOTAL_CHAPTERS);
-        int totalCount = msg.optInt("totalCount", TOTAL_CHAPTERS);
-        int progress = msg.optInt("progress", 100);
-        Log.d(TAG, "<<< chapter_saved count=" + count + " synced=" + syncedCount
-                + "/" + totalCount + " progress=" + progress);
-        // 单文件只有 1 章，直接结束传输
-        sendTransferComplete();
-    }
-
-    /**
-     * transfer_finished：传输完成
-     */
-    private void handleTransferFinished(JSONObject msg) {
+    /** saved: the watch confirmed the file was persisted. */
+    private void handleSaved(JSONObject msg) {
         cancelResponseTimeout();
         transferring = false;
-        Log.d(TAG, "<<< transfer_finished");
+        String name = msg.optString("name", pendingFileName);
+        Log.d(TAG, "<<< saved name=" + name);
         if (progressListener != null) {
-            progressListener.onSuccess("传输完成: " + pendingFileName);
+            progressListener.onSuccess("Transfer complete: " + name);
             progressListener = null;
         }
     }
 
-    /**
-     * error：手环报错
-     */
+    /** error: the watch reported an error. */
     private void handleErrorMsg(JSONObject msg) {
         cancelResponseTimeout();
         transferring = false;
-        String message = msg.optString("message", "手环传输错误");
-        int count = msg.optInt("count", CHAPTER_INDEX);
-        Log.e(TAG, "<<< error: " + message + " (count=" + count + ")");
+        String message = msg.optString("message", "Watch transfer error");
+        Log.e(TAG, "<<< error: " + message);
         if (progressListener != null) {
-            progressListener.onError("手环错误: " + message);
+            progressListener.onError("Watch error: " + message);
             progressListener = null;
         }
     }
 
-    /**
-     * cancel：手环取消传输
-     */
-    private void handleCancelMsg(JSONObject msg) {
+    /** cancelled: the watch cancelled the transfer. */
+    private void handleCancelledMsg(JSONObject msg) {
         cancelResponseTimeout();
         transferring = false;
-        Log.d(TAG, "<<< cancel");
+        Log.d(TAG, "<<< cancelled");
         if (progressListener != null) {
-            progressListener.onError("传输已被取消");
+            progressListener.onError("Transfer cancelled by watch");
             progressListener = null;
         }
     }
 
-    // ==================== 超时管理 ====================
+    // ==================== Timeout management ====================
 
     private void startResponseTimeout(String timeoutMessage) {
         cancelResponseTimeout();
         responseTimeoutRunnable = () -> {
             Log.w(TAG, "Response timeout: " + timeoutMessage);
             transferring = false;
-            // 超时后通知手环取消本次传输
+            // Notify the watch so it can tear down its half of the transfer.
             sendCancelQuietly();
             if (progressListener != null) {
                 progressListener.onError(timeoutMessage);
@@ -474,13 +329,13 @@ public class TxtTransferHandler {
     }
 
     /**
-     * 静默发送 cancel，不等待响应
+     * Send {"type":"cancel"} without waiting for a response.
      */
     private void sendCancelQuietly() {
         try {
             JSONObject payload = new JSONObject();
-            payload.put("stat", STAT_CANCEL);
-            conn.sendMessage(TAG_MSG, payload, null);
+            payload.put("type", TYPE_CANCEL);
+            conn.sendRawMessageWithCallback(payload.toString(), null);
         } catch (Exception e) {
             Log.e(TAG, "Failed to send cancel", e);
         }
@@ -496,10 +351,12 @@ public class TxtTransferHandler {
         }
     }
 
-    // ==================== 工具方法 ====================
+    // ==================== Utilities ====================
 
     /**
-     * 将内容按指定大小切片（按字符数切，不截断 UTF-8 字符）
+     * Split content into chunks of at most {@code chunkSize} characters. Splits on
+     * UTF-16 code units (same unit the watch side counts), so the original string is
+     * restored exactly when chunks are concatenated in order.
      */
     private List<String> splitContent(String content, int chunkSize) {
         List<String> chunks = new ArrayList<>();
@@ -520,7 +377,7 @@ public class TxtTransferHandler {
     }
 
     /**
-     * 从 Uri 读取 txt 文件内容（UTF-8）
+     * Read TXT file content from a Uri (UTF-8).
      */
     public static String readTxtFromUri(Context context, Uri uri) throws Exception {
         StringBuilder sb = new StringBuilder();
@@ -536,10 +393,10 @@ public class TxtTransferHandler {
     }
 
     /**
-     * 从文件名中提取不含后缀的名称
+     * Strip the extension from a file name. Returns "untitled" when the input is null.
      */
     public static String getFileNameWithoutExtension(String fileName) {
-        if (fileName == null) return "未命名";
+        if (fileName == null) return "untitled";
         int dot = fileName.lastIndexOf('.');
         if (dot > 0) {
             return fileName.substring(0, dot);
@@ -548,7 +405,7 @@ public class TxtTransferHandler {
     }
 
     /**
-     * 取消当前传输（主动取消）
+     * Cancel the current transfer (user-initiated). Sends {"type":"cancel"} to the watch.
      */
     public void cancelTransfer() {
         if (!transferring) {
@@ -558,7 +415,7 @@ public class TxtTransferHandler {
         transferring = false;
         sendCancelQuietly();
         if (progressListener != null) {
-            progressListener.onError("传输已取消");
+            progressListener.onError("Transfer cancelled");
             progressListener = null;
         }
     }

@@ -19,53 +19,71 @@ import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
 /**
- * 手环通信管理器 — 严格复刻弦电子书 Interconn.kt + InterHandshake.kt
+ * WearableManager is the Android side of the link between this phone app and the
+ * "考点阅读器" Vela smartwatch app. It talks to the watch through the Xiaomi XMS
+ * Wearable SDK interconnect API.
  *
- * 连接流程（与弦电子书 ConnectionHandler.kt 一致）：
- *   destroy() → connect() → auth() → getAppState() → openApp() → registerListener() → handshake
+ * The watch side is built on @system.interconnect, which manages the transport
+ * automatically. Therefore the phone only needs a simple bring-up sequence:
+ *
+ *   find nodes -> request permissions -> launch the watch app at /pages/push
+ *   -> register a message listener -> send {"type":"ping"}
+ *   -> wait for {"type":"pong"} (10s timeout)
+ *
+ * Once {"type":"pong"} arrives the link is considered ready. Messages are routed
+ * by their "tag" field to the registered callbacks. Any message sent before the
+ * link is ready is queued and flushed automatically when "pong" is received.
+ *
+ * There is no custom handshake protocol, no __hs__ tag, no count cycling and no
+ * keep-alive ping loop; the interconnect API handles connection liveness.
  */
 public class WearableManager {
 
     private static final String TAG = "WearableManager";
 
-    // 握手协议常量（与弦电子书 InterHandshake.kt 一致）
-    private static final String HANDSHAKE_TAG = "__hs__";
-    private static final long HANDSHAKE_TIMEOUT = 10000L;
-    private static final long PING_INTERVAL = 5000L;
-    private static final int PHONE_VERSION_CODE = 126430;
+    /** Watch page that hosts the interconnect peer. */
+    private static final String WATCH_APP_PATH = "/pages/push";
+
+    /** Wait up to 10s for the watch to reply with {"type":"pong"}. */
+    private static final long READINESS_TIMEOUT = 10000L;
+
+    private static final String TYPE_PING = "ping";
+    private static final String TYPE_PONG = "pong";
 
     private final NodeApi nodeApi;
     private final AuthApi authApi;
     private final MessageApi messageApi;
-    private Node currentNode;
     private final Handler handler = new Handler(Looper.getMainLooper());
 
-    // 连接状态
-    private boolean connected = false;
-    private boolean isHandshaking = false;
+    private Node currentNode;
 
-    // 消息路由表 — tag → 回调
+    /** True once {"type":"pong"} has been received from the watch. */
+    private boolean connected = false;
+    /** True while we are waiting for the pong response. */
+    private boolean readinessPending = false;
+
+    /** tag -> callback routing table. */
     private final Map<String, MessageCallback> messageHandlers = new HashMap<>();
 
-    // 消息队列 — 握手完成前暂存待发送消息（复刻弦电子书 InterHandshake.kt 的 promise?.await()）
+    /** Messages sent before the link became ready; flushed on pong. */
     private final List<QueuedMessage> messageQueue = new ArrayList<>();
 
-    // 事件回调
     private ConnectionListener connectionListener;
     private MessageReceivedListener messageReceivedListener;
-    private Runnable timeoutRunnable;
-    private Runnable pingRunnable;
-    private Runnable handshakeTimeoutRunnable;
 
-    /** 排队的消息（等待握手完成后发送） */
+    private Runnable readinessTimeoutRunnable;
+
+    /** A message held until the link is ready. */
     private static class QueuedMessage {
         final String tag;
         final JSONObject payload;
         final SendCallback callback;
+
         QueuedMessage(String tag, JSONObject payload, SendCallback callback) {
             this.tag = tag;
             this.payload = payload;
@@ -106,9 +124,7 @@ public class WearableManager {
         this.messageReceivedListener = listener;
     }
 
-    /**
-     * 注册消息处理器（按 tag 分发）
-     */
+    /** Register a per-tag message handler. */
     public void addListener(String tag, MessageCallback callback) {
         messageHandlers.put(tag, callback);
     }
@@ -118,30 +134,26 @@ public class WearableManager {
     }
 
     /**
-     * 销毁当前连接（复刻弦电子书 Interconn.kt destroy()）
-     * 清理旧的 message listener，防止重复注册
+     * Tear down the current link: cancel the readiness timer, fail any queued
+     * messages, and remove the message listener from the watch node.
      */
     public void destroy() {
         connected = false;
-        isHandshaking = false;
-        if (timeoutRunnable != null) {
-            handler.removeCallbacks(timeoutRunnable);
-            timeoutRunnable = null;
+        readinessPending = false;
+
+        if (readinessTimeoutRunnable != null) {
+            handler.removeCallbacks(readinessTimeoutRunnable);
+            readinessTimeoutRunnable = null;
         }
-        if (pingRunnable != null) {
-            handler.removeCallbacks(pingRunnable);
-            pingRunnable = null;
-        }
-        if (handshakeTimeoutRunnable != null) {
-            handler.removeCallbacks(handshakeTimeoutRunnable);
-            handshakeTimeoutRunnable = null;
-        }
-        // 清空消息队列
+
         for (QueuedMessage msg : messageQueue) {
-            if (msg.callback != null) msg.callback.onError("连接已断开");
+            if (msg.callback != null) {
+                msg.callback.onError("连接已断开");
+            }
         }
         messageQueue.clear();
-        // 移除旧的 listener
+
+        // Remove the previous listener so a reconnect does not double-register.
         if (currentNode != null) {
             messageApi.removeListener(currentNode.id)
                     .addOnSuccessListener(aVoid -> {
@@ -156,20 +168,20 @@ public class WearableManager {
     }
 
     /**
-     * 连接流程（复刻弦电子书 ConnectionHandler.kt reconnect()）：
-     * destroy() → connect() → auth() → getAppState() → openApp() → registerListener() → handshake
+     * Connect to the watch.
+     *
+     * Flow: find nodes -> request permissions -> launch /pages/push
+     *      -> register listener -> ping -> wait for pong.
      */
     public void connect() {
-        // 1. 先销毁旧连接（复刻弦电子书 connection.destroy().await()）
+        // 1. Drop any previous link first.
         destroy();
 
-        handler.post(() -> {
-            if (connectionListener != null) {
-                connectionListener.onError("连接中...");
-            }
-        });
+        // Signal "connecting" through the error channel (preserves the legacy
+        // ConnectionListener contract used by the UI).
+        notifyError("连接中...");
 
-        // 2. 查找设备（复刻弦电子书 connection.connect().await()）
+        // 2. Find connected nodes.
         nodeApi.getConnectedNodes()
                 .addOnSuccessListener(new OnSuccessListener<List<Node>>() {
                     @Override
@@ -179,10 +191,8 @@ public class WearableManager {
                             return;
                         }
                         currentNode = nodes.get(0);
-                        String deviceName = currentNode.name;
-                        Log.d(TAG, "Found device: " + deviceName);
-                        // 3. 认证
-                        authAndConnect(deviceName);
+                        Log.d(TAG, "Found device: " + currentNode.name);
+                        requestPermissions(currentNode.name);
                     }
                 })
                 .addOnFailureListener(new OnFailureListener() {
@@ -193,52 +203,52 @@ public class WearableManager {
                 });
     }
 
-    private void authAndConnect(String deviceName) {
-        // 复刻弦电子书 connection.auth().await()
-        // 弦电子书 auth() 的关键行为：
-        //   checkPermissions onSuccess → 即使权限为 false 也只 requestPermission（fire-and-forget），然后立即 complete(Unit) 继续
-        //   checkPermissions onFailure → completeExceptionally，但 ConnectionHandler 会捕获并继续
-        //   即：无论权限检查结果如何，都必须继续 openApp
-        Permission[] permissions = {Permission.DEVICE_MANAGER};
+    /**
+     * Request the DEVICE_MANAGER permission (fire-and-forget), then continue.
+     * launchWearApp does not depend on the permission result, so we always
+     * proceed to the next step regardless of the outcome.
+     */
+    private void requestPermissions(final String deviceName) {
+        final Permission[] permissions = { Permission.DEVICE_MANAGER };
 
         authApi.checkPermissions(currentNode.id, permissions)
                 .addOnSuccessListener(new OnSuccessListener<boolean[]>() {
                     @Override
                     public void onSuccess(boolean[] results) {
-                        // 尝试请求缺失的权限（fire-and-forget，不等待结果）
-                        for (int i = 0; i < results.length; i++) {
-                            if (!results[i]) {
-                                authApi.requestPermission(currentNode.id, permissions[i])
-                                        .addOnFailureListener(e -> Log.w(TAG, "requestPermission failed (ignored): " + e.getMessage()));
+                        // Request any permissions that are not granted yet.
+                        List<Permission> missing = new ArrayList<>();
+                        if (results != null) {
+                            for (int i = 0; i < results.length && i < permissions.length; i++) {
+                                if (!results[i]) {
+                                    missing.add(permissions[i]);
+                                }
                             }
                         }
-                        // 无论权限是否获取成功，都继续 openApp
-                        // 弦电子书的行为：complete(Unit) 后立即 openApp().await()
-                        openWatchApp(deviceName);
+                        if (!missing.isEmpty()) {
+                            authApi.requestPermission(currentNode.id,
+                                            missing.toArray(new Permission[0]))
+                                    .addOnFailureListener(e -> Log.w(TAG,
+                                            "requestPermission failed (ignored): " + e.getMessage()));
+                        }
+                        launchWatchApp(deviceName);
                     }
                 })
                 .addOnFailureListener(new OnFailureListener() {
                     @Override
                     public void onFailure(Exception e) {
-                        // 弦电子书此处 completeExceptionally，但 ConnectionHandler 会 catch 并继续
-                        // 我们直接继续 openApp，因为 launchWearApp 不依赖 auth 权限
-                        Log.w(TAG, "checkPermissions failed (continuing to openApp): " + e.getMessage());
-                        openWatchApp(deviceName);
+                        Log.w(TAG, "checkPermissions failed (continuing): " + e.getMessage());
+                        launchWatchApp(deviceName);
                     }
                 });
     }
 
-    /**
-     * 打开手环应用（复刻弦电子书 connection.openApp().await()）
-     * launchWearApp 直接启动到 /pages/push 页面
-     */
-    private void openWatchApp(String deviceName) {
-        nodeApi.launchWearApp(currentNode.id, "/pages/push")
+    /** Launch the watch app at /pages/push. */
+    private void launchWatchApp(final String deviceName) {
+        nodeApi.launchWearApp(currentNode.id, WATCH_APP_PATH)
                 .addOnSuccessListener(new OnSuccessListener<Void>() {
                     @Override
                     public void onSuccess(Void aVoid) {
-                        Log.d(TAG, "Watch app launched at /pages/push");
-                        // 6. 注册消息监听
+                        Log.d(TAG, "Watch app launched at " + WATCH_APP_PATH);
                         registerMessageListener(deviceName);
                     }
                 })
@@ -251,54 +261,29 @@ public class WearableManager {
     }
 
     /**
-     * 注册消息监听（复刻弦电子书 connection.registerListener().await()）
+     * Register the message listener, then start the ping/pong readiness check.
      */
-    private void registerMessageListener(String deviceName) {
+    private void registerMessageListener(final String deviceName) {
         messageApi.addListener(currentNode.id, new OnMessageReceivedListener() {
             @Override
             public void onMessageReceived(String nodeId, byte[] data) {
-                String messageStr = new String(data);
+                String messageStr = new String(data, java.nio.charset.StandardCharsets.UTF_8);
                 Log.d(TAG, "<<< Received: " + messageStr);
-                resetTimeout();
-
-                try {
-                    JSONObject msg = new JSONObject(messageStr);
-                    String tag = msg.optString("tag", "");
-
-                    // 处理握手消息
-                    if (HANDSHAKE_TAG.equals(tag)) {
-                        handleHandshake(messageStr);
-                        return;
-                    }
-
-                    // 分发到注册的处理器
-                    MessageCallback cb = messageHandlers.get(tag);
-                    if (cb != null) {
-                        cb.onMessage(messageStr);
-                    }
-
-                    // 通知全局监听器
-                    if (messageReceivedListener != null) {
-                        messageReceivedListener.onReceived(tag, messageStr);
-                    }
-                } catch (Exception e) {
-                    Log.e(TAG, "Parse message error", e);
-                }
+                handleIncomingMessage(messageStr, deviceName);
             }
         }).addOnSuccessListener(new OnSuccessListener<Void>() {
             @Override
             public void onSuccess(Void aVoid) {
-                Log.d(TAG, "Listener registered");
-                // 7. 开始握手
-                startHandshake(deviceName);
+                Log.d(TAG, "Message listener registered");
+                startReadinessCheck(deviceName);
             }
         }).addOnFailureListener(new OnFailureListener() {
             @Override
             public void onFailure(Exception e) {
                 String msg = e.getMessage() != null ? e.getMessage() : "";
                 if (msg.contains("You have registered")) {
-                    Log.w(TAG, "Listener already registered, continue");
-                    startHandshake(deviceName);
+                    Log.w(TAG, "Listener already registered, continuing");
+                    startReadinessCheck(deviceName);
                 } else {
                     notifyError("注册消息监听失败: " + e.getMessage());
                 }
@@ -314,79 +299,96 @@ public class WearableManager {
         });
     }
 
-    // ==================== 握手协议（复刻弦电子书 InterHandshake.kt） ====================
+    // ==================== Readiness check (ping / pong) ====================
 
     /**
-     * 开始握手（复刻弦电子书 InterHandshake.kt init block）
-     * 发送初始握手包 {tag:"__hs__", count:0, version:PHONE_VERSION_CODE}
+     * Send {"type":"ping"} and wait up to READINESS_TIMEOUT for
+     * {"type":"pong"}. When pong arrives, the link becomes ready and any
+     * queued messages are flushed. If pong does not arrive in time, the
+     * pending messages are failed and an error is reported.
      */
-    private void startHandshake(String deviceName) {
-        Log.d(TAG, "Starting handshake with " + deviceName);
-        isHandshaking = true;
+    private void startReadinessCheck(final String deviceName) {
+        readinessPending = true;
 
-        // 发送初始握手包
-        sendRawMessage("{\"tag\":\"" + HANDSHAKE_TAG + "\",\"count\":0,\"version\":" + PHONE_VERSION_CODE + "}");
+        try {
+            JSONObject ping = new JSONObject();
+            ping.put("type", TYPE_PING);
+            sendRawMessage(ping.toString());
+            Log.d(TAG, ">>> Readiness ping sent");
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to build/send ping", e);
+        }
 
-        // 设置握手超时（复刻弦电子书 InterHandshake.kt timeoutCb）
-        if (handshakeTimeoutRunnable != null) handler.removeCallbacks(handshakeTimeoutRunnable);
-        handshakeTimeoutRunnable = () -> {
-            if (!connected) {
-                isHandshaking = false;
-                Log.w(TAG, "Handshake timeout - device did not respond");
-                handler.post(() -> {
-                    if (connectionListener != null) {
-                        connectionListener.onError("握手超时，请确保手环上已打开考点阅读器");
-                    }
-                });
+        if (readinessTimeoutRunnable != null) {
+            handler.removeCallbacks(readinessTimeoutRunnable);
+        }
+        readinessTimeoutRunnable = () -> {
+            if (!readinessPending) {
+                return;
             }
+            readinessPending = false;
+            Log.w(TAG, "Readiness timeout - no pong from watch");
+            for (QueuedMessage msg : messageQueue) {
+                if (msg.callback != null) {
+                    msg.callback.onError("连接就绪超时");
+                }
+            }
+            messageQueue.clear();
+            handler.post(() -> {
+                if (connectionListener != null) {
+                    connectionListener.onError(
+                            "连接超时，请确保手环上已打开考点阅读器");
+                }
+            });
         };
-        handler.postDelayed(handshakeTimeoutRunnable, HANDSHAKE_TIMEOUT);
+        handler.postDelayed(readinessTimeoutRunnable, READINESS_TIMEOUT);
     }
 
-    /**
-     * 处理握手消息（复刻弦电子书 InterHandshake.kt addListener(TYPE)）
-     */
-    private void handleHandshake(String payload) {
+    /** Dispatch a message received from the watch. */
+    private void handleIncomingMessage(String messageStr, String deviceName) {
         try {
-            JSONObject data = new JSONObject(payload);
-            int count = data.optInt("count", 0);
+            JSONObject msg = new JSONObject(messageStr);
+            String type = msg.optString("type", "");
 
-            // 只有 count > 0 才表示对端收到了我们的握手包
-            if (count > 0 && !connected) {
-                onHandshakeComplete(currentNode != null ? currentNode.name : "手环");
+            // 1. Readiness response: {"type":"pong"}.
+            if (TYPE_PONG.equals(type)) {
+                onReadinessComplete(deviceName);
+                return;
             }
 
-            // 回复握手（最多到 count=3，与弦电子书一致）
-            if (count < 3) {
-                sendRawMessage("{\"tag\":\"" + HANDSHAKE_TAG + "\",\"count\":" + (count + 1) + ",\"version\":" + PHONE_VERSION_CODE + "}");
+            // 2. Route by tag to the registered handler.
+            String tag = msg.optString("tag", "");
+            MessageCallback cb = messageHandlers.get(tag);
+            if (cb != null) {
+                cb.onMessage(messageStr);
+            }
+
+            // 3. Notify the global listener.
+            if (messageReceivedListener != null) {
+                messageReceivedListener.onReceived(tag, messageStr);
             }
         } catch (Exception e) {
-            Log.e(TAG, "Handshake parse error", e);
+            Log.e(TAG, "Parse message error", e);
         }
     }
 
-    /**
-     * 握手完成（复刻弦电子书 InterHandshake.kt onConnected）
-     */
-    private void onHandshakeComplete(String deviceName) {
+    /** {"type":"pong"} received - the link is ready. */
+    private void onReadinessComplete(String deviceName) {
+        if (!readinessPending) {
+            // Duplicate or late pong after timeout; ignore.
+            return;
+        }
+        readinessPending = false;
         connected = true;
-        isHandshaking = false;
 
-        // 取消握手超时
-        if (handshakeTimeoutRunnable != null) {
-            handler.removeCallbacks(handshakeTimeoutRunnable);
-            handshakeTimeoutRunnable = null;
+        if (readinessTimeoutRunnable != null) {
+            handler.removeCallbacks(readinessTimeoutRunnable);
+            readinessTimeoutRunnable = null;
         }
 
-        // 启动 ping 保活
-        startPing();
-
-        // 启动连接超时检测
-        resetTimeout();
-
-        // 处理握手期间排队的消息（复刻弦电子书 promise resolve 后继续发送的逻辑）
+        // Flush messages that were queued before the link came up.
         if (!messageQueue.isEmpty()) {
-            Log.d(TAG, "Processing " + messageQueue.size() + " queued messages");
+            Log.d(TAG, "Flushing " + messageQueue.size() + " queued messages");
             List<QueuedMessage> queued = new ArrayList<>(messageQueue);
             messageQueue.clear();
             for (QueuedMessage msg : queued) {
@@ -394,111 +396,79 @@ public class WearableManager {
             }
         }
 
+        final String name = (deviceName != null && !deviceName.isEmpty()) ? deviceName : "watch";
         handler.post(() -> {
             if (connectionListener != null) {
-                connectionListener.onConnected(deviceName);
+                connectionListener.onConnected(name);
             }
         });
     }
 
-    /**
-     * 启动 ping 保活（复刻弦电子书 InterHandshake.kt startPing()）
-     */
-    private void startPing() {
-        if (pingRunnable != null) handler.removeCallbacks(pingRunnable);
-        pingRunnable = new Runnable() {
-            @Override
-            public void run() {
-                if (connected) {
-                    sendRawMessage("{\"tag\":\"" + HANDSHAKE_TAG + "\",\"count\":0,\"version\":" + PHONE_VERSION_CODE + "}");
-                    handler.postDelayed(this, PING_INTERVAL);
-                }
-            }
-        };
-        handler.postDelayed(pingRunnable, PING_INTERVAL);
-    }
+    // ==================== Sending messages ====================
 
     /**
-     * 重置连接超时（复刻弦电子书 InterHandshake.kt resetTimeout()）
-     */
-    private void resetTimeout() {
-        if (timeoutRunnable != null) handler.removeCallbacks(timeoutRunnable);
-        timeoutRunnable = () -> {
-            Log.w(TAG, "Connection timeout");
-            connected = false;
-            // 清空消息队列并通知错误
-            for (QueuedMessage msg : messageQueue) {
-                if (msg.callback != null) msg.callback.onError("连接超时");
-            }
-            messageQueue.clear();
-            handler.post(() -> {
-                if (connectionListener != null) {
-                    connectionListener.onDisconnected();
-                }
-            });
-        };
-        handler.postDelayed(timeoutRunnable, HANDSHAKE_TIMEOUT);
-    }
-
-    // ==================== 消息发送（复刻弦电子书 InterHandshake.kt sendMessage） ====================
-
-    /**
-     * 发送 JSON 消息到手环（自动包裹 tag）
-     * 若握手未完成，将消息入队等待（复刻弦电子书 InterHandshake.kt 的 promise?.await()）
+     * Send a JSON message to the watch, wrapping the payload with its tag.
+     *
+     * If the link is not ready yet, the message is queued and delivered
+     * automatically once {"type":"pong"} is received.
      */
     public void sendMessage(String tag, JSONObject payload, SendCallback callback) {
         try {
             if (!connected) {
-                // 握手未完成，将消息入队等待
                 messageQueue.add(new QueuedMessage(tag, payload, callback));
-                Log.d(TAG, "Queued message (waiting for handshake): " + tag + ", queue size=" + messageQueue.size());
+                Log.d(TAG, "Queued message (waiting for pong): " + tag
+                        + ", queue size=" + messageQueue.size());
                 return;
             }
             JSONObject message = new JSONObject();
-            // 合并 payload 到 message
-            for (java.util.Iterator<String> it = payload.keys(); it.hasNext(); ) {
+            Iterator<String> it = payload.keys();
+            while (it.hasNext()) {
                 String key = it.next();
                 message.put(key, payload.get(key));
             }
             message.put("tag", tag);
             sendRawMessageWithCallback(message.toString(), callback);
         } catch (Exception e) {
-            if (callback != null) callback.onError(e.getMessage());
+            if (callback != null) {
+                callback.onError(e.getMessage());
+            }
         }
     }
 
-    /**
-     * 直接发送原始字符串消息
-     */
+    /** Send a raw string to the watch with a completion callback. */
     public void sendRawMessageWithCallback(String message, SendCallback callback) {
         Log.d(TAG, ">>> Send: " + message);
         if (currentNode == null) {
-            if (callback != null) callback.onError("设备未连接");
+            if (callback != null) {
+                callback.onError("设备未连接");
+            }
             return;
         }
-        messageApi.sendMessage(currentNode.id, message.getBytes())
+        messageApi.sendMessage(currentNode.id, message.getBytes(java.nio.charset.StandardCharsets.UTF_8))
                 .addOnSuccessListener(new OnSuccessListener<Void>() {
                     @Override
                     public void onSuccess(Void aVoid) {
-                        if (callback != null) callback.onSuccess();
+                        if (callback != null) {
+                            callback.onSuccess();
+                        }
                     }
                 })
                 .addOnFailureListener(new OnFailureListener() {
                     @Override
                     public void onFailure(Exception e) {
-                        if (callback != null) callback.onError(e.getMessage());
+                        if (callback != null) {
+                            callback.onError(e.getMessage());
+                        }
                     }
                 });
     }
 
-    /**
-     * 发送原始字符串消息（内部用，无回调）
-     */
+    /** Internal fire-and-forget raw send. */
     private void sendRawMessage(String message) {
         sendRawMessageWithCallback(message, null);
     }
 
-    // ==================== 状态查询 ====================
+    // ==================== Status ====================
 
     public Handler getHandler() {
         return handler;

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 禁用：灰色，避免与可点击状态混淆 -->
+    <item android:state_enabled="false" android:color="#BDBDBD" />
+    <!-- 可用：Material 蓝色主色 -->
+    <item android:color="#1976D2" />
+</selector>
