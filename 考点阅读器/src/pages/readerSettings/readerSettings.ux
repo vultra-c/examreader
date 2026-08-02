@@ -2,7 +2,7 @@
   <div class="page" style="flex-direction: column;">
 
     <list class="list">
-      <!-- 搜索分区（最上方） -->
+      <!-- 搜索分区 -->
       <list-item class="item" style="padding: 7px 16px; height: 50px;" type="tip">
         <text class="section-title" static>搜索</text>
       </list-item>
@@ -18,7 +18,7 @@
       <list-item class="item" style="padding: 7px 16px; height: 50px;" type="tip">
         <text class="section-title" static>阅读导航</text>
       </list-item>
-      <list-item class="item" @click="goPageJump" type="item">
+      <list-item class="item" @click="goPageJump" if="{{readingMode !== 'seamless'}}" type="item">
         <div class="item-content">
           <text class="itemtext" static>按页数跳转</text>
           <text class="itemtext2" static>跳转到指定页码</text>
@@ -104,6 +104,7 @@ export default {
     fontSizeValue: 26,
     lineHeightValue: 30,
     keepScreenOn: false,
+    readingMode: 'paginated',
     contentPath: '',
     contentName: '阅读设置'
   },
@@ -179,6 +180,17 @@ export default {
       fail: () => {
         if (!this.$valid) return
         this.keepScreenOn = false
+      }
+    })
+    storage.get({
+      key: 'KD_READING_MODE',
+      success: (data) => {
+        if (!this.$valid) return
+        this.readingMode = data === 'seamless' ? 'seamless' : 'paginated'
+      },
+      fail: () => {
+        if (!this.$valid) return
+        this.readingMode = 'paginated'
       }
     })
   },

@@ -30,20 +30,18 @@
 
 <script>
 import router from '@system.router'
+import storage from '@system.storage'
 import dataManager from '../../common/utils/dataManager.js'
-import { getNowTime } from '../../common/utils/timeUtil.js'
+import { getFormattedTimeNow } from '../../common/utils/timeUtil.js'
 
 export default {
   private: {
     nowTime: '00:00',
     timer: null,
+    timeFormat: '24h',
     pageName: '',
     allItems: [],
     visibleItems: [],
-    currentPage: 0,
-    totalPages: 1,
-    totalItems: 0,
-    pageSize: 3,
     isNavigating: false,
     longPressTriggered: false
   },
@@ -52,20 +50,36 @@ export default {
   },
 
   onInit() {
-    this.nowTime = getNowTime()
+    this.loadTimeFormat()
     this.timer = setInterval(() => {
       if (this.$valid) {
-        this.nowTime = getNowTime()
+        this.nowTime = getFormattedTimeNow(this.timeFormat)
       }
     }, 60000)
     // 设置页面名称为当前文件夹名
     this.pageName = dataManager.getNodeName(this.path) || '文件夹'
   },
 
+  loadTimeFormat() {
+    storage.get({
+      key: 'KD_TIME_FORMAT',
+      success: (data) => {
+        if (!this.$valid) return
+        if (data) {
+          this.timeFormat = data
+        }
+        this.nowTime = getFormattedTimeNow(this.timeFormat)
+      },
+      fail: () => {
+        if (!this.$valid) return
+        this.nowTime = getFormattedTimeNow(this.timeFormat)
+      }
+    })
+  },
+
   onShow() {
     this.isNavigating = false
     this.longPressTriggered = false
-    this.currentPage = 0
     this.loadData()
   },
 
@@ -80,16 +94,7 @@ export default {
     const children = await dataManager.getVisibleChildren(this.path)
     if (!this.$valid) return
     this.allItems = children || []
-    this.totalItems = this.allItems.length
-    this.loadPage(this.currentPage)
-  },
-
-  loadPage(page) {
-    this.totalPages = Math.ceil(this.allItems.length / this.pageSize) || 1
-    let safePage = Math.max(0, Math.min(page, this.totalPages - 1))
-    const start = safePage * this.pageSize
-    this.visibleItems = this.allItems.slice(start, start + this.pageSize)
-    this.currentPage = safePage
+    this.visibleItems = this.allItems
   },
 
   onItemClick(item) {
@@ -101,8 +106,8 @@ export default {
     }
     this.isNavigating = true
 
-    // 蓝牙传输文件夹：直接用 item.id 作为路径
-    if (this.path === 'bt') {
+    // 子文件夹内容：直接用 item.id 作为路径
+    if (this.path && this.path.startsWith('bt_')) {
       if (item.type === 'folder') {
         router.push({ uri: '/pages/subfolder', params: { path: item.id } })
       } else {
@@ -152,8 +157,8 @@ export default {
     this.longPressTriggered = true
     this.isNavigating = true
 
-    // 蓝牙传输文件夹：用 item.id 作为路径
-    if (this.path === 'bt') {
+    // 子文件夹内容：用 item.id 作为路径
+    if (this.path && this.path.startsWith('bt_')) {
       router.push({
         uri: '/pages/deleteConfirm',
         params: {

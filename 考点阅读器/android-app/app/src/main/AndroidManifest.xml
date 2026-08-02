@@ -11,11 +11,12 @@
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
-    <!-- 包可见性权限：XMS Wearable SDK 需要通过 IPC 与小米穿戴/小米运动健康通信来发现手环设备。
-         正式发布时建议改用 <queries> 声明指定包名（需 build-tools 30+），
-         调试构建使用 QUERY_ALL_PACKAGES 以兼容旧版 build-tools。 -->
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
-        tools:ignore="QueryAllPackagesPermission" />
+    <!-- 包可见性：XMS Wearable SDK 需要通过 IPC 与小米穿戴/小米运动健康通信来发现手环设备。
+         使用 <queries> 声明指定包名，与官方 demo AAR 中的声明一致。 -->
+    <queries>
+        <package android:name="com.xiaomi.wearable" />
+        <package android:name="com.mi.health" />
+    </queries>
 
     <application
         android:allowBackup="true"

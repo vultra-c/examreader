@@ -17,79 +17,51 @@ import com.xiaomi.xms.wearable.tasks.OnSuccessListener;
 
 import org.json.JSONObject;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * WearableManager is the Android side of the link between this phone app and the
- * "考点阅读器" Vela smartwatch app. It talks to the watch through the Xiaomi XMS
- * Wearable SDK interconnect API.
+ * WearableManager — Android side of the interconnect link.
  *
- * The watch side is built on @system.interconnect, which manages the transport
- * automatically. Therefore the phone only needs a simple bring-up sequence:
+ * Matches the official XMS Wearable demo flow:
+ *   1. Finds connected nodes
+ *    2. Requests DEVICE_MANAGER + NOTIFY permissions
+ *    3. Launches the watch app via launchWearApp
+ *    4. Registers a message listener
+ *    5. Marks as connected
  *
- *   find nodes -> request permissions -> launch the watch app at /pages/push
- *   -> register a message listener -> send {"type":"ping"}
- *   -> wait for {"type":"pong"} (10s timeout)
- *
- * Once {"type":"pong"} arrives the link is considered ready. Messages are routed
- * by their "tag" field to the registered callbacks. Any message sent before the
- * link is ready is queued and flushed automatically when "pong" is received.
- *
- * There is no custom handshake protocol, no __hs__ tag, no count cycling and no
- * keep-alive ping loop; the interconnect API handles connection liveness.
+ * Tag-based routing is kept for the file transfer protocol.
  */
 public class WearableManager {
 
     private static final String TAG = "WearableManager";
 
-    /** Watch page that hosts the interconnect peer. */
-    private static final String WATCH_APP_PATH = "/pages/push";
+    /** Connection timeout in milliseconds. */
+    private static final long CONNECT_TIMEOUT = 15000L;
 
-    /** Wait up to 10s for the watch to reply with {"type":"pong"}. */
-    private static final long READINESS_TIMEOUT = 10000L;
+    /** File transfer tag used by interconnfile.js. */
+    public static final String TAG_FILE = "file";
 
-    private static final String TYPE_PING = "ping";
-    private static final String TYPE_PONG = "pong";
+    /** Tree sync tag used for folder/node synchronization. */
+    public static final String TAG_TREE = "tree";
 
     private final NodeApi nodeApi;
     private final AuthApi authApi;
     private final MessageApi messageApi;
     private final Handler handler = new Handler(Looper.getMainLooper());
 
-    private Node currentNode;
+    private volatile Node currentNode;
+    private volatile boolean connected = false;
+    private volatile boolean destroyed = false;
+    private volatile ConnectionState connectionState = ConnectionState.DISCONNECTED;
+    private Runnable connectTimeoutRunnable;
 
-    /** True once {"type":"pong"} has been received from the watch. */
-    private boolean connected = false;
-    /** True while we are waiting for the pong response. */
-    private boolean readinessPending = false;
-
-    /** tag -> callback routing table. */
-    private final Map<String, MessageCallback> messageHandlers = new HashMap<>();
-
-    /** Messages sent before the link became ready; flushed on pong. */
-    private final List<QueuedMessage> messageQueue = new ArrayList<>();
+    /** tag -> callback routing table. Thread-safe for concurrent access. */
+    private final ConcurrentHashMap<String, MessageCallback> messageHandlers = new ConcurrentHashMap<>();
 
     private ConnectionListener connectionListener;
-    private MessageReceivedListener messageReceivedListener;
-
-    private Runnable readinessTimeoutRunnable;
-
-    /** A message held until the link is ready. */
-    private static class QueuedMessage {
-        final String tag;
-        final JSONObject payload;
-        final SendCallback callback;
-
-        QueuedMessage(String tag, JSONObject payload, SendCallback callback) {
-            this.tag = tag;
-            this.payload = payload;
-            this.callback = callback;
-        }
-    }
 
     public interface ConnectionListener {
         void onConnected(String deviceName);
@@ -97,12 +69,16 @@ public class WearableManager {
         void onError(String error);
     }
 
-    public interface MessageCallback {
-        void onMessage(String message);
+    /** Connection state enumeration. */
+    public enum ConnectionState {
+        DISCONNECTED,
+        CONNECTING,
+        CONNECTED,
+        ERROR
     }
 
-    public interface MessageReceivedListener {
-        void onReceived(String tag, String message);
+    public interface MessageCallback {
+        void onMessage(String message);
     }
 
     public interface SendCallback {
@@ -120,10 +96,6 @@ public class WearableManager {
         this.connectionListener = listener;
     }
 
-    public void setMessageReceivedListener(MessageReceivedListener listener) {
-        this.messageReceivedListener = listener;
-    }
-
     /** Register a per-tag message handler. */
     public void addListener(String tag, MessageCallback callback) {
         messageHandlers.put(tag, callback);
@@ -133,89 +105,166 @@ public class WearableManager {
         messageHandlers.remove(tag);
     }
 
+    public boolean isConnected() {
+        return connected && currentNode != null;
+    }
+
+    /** Return the current connection state. */
+    public ConnectionState getConnectionState() {
+        return connectionState;
+    }
+
+    public Handler getHandler() {
+        return handler;
+    }
+
     /**
-     * Tear down the current link: cancel the readiness timer, fail any queued
-     * messages, and remove the message listener from the watch node.
+     * Tear down: null currentNode synchronously FIRST, then async remove
+     * the listener. This prevents the race where a stale removeListener
+     * callback nulls a newly-assigned currentNode.
      */
     public void destroy() {
+        destroyed = true;
         connected = false;
-        readinessPending = false;
+        connectionState = ConnectionState.DISCONNECTED;
+        cancelConnectTimeout();
 
-        if (readinessTimeoutRunnable != null) {
-            handler.removeCallbacks(readinessTimeoutRunnable);
-            readinessTimeoutRunnable = null;
-        }
+        final Node oldNode = currentNode;
+        currentNode = null;
 
-        for (QueuedMessage msg : messageQueue) {
-            if (msg.callback != null) {
-                msg.callback.onError("连接已断开");
+        if (oldNode != null) {
+            try {
+                messageApi.removeListener(oldNode.id)
+                        .addOnSuccessListener(aVoid ->
+                                Log.d(TAG, "Previous listener removed"))
+                        .addOnFailureListener(e ->
+                                Log.w(TAG, "Failed to remove listener: " + e.getMessage()));
+            } catch (Exception e) {
+                Log.w(TAG, "removeListener exception: " + e.getMessage());
             }
-        }
-        messageQueue.clear();
-
-        // Remove the previous listener so a reconnect does not double-register.
-        if (currentNode != null) {
-            messageApi.removeListener(currentNode.id)
-                    .addOnSuccessListener(aVoid -> {
-                        Log.d(TAG, "Previous listener removed");
-                        currentNode = null;
-                    })
-                    .addOnFailureListener(e -> {
-                        Log.w(TAG, "Failed to remove previous listener: " + e.getMessage());
-                        currentNode = null;
-                    });
         }
     }
 
     /**
      * Connect to the watch.
      *
-     * Flow: find nodes -> request permissions -> launch /pages/push
-     *      -> register listener -> ping -> wait for pong.
+     * Flow: find nodes → request permissions → launch watch app → register listener → connected
+     *
+     * Matches the official XMS Wearable demo, which calls launchWearApp
+     * to ensure the watch quick app is running before communication.
      */
     public void connect() {
-        // 1. Drop any previous link first.
-        destroy();
+        destroyed = false;
 
-        // Signal "connecting" through the error channel (preserves the legacy
-        // ConnectionListener contract used by the UI).
+        // Drop any previous link first.
+        final Node oldNode = currentNode;
+        currentNode = null;
+        connected = false;
+
+        if (oldNode != null) {
+            try {
+                messageApi.removeListener(oldNode.id)
+                        .addOnSuccessListener(aVoid ->
+                                Log.d(TAG, "Old listener removed"))
+                        .addOnFailureListener(e ->
+                                Log.w(TAG, "Old removeListener failed: " + e.getMessage()));
+            } catch (Exception e) {
+                Log.w(TAG, "removeListener exception: " + e.getMessage());
+            }
+        }
+
+        // Signal "connecting".
+        connectionState = ConnectionState.CONNECTING;
         notifyError("连接中...");
 
-        // 2. Find connected nodes.
+        // Start the connection timeout — if we don't connect within
+        // CONNECT_TIMEOUT ms, fire an error.
+        startConnectTimeout();
+
+        // Find connected nodes.
         nodeApi.getConnectedNodes()
                 .addOnSuccessListener(new OnSuccessListener<List<Node>>() {
                     @Override
                     public void onSuccess(List<Node> nodes) {
+                        if (destroyed) return;
                         if (nodes == null || nodes.isEmpty()) {
                             notifyError("未找到设备！请检查小米运动健康是否已连接");
                             return;
                         }
-                        currentNode = nodes.get(0);
-                        Log.d(TAG, "Found device: " + currentNode.name);
-                        requestPermissions(currentNode.name);
+                        Node node = nodes.get(0);
+                        if (node == null) {
+                            notifyError("设备信息异常");
+                            return;
+                        }
+                        currentNode = node;
+                        Log.d(TAG, "Found device: " + node.name);
+                        requestPermissions(node.name);
                     }
                 })
                 .addOnFailureListener(new OnFailureListener() {
                     @Override
                     public void onFailure(Exception e) {
+                        if (destroyed) return;
+                        Log.e(TAG, "getConnectedNodes failed", e);
                         notifyError("获取设备列表失败，请检查小米运动健康是否已连接");
                     }
                 });
     }
 
     /**
-     * Request the DEVICE_MANAGER permission (fire-and-forget), then continue.
-     * launchWearApp does not depend on the permission result, so we always
-     * proceed to the next step regardless of the outcome.
+     * Launch the watch app — matches the official demo's launchWearApp call.
+     * After launching, register the message listener.
+     */
+    private void launchWatchApp(final String deviceName) {
+        if (destroyed || currentNode == null) {
+            notifyError("设备未连接");
+            return;
+        }
+
+        final String nodeId = currentNode.id;
+
+        // Launch the watch app to its entry page.
+        // The official demo uses nodeApi.launchWearApp(node.id, "/home").
+        // Our app's entry page is "pages/index".
+        nodeApi.launchWearApp(nodeId, "/pages/index")
+                .addOnSuccessListener(new OnSuccessListener<Void>() {
+                    @Override
+                    public void onSuccess(Void aVoid) {
+                        if (destroyed || currentNode == null) return;
+                        Log.d(TAG, "Watch app launched successfully");
+                        registerMessageListener(deviceName);
+                    }
+                })
+                .addOnFailureListener(new OnFailureListener() {
+                    @Override
+                    public void onFailure(Exception e) {
+                        if (destroyed) return;
+                        Log.w(TAG, "launchWearApp failed: " + e.getMessage()
+                                + " — continuing with listener registration anyway");
+                        // Even if launchWearApp fails (app may already be running),
+                        // proceed to register the message listener.
+                        registerMessageListener(deviceName);
+                    }
+                });
+    }
+
+    /**
+     * Request DEVICE_MANAGER and NOTIFY permissions.
      */
     private void requestPermissions(final String deviceName) {
-        final Permission[] permissions = { Permission.DEVICE_MANAGER };
+        if (destroyed || currentNode == null) {
+            notifyError("设备未连接");
+            return;
+        }
 
-        authApi.checkPermissions(currentNode.id, permissions)
+        final Permission[] permissions = { Permission.DEVICE_MANAGER, Permission.NOTIFY };
+        final String nodeId = currentNode.id;
+
+        authApi.checkPermissions(nodeId, permissions)
                 .addOnSuccessListener(new OnSuccessListener<boolean[]>() {
                     @Override
                     public void onSuccess(boolean[] results) {
-                        // Request any permissions that are not granted yet.
+                        if (destroyed || currentNode == null) return;
                         List<Permission> missing = new ArrayList<>();
                         if (results != null) {
                             for (int i = 0; i < results.length && i < permissions.length; i++) {
@@ -225,229 +274,176 @@ public class WearableManager {
                             }
                         }
                         if (!missing.isEmpty()) {
-                            authApi.requestPermission(currentNode.id,
+                            authApi.requestPermission(nodeId,
                                             missing.toArray(new Permission[0]))
-                                    .addOnFailureListener(e -> Log.w(TAG,
-                                            "requestPermission failed (ignored): " + e.getMessage()));
+                                    .addOnSuccessListener(granted -> {
+                                        Log.d(TAG, "Permissions granted");
+                                        launchWatchApp(deviceName);
+                                    })
+                                    .addOnFailureListener(e -> {
+                                        Log.w(TAG, "requestPermission failed: " + e.getMessage());
+                                        launchWatchApp(deviceName);
+                                    });
+                        } else {
+                            launchWatchApp(deviceName);
                         }
-                        launchWatchApp(deviceName);
                     }
                 })
                 .addOnFailureListener(new OnFailureListener() {
                     @Override
                     public void onFailure(Exception e) {
-                        Log.w(TAG, "checkPermissions failed (continuing): " + e.getMessage());
+                        if (destroyed || currentNode == null) return;
+                        Log.w(TAG, "checkPermissions failed: " + e.getMessage());
                         launchWatchApp(deviceName);
-                    }
-                });
-    }
-
-    /** Launch the watch app at /pages/push. */
-    private void launchWatchApp(final String deviceName) {
-        nodeApi.launchWearApp(currentNode.id, WATCH_APP_PATH)
-                .addOnSuccessListener(new OnSuccessListener<Void>() {
-                    @Override
-                    public void onSuccess(Void aVoid) {
-                        Log.d(TAG, "Watch app launched at " + WATCH_APP_PATH);
-                        registerMessageListener(deviceName);
-                    }
-                })
-                .addOnFailureListener(new OnFailureListener() {
-                    @Override
-                    public void onFailure(Exception e) {
-                        notifyError("打开手环应用失败: " + e.getMessage());
                     }
                 });
     }
 
     /**
-     * Register the message listener, then start the ping/pong readiness check.
+     * Register the message listener. Once registered, we are connected.
      */
     private void registerMessageListener(final String deviceName) {
-        messageApi.addListener(currentNode.id, new OnMessageReceivedListener() {
+        if (destroyed || currentNode == null) {
+            notifyError("设备未连接");
+            return;
+        }
+
+        final String nodeId = currentNode.id;
+
+        messageApi.addListener(nodeId, new OnMessageReceivedListener() {
             @Override
-            public void onMessageReceived(String nodeId, byte[] data) {
-                String messageStr = new String(data, java.nio.charset.StandardCharsets.UTF_8);
+            public void onMessageReceived(String did, byte[] data) {
+                if (data == null) return;
+                String messageStr = new String(data, StandardCharsets.UTF_8);
                 Log.d(TAG, "<<< Received: " + messageStr);
-                handleIncomingMessage(messageStr, deviceName);
+                handleIncomingMessage(messageStr);
             }
         }).addOnSuccessListener(new OnSuccessListener<Void>() {
             @Override
             public void onSuccess(Void aVoid) {
-                Log.d(TAG, "Message listener registered");
-                startReadinessCheck(deviceName);
+                if (destroyed || currentNode == null) return;
+                Log.d(TAG, "Message listener registered — connected!");
+                connected = true;
+                notifyConnected(deviceName);
             }
         }).addOnFailureListener(new OnFailureListener() {
             @Override
             public void onFailure(Exception e) {
+                if (destroyed) return;
                 String msg = e.getMessage() != null ? e.getMessage() : "";
-                if (msg.contains("You have registered")) {
-                    Log.w(TAG, "Listener already registered, continuing");
-                    startReadinessCheck(deviceName);
+                if (msg.contains("You have registered") || msg.contains("already")) {
+                    Log.w(TAG, "Listener already registered — connected!");
+                    connected = true;
+                    notifyConnected(deviceName);
                 } else {
-                    notifyError("注册消息监听失败: " + e.getMessage());
+                    notifyError("注册消息监听失败: " + msg);
                 }
+            }
+        });
+    }
+
+    /**
+     * Dispatch a message received from the watch.
+     * Routes by "tag" field: "file" for transfer, etc.
+     * Called on a background SDK thread — must be thread-safe.
+     */
+    private void handleIncomingMessage(String messageStr) {
+        if (destroyed) return;
+        try {
+            JSONObject msg = new JSONObject(messageStr);
+            String tag = msg.optString("tag", "");
+
+            // Route by tag to the registered handler
+            MessageCallback callback = messageHandlers.get(tag);
+            if (callback != null) {
+                callback.onMessage(messageStr);
+            } else {
+                Log.w(TAG, "No handler for tag: " + tag + " (message: " + messageStr + ")");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to parse message: " + messageStr, e);
+        }
+    }
+
+    private void notifyConnected(String deviceName) {
+        cancelConnectTimeout();
+        connectionState = ConnectionState.CONNECTED;
+        handler.post(() -> {
+            if (destroyed) return;
+            ConnectionListener l = connectionListener;
+            if (l != null) {
+                l.onConnected(deviceName);
             }
         });
     }
 
     private void notifyError(String error) {
+        // "连接中..." is a status signal, not a real error — keep CONNECTING state.
+        // Real errors cancel the timeout and transition to ERROR state.
+        boolean isConnectingSignal = error != null && error.contains("连接中");
+        if (!isConnectingSignal) {
+            cancelConnectTimeout();
+            connectionState = ConnectionState.ERROR;
+        }
         handler.post(() -> {
-            if (connectionListener != null) {
-                connectionListener.onError(error);
+            if (destroyed) return;
+            ConnectionListener l = connectionListener;
+            if (l != null) {
+                l.onError(error);
             }
         });
     }
 
-    // ==================== Readiness check (ping / pong) ====================
+    // ==================== Connection timeout ====================
 
     /**
-     * Send {"type":"ping"} and wait up to READINESS_TIMEOUT for
-     * {"type":"pong"}. When pong arrives, the link becomes ready and any
-     * queued messages are flushed. If pong does not arrive in time, the
-     * pending messages are failed and an error is reported.
+     * Start the connection timeout. If the watch is not connected within
+     * {@link #CONNECT_TIMEOUT} ms, {@link #notifyError(String)} is called
+     * with a timeout message.
      */
-    private void startReadinessCheck(final String deviceName) {
-        readinessPending = true;
-
-        try {
-            JSONObject ping = new JSONObject();
-            ping.put("type", TYPE_PING);
-            sendRawMessage(ping.toString());
-            Log.d(TAG, ">>> Readiness ping sent");
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to build/send ping", e);
-        }
-
-        if (readinessTimeoutRunnable != null) {
-            handler.removeCallbacks(readinessTimeoutRunnable);
-        }
-        readinessTimeoutRunnable = () -> {
-            if (!readinessPending) {
-                return;
+    private void startConnectTimeout() {
+        cancelConnectTimeout();
+        connectTimeoutRunnable = () -> {
+            if (connectionState == ConnectionState.CONNECTING && !connected) {
+                Log.w(TAG, "Connection timeout after " + CONNECT_TIMEOUT + "ms");
+                connectionState = ConnectionState.ERROR;
+                notifyError("连接超时");
             }
-            readinessPending = false;
-            Log.w(TAG, "Readiness timeout - no pong from watch");
-            for (QueuedMessage msg : messageQueue) {
-                if (msg.callback != null) {
-                    msg.callback.onError("连接就绪超时");
-                }
-            }
-            messageQueue.clear();
-            handler.post(() -> {
-                if (connectionListener != null) {
-                    connectionListener.onError(
-                            "连接超时，请确保手环上已打开考点阅读器");
-                }
-            });
         };
-        handler.postDelayed(readinessTimeoutRunnable, READINESS_TIMEOUT);
+        handler.postDelayed(connectTimeoutRunnable, CONNECT_TIMEOUT);
     }
 
-    /** Dispatch a message received from the watch. */
-    private void handleIncomingMessage(String messageStr, String deviceName) {
-        try {
-            JSONObject msg = new JSONObject(messageStr);
-            String type = msg.optString("type", "");
-
-            // 1. Readiness response: {"type":"pong"}.
-            if (TYPE_PONG.equals(type)) {
-                onReadinessComplete(deviceName);
-                return;
-            }
-
-            // 2. Route by tag to the registered handler.
-            String tag = msg.optString("tag", "");
-            MessageCallback cb = messageHandlers.get(tag);
-            if (cb != null) {
-                cb.onMessage(messageStr);
-            }
-
-            // 3. Notify the global listener.
-            if (messageReceivedListener != null) {
-                messageReceivedListener.onReceived(tag, messageStr);
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Parse message error", e);
+    private void cancelConnectTimeout() {
+        if (connectTimeoutRunnable != null) {
+            handler.removeCallbacks(connectTimeoutRunnable);
+            connectTimeoutRunnable = null;
         }
     }
 
-    /** {"type":"pong"} received - the link is ready. */
-    private void onReadinessComplete(String deviceName) {
-        if (!readinessPending) {
-            // Duplicate or late pong after timeout; ignore.
+    /**
+     * Send a raw JSON string to the watch.
+     */
+    public void sendRawMessageWithCallback(String message, SendCallback callback) {
+        if (destroyed) {
+            if (callback != null) {
+                callback.onError("连接已关闭");
+            }
             return;
         }
-        readinessPending = false;
-        connected = true;
-
-        if (readinessTimeoutRunnable != null) {
-            handler.removeCallbacks(readinessTimeoutRunnable);
-            readinessTimeoutRunnable = null;
-        }
-
-        // Flush messages that were queued before the link came up.
-        if (!messageQueue.isEmpty()) {
-            Log.d(TAG, "Flushing " + messageQueue.size() + " queued messages");
-            List<QueuedMessage> queued = new ArrayList<>(messageQueue);
-            messageQueue.clear();
-            for (QueuedMessage msg : queued) {
-                sendMessage(msg.tag, msg.payload, msg.callback);
-            }
-        }
-
-        final String name = (deviceName != null && !deviceName.isEmpty()) ? deviceName : "watch";
-        handler.post(() -> {
-            if (connectionListener != null) {
-                connectionListener.onConnected(name);
-            }
-        });
-    }
-
-    // ==================== Sending messages ====================
-
-    /**
-     * Send a JSON message to the watch, wrapping the payload with its tag.
-     *
-     * If the link is not ready yet, the message is queued and delivered
-     * automatically once {"type":"pong"} is received.
-     */
-    public void sendMessage(String tag, JSONObject payload, SendCallback callback) {
-        try {
-            if (!connected) {
-                messageQueue.add(new QueuedMessage(tag, payload, callback));
-                Log.d(TAG, "Queued message (waiting for pong): " + tag
-                        + ", queue size=" + messageQueue.size());
-                return;
-            }
-            JSONObject message = new JSONObject();
-            Iterator<String> it = payload.keys();
-            while (it.hasNext()) {
-                String key = it.next();
-                message.put(key, payload.get(key));
-            }
-            message.put("tag", tag);
-            sendRawMessageWithCallback(message.toString(), callback);
-        } catch (Exception e) {
-            if (callback != null) {
-                callback.onError(e.getMessage());
-            }
-        }
-    }
-
-    /** Send a raw string to the watch with a completion callback. */
-    public void sendRawMessageWithCallback(String message, SendCallback callback) {
-        Log.d(TAG, ">>> Send: " + message);
-        if (currentNode == null) {
+        Node node = currentNode;
+        if (node == null) {
             if (callback != null) {
                 callback.onError("设备未连接");
             }
             return;
         }
-        messageApi.sendMessage(currentNode.id, message.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+
+        byte[] data = message.getBytes(StandardCharsets.UTF_8);
+        messageApi.sendMessage(node.id, data)
                 .addOnSuccessListener(new OnSuccessListener<Void>() {
                     @Override
                     public void onSuccess(Void aVoid) {
+                        Log.d(TAG, ">>> Sent: " + message);
                         if (callback != null) {
                             callback.onSuccess();
                         }
@@ -456,29 +452,11 @@ public class WearableManager {
                 .addOnFailureListener(new OnFailureListener() {
                     @Override
                     public void onFailure(Exception e) {
+                        Log.e(TAG, ">>> Send failed: " + e.getMessage());
                         if (callback != null) {
                             callback.onError(e.getMessage());
                         }
                     }
                 });
-    }
-
-    /** Internal fire-and-forget raw send. */
-    private void sendRawMessage(String message) {
-        sendRawMessageWithCallback(message, null);
-    }
-
-    // ==================== Status ====================
-
-    public Handler getHandler() {
-        return handler;
-    }
-
-    public boolean isConnected() {
-        return connected;
-    }
-
-    public String getDeviceName() {
-        return currentNode != null ? currentNode.name : null;
     }
 }

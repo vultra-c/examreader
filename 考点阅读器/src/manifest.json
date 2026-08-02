@@ -1,9 +1,10 @@
 {
   "package": "com.silenthong.kdreader",
   "name": "考点阅读器",
-  "versionName": "V26.4.4.BAND",
-  "versionCode": 260520,
-  "minPlatformVersion": 1100,
+  "versionName": "V26.5.0.BAND",
+  "versionCode": 260530,
+  "minPlatformVersion": 1200,
+  "minAPILevel": 1,
   "icon": "/common/images/icon.png",
   "deviceTypeList": [
     "watch"

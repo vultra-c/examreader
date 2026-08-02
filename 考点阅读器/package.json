@@ -13,7 +13,7 @@
   },
   "devDependencies": {
     "@aiot-toolkit/velasim": "^0.1.25",
-    "aiot-toolkit": "^2.0.4"
+    "aiot-toolkit": "^2.0.5"
   },
   "dependencies": {
     "@aiot-toolkit/jsc": "^1.0.7"

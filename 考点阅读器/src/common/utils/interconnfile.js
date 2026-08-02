@@ -33,8 +33,11 @@ export default class interconnfile {
     receivedChapters = 0;
     currentChapterMeta = null;
     currentChapterContent = "";
+    targetFolder = 'bt_root';
 
     chapterWriteState = new Map();
+    // UI 进度回调节流：上次触发时间戳，最多每 200ms 触发一次
+    _lastProgressTime = 0;
 
     constructor({ addListener, send, setEventListener }) {
         this.send = send;
@@ -82,11 +85,28 @@ export default class interconnfile {
         this.currentChapterMeta = null;
         this.receivedChapters = 0;
         this.totalChapters = 0;
+        this.targetFolder = 'bt_root';
         this.chapterWriteState.clear();
+        this._lastProgressTime = 0;
     }
 
-    async startTransfer({ filename, total, wordCount, startFrom = 0 }) {
-        console.log('[BT-File] startTransfer: ' + filename + ', total=' + total + ', startFrom=' + startFrom);
+    /**
+     * 节流的 UI 进度回调
+     * 最多每 200ms 触发一次；force=true、progress>=1（100%）时强制触发
+     * 确保最后一个分片（isLastChunk）与 100% 进度一定会回调到 UI
+     * @param {number} progress 0~1 的整体进度
+     * @param {boolean} force 是否强制触发（如最后一个分片）
+     */
+    _emitProgress(progress, force) {
+        const now = Date.now();
+        if (force || progress >= 1 || (now - this._lastProgressTime) >= 200) {
+            this._lastProgressTime = now;
+            this.callback({ msg: "next", progress: progress, filename: this.currentBookName });
+        }
+    }
+
+    async startTransfer({ filename, total, wordCount, startFrom = 0, folder }) {
+        console.log('[BT-File] startTransfer: ' + filename + ', total=' + total + ', startFrom=' + startFrom + ', folder=' + (folder || 'bt_root'));
 
         this.currentBookName = filename;
         this.totalChapters = total;
@@ -94,6 +114,9 @@ export default class interconnfile {
         this.currentChapterContent = "";
         this.currentChapterMeta = null;
         this.chapterWriteState.clear();
+        // 确保 folder 参数不为空
+        this.targetFolder = (folder && folder !== '') ? folder : 'bt_root';
+        console.log('[BT-File] targetFolder set to: ' + this.targetFolder);
 
         // 通知 UI 开始传输
         this.callback({ msg: "start", total, filename });
@@ -115,13 +138,14 @@ export default class interconnfile {
             completed: false,
             lastChunkNum: -1,
             totalChunks: 0,
+            contentParts: [],
             content: ""
         };
 
         // 已完成的章节，直接回复
         if (state.completed && chunkNum !== 0) {
             const overallProgress = (count + ((chunkNum + 1) / totalChunks)) / this.totalChapters;
-            this.callback({ msg: "next", progress: overallProgress, filename: this.currentBookName });
+            this._emitProgress(overallProgress, false);
 
             if (chunkNum === totalChunks - 1) {
                 await this.send({ type: "chapter_chunk_complete" });
@@ -139,20 +163,25 @@ export default class interconnfile {
             state.completed = false;
             state.lastChunkNum = -1;
             state.totalChunks = totalChunks;
+            state.contentParts = [];
             state.content = "";
         }
 
-        // 追加内容
-        state.content += (content || "");
+        // 用数组收集分片，避免反复字符串拼接带来的 O(n^2) 开销
+        state.contentParts.push(content || "");
         state.lastChunkNum = chunkNum;
         this.chapterWriteState.set(index, state);
 
-        // 通知 UI 进度
+        // 通知 UI 进度（节流，最后一个分片强制触发）
         const overallProgress = (count + ((chunkNum + 1) / totalChunks)) / this.totalChapters;
-        this.callback({ msg: "next", progress: overallProgress, filename: this.currentBookName });
+        this._emitProgress(overallProgress, isLastChunk);
 
         if (isLastChunk) {
             state.completed = true;
+            // 最后一次性 join 出完整正文
+            state.content = state.contentParts.join("");
+            // 立即释放 contentParts 数组，减少内存占用
+            state.contentParts = null;
             this.chapterWriteState.set(index, state);
 
             // 保存章节元信息，等待 chapter_complete 时一起写入
@@ -179,18 +208,28 @@ export default class interconnfile {
                 const displayName = this.totalChapters > 1
                     ? this.currentBookName + ' - 第' + (this.currentChapterMeta.index + 1) + '章'
                     : this.currentBookName;
-                await dataManager.saveBluetoothContent(
+                console.log('[BT-File] Saving to folder: ' + this.targetFolder + ', name: ' + displayName);
+                const savedId = await dataManager.saveBluetoothContent(
                     displayName,
-                    this.currentChapterMeta.content
+                    this.currentChapterMeta.content,
+                    this.targetFolder
                 );
+                if (!savedId) {
+                    throw new Error('存储写入失败（可能存储空间不足）');
+                }
                 this.receivedChapters++;
             } catch (e) {
-                console.error('[BT-File] Save chapter failed: ' + e.message);
-                this.send({ type: "error", message: '保存失败: ' + e.message, count: 0 });
+                const errMsg = (e && e.message) ? e.message : String(e || '未知错误');
+                console.error('[BT-File] Save chapter failed: ' + errMsg);
+                this.send({ type: "error", message: '保存失败: ' + errMsg, count: 0 });
                 return;
             }
+            // 立即释放正文内存，防止 OOM
             this.currentChapterMeta = null;
         }
+
+        // 清理 chapterWriteState，释放内存
+        this.chapterWriteState.clear();
 
         await this.send({
             type: "chapter_saved",
@@ -216,7 +255,7 @@ export default class interconnfile {
     }
 
     handleError(error, context) {
-        const errorMsg = error.message || '未知错误';
+        const errorMsg = (error && error.message) ? error.message : String(error || '未知错误');
         const displayMsg = context + ': ' + errorMsg;
         console.error('[BT-File] ' + displayMsg);
         this.send({ type: "error", message: displayMsg, count: 0 });

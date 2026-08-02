@@ -25,24 +25,34 @@
 
     <!-- State: receiving -->
     <div style="flex-direction: column;margin-top: 46px;width: 336px;" if="{{state == 'receiving'}}">
-      <img static src="/common/images/download.png" style="margin-left: 104px;margin-bottom:24px;margin-top:60px" />
-      <text static style="width: 336px;font-size: 32px;font-weight:bold;color: white;text-align: center;margin-bottom:36px;">
+      <img static src="/common/images/download.png" style="margin-left: 104px;margin-bottom:20px;margin-top:40px" />
+      <text static style="width: 336px;font-size: 32px;font-weight:bold;color: white;text-align: center;margin-bottom:24px;">
         正在接收
       </text>
-      <div class="item">
-        <text class="itemtext" style="flex:1" static>{{fileName}}</text>
-        <text class="itemtext" style="color:rgb(168, 168, 168)">{{percent}}%</text>
+      <div style="width:296px;margin-left:20px;flex-direction:column;">
+        <div style="flex-direction:row;justify-content:space-between;margin-bottom:12px;">
+          <text class="itemtext" style="flex:1;font-size:22px;" static>{{fileName}}</text>
+          <text class="itemtext" style="color:rgb(100,181,246);font-size:22px;">{{percent}}%</text>
+        </div>
+        <progress percent="{{percent}}" style="width:296px;height:6px;color:#1976D2;"/>
+        <text if="{{transferRate}}" style="font-size:20px;color:rgb(153,153,153);margin-top:10px;text-align:center;width:296px;">{{transferRate}}</text>
       </div>
     </div>
 
     <!-- State: saved successfully -->
     <div style="flex-direction: column;margin-top: 46px;width: 336px;" if="{{state == 'saved'}}">
-      <img static src="/common/images/succ.png" style="margin-left: 104px;margin-bottom:24px;margin-top:100px" />
-      <text static style="width: 336px;font-size: 32px;font-weight:bold;color: white;text-align: center;margin-bottom:36px;">
+      <img static src="/common/images/succ.png" style="margin-left: 104px;margin-bottom:24px;margin-top:80px" />
+      <text static style="width: 336px;font-size: 32px;font-weight:bold;color: white;text-align: center;margin-bottom:24px;">
         接收成功
       </text>
-      <text static style="width: 286px;left:25px;font-size: 24px;font-weight:bold;color: rgb(153, 153, 153);text-align: center;margin-top: 10px;padding: 10px;">
-        {{fileName}} 已保存到蓝牙传输
+      <text static style="width: 286px;left:25px;font-size: 22px;font-weight:bold;color: rgb(100,181,246);text-align: center;margin-top: 4px;padding: 10px;">
+        {{fileName}}
+      </text>
+      <text static style="width: 286px;left:25px;font-size: 20px;color: rgb(153, 153, 153);text-align: center;margin-top: 4px;padding: 4px;">
+        已保存到 {{savedFolder}}
+      </text>
+      <text static style="width: 286px;left:25px;font-size: 20px;color: rgb(120,120,120);text-align: center;margin-top: 12px;">
+        自动返回中...
       </text>
     </div>
 
@@ -71,8 +81,8 @@
 <script>
 import router from '@system.router'
 import brightness from '@system.brightness'
+import vibrator from '@system.vibrator'
 import { getNowTime } from '../../common/utils/timeUtil.js'
-import interconnectManager from '../../common/utils/interconnectManager.js'
 
 export default {
   private: {
@@ -80,8 +90,15 @@ export default {
     percent: 0,
     fileName: '',
     errorMsg: '',
+    savedFolder: '主页',
     nowTime: '00:00',
-    timer: null
+    timer: null,
+    autoReturnTimer: null,
+    transferRate: '',
+    lastProgress: 0,
+    lastRateTime: 0,
+    lastReceived: 0,
+    totalChars: 0
   },
 
   onInit() {
@@ -91,31 +108,75 @@ export default {
       this.nowTime = getNowTime()
     }, 60000)
 
-    // Set up interconnect callbacks
-    interconnectManager.setCallbacks(
-      // State callback
-      (newState) => {
+    // Use the existing interconnfile module (created in app.ux)
+    // to receive file transfer UI callbacks.
+    if (globalThis.connfile) {
+      globalThis.connfile.setCallback((data) => {
         if (!this.$valid) return
-        this.state = newState
-        if (newState === 'receiving' && !this.fileName) {
-          this.fileName = ''
+        switch (data.msg) {
+          case 'start':
+            this.state = 'receiving'
+            this.fileName = data.filename || ''
+            this.percent = 0
+            this.transferRate = ''
+            this.lastProgress = 0
+            this.lastReceived = 0
+            this.lastRateTime = Date.now()
+            this.totalChars = (data.totalChars ? parseInt(data.totalChars) : (data.wordCount ? parseInt(data.wordCount) : 0))
+            break
+          case 'next':
+            this.state = 'receiving'
+            this.fileName = data.filename || this.fileName
+            this.updateTransferRate(data.progress || 0, data.received)
+            this.percent = Math.floor((data.progress || 0) * 100)
+            break
+          case 'success':
+            this.state = 'saved'
+            // 接收成功震动反馈
+            this.vibrate(100)
+            // Determine saved folder name from targetFolder
+            if (globalThis.connfile && globalThis.connfile.targetFolder) {
+              const tf = globalThis.connfile.targetFolder
+              if (tf === 'bt_root' || !tf) {
+                this.savedFolder = '主页'
+              } else if (tf.startsWith('bt_folder_') && globalThis.conn) {
+                // Try to find folder name from cached data
+                this.savedFolder = '文件夹'
+              } else {
+                this.savedFolder = tf
+              }
+            }
+            // 成功后 2 秒自动返回
+            if (this.autoReturnTimer) clearTimeout(this.autoReturnTimer)
+            this.autoReturnTimer = setTimeout(() => {
+              if (!this.$valid) return
+              router.back()
+            }, 2000)
+            break
+          case 'cancel':
+            this.state = 'ready'
+            break
+          case 'error':
+            this.state = 'error'
+            this.errorMsg = data.error || '未知错误'
+            // 接收失败连续短震反馈
+            this.vibrate([50, 50, 50])
+            // 有错误时不自动返回
+            if (this.autoReturnTimer) {
+              clearTimeout(this.autoReturnTimer)
+              this.autoReturnTimer = null
+            }
+            break
         }
-      },
-      // Progress callback
-      (percent, received, total, message, fileName) => {
-        if (!this.$valid) return
-        this.percent = percent
-        if (fileName) {
-          this.fileName = fileName
-        }
-      }
-    )
+      })
+    }
 
-    // Initialize the interconnect connection
-    interconnectManager.init()
-
-    // Set initial state
-    this.state = interconnectManager.getState()
+    // Check current connection state (interconn.js tracks this)
+    if (globalThis.conn && globalThis.conn.connected) {
+      this.state = 'ready'
+    } else {
+      this.state = 'wait'
+    }
   },
 
   onShow() {
@@ -123,13 +184,60 @@ export default {
       keepScreenOn: true,
     })
     // Refresh connection state
-    this.state = interconnectManager.getState()
+    if (globalThis.conn && globalThis.conn.connected) {
+      if (this.state === 'wait') {
+        this.state = 'ready'
+      }
+    } else {
+      if (this.state !== 'receiving' && this.state !== 'saved' && this.state !== 'error') {
+        this.state = 'wait'
+      }
+    }
   },
 
   onHide() {
     brightness.setKeepScreenOn({
       keepScreenOn: false,
     })
+  },
+
+  vibrate(duration) {
+    try {
+      vibrator.vibrate({ duration: duration })
+    } catch (e) {
+      // 振动不可用时忽略
+    }
+  },
+
+  updateTransferRate(progress, received) {
+    const now = Date.now()
+    let receivedChars = 0
+    if (received != null) {
+      receivedChars = parseInt(received) || 0
+    } else if (this.totalChars > 0) {
+      receivedChars = Math.round(progress * this.totalChars)
+    }
+
+    if (this.lastRateTime > 0 && now > this.lastRateTime) {
+      const dt = (now - this.lastRateTime) / 1000
+      if (dt > 0) {
+        let delta = 0
+        if (receivedChars > 0 || this.lastReceived > 0) {
+          delta = receivedChars - this.lastReceived
+        } else if (this.totalChars > 0) {
+          delta = Math.round((progress - this.lastProgress) * this.totalChars)
+        }
+        if (delta > 0) {
+          const rate = Math.round(delta / dt)
+          if (rate > 0) {
+            this.transferRate = rate + ' 字/秒'
+          }
+        }
+      }
+    }
+    this.lastProgress = progress
+    this.lastRateTime = now
+    this.lastReceived = receivedChars
   },
 
   back() {
@@ -141,7 +249,14 @@ export default {
       clearInterval(this.timer)
       this.timer = null
     }
-    interconnectManager.destroy()
+    if (this.autoReturnTimer) {
+      clearTimeout(this.autoReturnTimer)
+      this.autoReturnTimer = null
+    }
+    // Clear the callback to prevent stale references
+    if (globalThis.connfile) {
+      globalThis.connfile.setCallback(() => {})
+    }
   }
 }
 </script>

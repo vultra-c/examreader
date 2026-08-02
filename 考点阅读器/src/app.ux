@@ -1,17 +1,18 @@
 <script>
 import interconnfile from './common/utils/interconnfile.js'
-import interconn from './common/utils/handshake.js'
+import interconnTree from './common/utils/interconnTree.js'
+import interconn from './common/utils/interconn.js'
 import dataManager from './common/utils/dataManager.js'
 import router from '@system.router'
 import storage from '@system.storage'
 import brightness from '@system.brightness'
 
-// 初始化全局连接（完全复刻弦电子书 app.ux）
+// 初始化全局连接
+// 通信连接会自动建立，应用内不用关心连接的创建和销毁
+// 参考官方 interconnect demo：直接使用 interconn.js，不需要自定义握手协议
 globalThis.conn = new interconn();
-globalThis.conn.setHandshakeListener(() => {
-  router.push({uri: 'pages/push'})
-})
 globalThis.connfile = globalThis.conn.register(interconnfile);
+globalThis.conntree = globalThis.conn.register(interconnTree);
 
 export default {
   onInit() {

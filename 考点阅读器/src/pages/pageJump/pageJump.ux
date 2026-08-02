@@ -42,7 +42,6 @@
 <script>
 import router from '@system.router'
 import prompt from '@system.prompt'
-import dataManager from '../../common/utils/dataManager.js'
 import { getNowTime } from '../../common/utils/timeUtil.js'
 import appState from '../../common/utils/appState.js'
 
@@ -58,7 +57,7 @@ export default {
     path: ''
   },
 
-  async onInit() {
+  onInit() {
     this.nowTime = getNowTime()
     this.timer = setInterval(() => {
       if (this.$valid) {
@@ -66,13 +65,8 @@ export default {
       }
     }, 60000)
     this.contentPath = this.path
-    // 加载总页数
-    const pages = await dataManager.getReaderPages(this.path)
-    if (!this.$valid) return
-    this.totalPages = pages.length
-    if (this.totalPages < 1) {
-      this.totalPages = 1
-    }
+    // 从 appState 读取总页数（由 reader.ux 在 onShow 时存入），不再调用 getReaderPages
+    this.totalPages = (appState.totalPages && appState.totalPages > 0) ? appState.totalPages : 1
     // 默认显示当前页码
     if (appState.readerPage != null && appState.readerPage !== undefined) {
       this.inputPage = (appState.readerPage + 1).toString()

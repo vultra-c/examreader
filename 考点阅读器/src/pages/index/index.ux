@@ -31,36 +31,55 @@
 <script>
 import router from '@system.router'
 import app from '@system.app'
+import storage from '@system.storage'
 import dataManager from '../../common/utils/dataManager.js'
-import { getNowTime } from '../../common/utils/timeUtil.js'
+import { getFormattedTimeNow } from '../../common/utils/timeUtil.js'
+import appState from '../../common/utils/appState.js'
 
 export default {
   private: {
     nowTime: '00:00',
     timer: null,
+    timeFormat: '24h',
     allItems: [],
     visibleItems: [],
-    currentPage: 0,
-    totalPages: 1,
-    totalItems: 0,
-    pageSize: 3,
     isNavigating: false,
     longPressTriggered: false
   },
 
   onInit() {
-    this.nowTime = getNowTime()
+    this.loadTimeFormat()
     this.timer = setInterval(() => {
       if (this.$valid) {
-        this.nowTime = getNowTime()
+        this.nowTime = getFormattedTimeNow(this.timeFormat)
       }
     }, 60000)
+  },
+
+  loadTimeFormat() {
+    storage.get({
+      key: 'KD_TIME_FORMAT',
+      success: (data) => {
+        if (!this.$valid) return
+        if (data) {
+          this.timeFormat = data
+        }
+        this.nowTime = getFormattedTimeNow(this.timeFormat)
+      },
+      fail: () => {
+        if (!this.$valid) return
+        this.nowTime = getFormattedTimeNow(this.timeFormat)
+      }
+    })
   },
 
   onShow() {
     this.isNavigating = false
     this.longPressTriggered = false
-    this.currentPage = 0
+    // 删除操作后强制刷新列表
+    if (appState.needRefreshList) {
+      appState.needRefreshList = false
+    }
     this.loadData()
   },
 
@@ -75,44 +94,23 @@ export default {
     const folders = await dataManager.getTopLevelFolders()
     if (!this.$valid) return
 
-    // 构建列表项
+    // 构建列表项 — 主页直接显示根级文件夹和文件
     const items = []
-
-    // 添加知识树文件夹
     if (folders) {
-      folders.forEach((folder, index) => {
-        let subtitle = '文件夹'
-        let path = index.toString()
-
-        if (folder.id === 'bt_folder') {
-          subtitle = '蓝牙传输'
-          path = 'bt'
-        } else if (folder.id === 'builtin_folder') {
-          subtitle = '示例'
-          path = 'builtin'
-        }
-
+      folders.forEach((folder) => {
+        const subtitle = folder.type === 'folder' ? '文件夹' : '考点'
         items.push({
           id: folder.id,
           name: folder.name,
           subtitle: subtitle,
-          type: 'folder',
-          path: path
+          type: folder.type || 'content',
+          path: folder.id
         })
       })
     }
 
     this.allItems = items
-    this.totalItems = this.allItems.length
-    this.loadPage(this.currentPage)
-  },
-
-  loadPage(page) {
-    this.totalPages = Math.ceil(this.allItems.length / this.pageSize) || 1
-    let safePage = Math.max(0, Math.min(page, this.totalPages - 1))
-    const start = safePage * this.pageSize
-    this.visibleItems = this.allItems.slice(start, start + this.pageSize)
-    this.currentPage = safePage
+    this.visibleItems = items
   },
 
   onItemClick(item) {
@@ -124,24 +122,33 @@ export default {
     }
     this.isNavigating = true
 
-    router.push({
-      uri: '/pages/subfolder',
-      params: { path: item.path }
-    })
+    // 主页直接显示根级文件夹和文件
+    if (item.type === 'folder') {
+      router.push({
+        uri: '/pages/subfolder',
+        params: { path: item.id }
+      })
+    } else {
+      router.push({
+        uri: '/pages/reader',
+        params: { path: item.id }
+      })
+    }
   },
 
   onLongPress(item) {
     if (this.isNavigating) return
-
-    // The built-in examples folder cannot be deleted
-    if (item.path === 'builtin') return
 
     // 标记长按已触发，阻止后续click事件
     this.longPressTriggered = true
     this.isNavigating = true
     router.push({
       uri: '/pages/deleteConfirm',
-      params: { action: 'deleteFolder', path: item.path, name: item.name }
+      params: {
+        action: item.type === 'folder' ? 'deleteFolder' : 'deleteContent',
+        path: item.id,
+        name: item.name
+      }
     })
   },
 

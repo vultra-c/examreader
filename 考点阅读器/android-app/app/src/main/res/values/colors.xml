@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Primary -->
+    <color name="primary">#1976D2</color>
+    <color name="primary_dark">#0D47A1</color>
+    <color name="primary_light">#BBDEFB</color>
+    <color name="accent">#03A9F4</color>
+    <color name="accent_secondary">#FF6F00</color>
+    
+    <!-- Background -->
+    <color name="bg_main">#F0F2F5</color>
+    <color name="bg_card">#FFFFFF</color>
+    <color name="bg_surface">#FAFAFA</color>
+    
+    <!-- Text -->
+    <color name="text_primary">#1A237E</color>
+    <color name="text_body">#202124</color>
+    <color name="text_secondary">#5F6368</color>
+    <color name="text_hint">#9AA0A6</color>
+    <color name="text_white">#FFFFFF</color>
+    
+    <!-- Status -->
+    <color name="status_connected">#2E7D32</color>
+    <color name="status_connecting">#F57C00</color>
+    <color name="status_error">#C62828</color>
+    <color name="status_disconnected">#757575</color>
+    
+    <!-- Semantic -->
+    <color name="success">#4CAF50</color>
+    <color name="warning">#FF9800</color>
+    <color name="error">#F44336</color>
+    <color name="info">#2196F3</color>
+    
+    <!-- Divider -->
+    <color name="divider">#EBEEF0</color>
+    <color name="border_light">#E0E0E0</color>
+    
+    <!-- Tree -->
+    <color name="tree_folder">#1565C0</color>
+    <color name="tree_file">#5F6368</color>
+    <color name="tree_bg">#F5F7FA</color>
+    <color name="tree_selected">#E3F2FD</color>
+    <color name="tree_target">#1565C0</color>
+    
+    <!-- Dark mode -->
+    <color name="dark_bg_main">#121212</color>
+    <color name="dark_bg_card">#1E1E1E</color>
+    <color name="dark_text_primary">#E8EAF6</color>
+    <color name="dark_text_body">#E0E0E0</color>
+    <color name="dark_text_secondary">#B0BEC5</color>
+    <color name="dark_divider">#37474F</color>
+</resources>

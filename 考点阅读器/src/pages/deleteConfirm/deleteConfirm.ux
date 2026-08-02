@@ -89,19 +89,24 @@ export default {
     if (this.action === 'deleteAll') {
       await dataManager.deleteAll()
       if (!this.$valid) return
+      dataManager.invalidateCache()
+      appState.needRefreshList = true
       prompt.showToast({ message: '已删除所有考点', duration: 1500 })
       router.back()
     } else if (this.action === 'deleteFolder') {
       await dataManager.deleteFolder(this.path)
       if (!this.$valid) return
+      dataManager.invalidateCache()
+      appState.needRefreshList = true
       prompt.showToast({ message: '已删除文件夹', duration: 1000 })
       router.back()
     } else if (this.action === 'deleteContent') {
       await dataManager.deleteContent(this.path)
       if (!this.$valid) return
+      dataManager.invalidateCache()
+      appState.needRefreshList = true
       prompt.showToast({ message: '删除成功', duration: 1000 })
       appState.refreshReader = true
-      appState.needBackToReader = true
       router.back()
     }
   },

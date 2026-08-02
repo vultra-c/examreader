@@ -7,11 +7,20 @@ const state = {
   // 跳转目标页码（pageJump / percentJump -> reader）
   jumpToPage: null,
 
+  // 跳转目标百分比（无缝模式 percentJump -> reader）
+  jumpToPercent: null,
+
+  // 当前阅读模式（'paginated' 分页 / 'seamless' 无缝）
+  readingMode: 'paginated',
+
   // 是否需要自动返回到 reader（pageJump / percentJump / deleteConfirm -> readerSettings -> reader）
   needBackToReader: false,
 
   // 是否需要刷新 reader（deleteConfirm 删除后 -> reader 自动返回上级）
   refreshReader: false,
+
+  // 是否需要刷新列表（deleteConfirm 删除后 -> index / subfolder 重新加载）
+  needRefreshList: false,
 
   // 当前阅读路径（reader -> readerSettings / pageJump / percentJump）
   readerPath: '',
@@ -20,7 +29,16 @@ const state = {
   readerPage: 0,
 
   // 当前内容名称（reader -> readerSettings）
-  contentName: ''
+  contentName: '',
+
+  // 当前阅读总页数（reader -> pageJump / percentJump）
+  totalPages: 0,
+
+  // 当前阅读字号（缓存 storage 读取，reader -> readerSettings）
+  fontSize: 26,
+
+  // 当前阅读行间距（缓存 storage 读取，reader -> readerSettings）
+  lineHeight: 30
 }
 
 export function getState() {
@@ -53,6 +71,7 @@ export function setContentName(name) {
 
 export function resetJumpState() {
   state.jumpToPage = null
+  state.jumpToPercent = null
   state.needBackToReader = false
 }
 

@@ -42,7 +42,6 @@
 <script>
 import router from '@system.router'
 import prompt from '@system.prompt'
-import dataManager from '../../common/utils/dataManager.js'
 import { getNowTime } from '../../common/utils/timeUtil.js'
 import appState from '../../common/utils/appState.js'
 
@@ -58,7 +57,7 @@ export default {
     path: ''
   },
 
-  async onInit() {
+  onInit() {
     this.nowTime = getNowTime()
     this.timer = setInterval(() => {
       if (this.$valid) {
@@ -66,17 +65,16 @@ export default {
       }
     }, 60000)
     this.contentPath = this.path
-    // 加载总页数
-    const pages = await dataManager.getReaderPages(this.path)
-    if (!this.$valid) return
-    this.totalPages = pages.length
-    if (this.totalPages < 1) {
-      this.totalPages = 1
-    }
-    // 默认显示当前页码对应的百分比
-    if (appState.readerPage != null && appState.readerPage !== undefined && this.totalPages > 0) {
-      const percent = Math.round((appState.readerPage / (this.totalPages - 1 > 0 ? this.totalPages - 1 : 1)) * 100)
-      this.inputPercent = percent.toString()
+    // 无缝模式：默认 0%
+    if (appState.readingMode === 'seamless') {
+      this.inputPercent = '0'
+    } else {
+      // 分页模式：从 appState 读取总页数，计算当前百分比
+      this.totalPages = (appState.totalPages && appState.totalPages > 0) ? appState.totalPages : 1
+      if (appState.readerPage != null && appState.readerPage !== undefined && this.totalPages > 0) {
+        const percent = Math.round((appState.readerPage / (this.totalPages - 1 > 0 ? this.totalPages - 1 : 1)) * 100)
+        this.inputPercent = percent.toString()
+      }
     }
   },
 
@@ -99,18 +97,23 @@ export default {
         prompt.showToast({ message: '百分比无效，无法跳转', duration: 2000 })
         return
       }
-      // 计算目标页码（0索引）
-      let targetPage = 0
-      if (this.totalPages > 1) {
-        targetPage = Math.floor((targetPercent / 100) * (this.totalPages - 1))
+      if (appState.readingMode === 'seamless') {
+        // 无缝模式：直接设置百分比跳转
+        appState.jumpToPercent = targetPercent
+      } else {
+        // 分页模式：计算目标页码（0索引）
+        let targetPage = 0
+        if (this.totalPages > 1) {
+          targetPage = Math.floor((targetPercent / 100) * (this.totalPages - 1))
+        }
+        if (targetPage >= this.totalPages) {
+          targetPage = this.totalPages - 1
+        }
+        if (targetPage < 0) {
+          targetPage = 0
+        }
+        appState.jumpToPage = targetPage
       }
-      if (targetPage >= this.totalPages) {
-        targetPage = this.totalPages - 1
-      }
-      if (targetPage < 0) {
-        targetPage = 0
-      }
-      appState.jumpToPage = targetPage
       appState.needBackToReader = true
       router.back()
       return

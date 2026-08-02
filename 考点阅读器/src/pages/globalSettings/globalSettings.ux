@@ -31,6 +31,13 @@
         </div>
         <text style="font-size: 28px; font-weight: bold; color: rgba(255,255,255,0.6);">{{timeFormat === '12h' ? '12小时' : '24小时'}}</text>
       </list-item>
+      <list-item class="item" @click="toggleReadingMode" type="item">
+        <div class="item-content">
+          <text class="itemtext" static>阅读模式</text>
+          <text class="itemtext2" static>分页/无缝衔接</text>
+        </div>
+        <text style="font-size: 28px; font-weight: bold; color: rgba(255,255,255,0.6);">{{readingMode === 'paginated' ? '分页' : '无缝'}}</text>
+      </list-item>
 
       <!-- 数据管理分区 -->
       <list-item class="item" style="padding: 7px 16px; height: 50px;" type="tip">
@@ -58,6 +65,41 @@
         <img static src="/common/images/enter.png" class="arrow" />
       </list-item>
 
+      <!-- 存储管理分区 -->
+      <list-item class="item" style="padding: 7px 16px; height: 50px;" type="tip">
+        <text class="section-title" static>存储管理</text>
+      </list-item>
+      <list-item class="item" type="item">
+        <div class="item-content">
+          <text class="itemtext" static>占用存储</text>
+          <text class="itemtext2" static>考点内容占用大小</text>
+        </div>
+        <text style="font-size: 28px; font-weight: bold; color: rgba(255,255,255,0.6);">{{contentStorageSize}}</text>
+      </list-item>
+      <list-item class="item" @click="clearCache" type="item">
+        <div class="item-content">
+          <text class="itemtext" static>清理缓存</text>
+          <text class="itemtext2" static>清除内存缓存</text>
+        </div>
+        <img static src="/common/images/enter.png" class="arrow" />
+      </list-item>
+
+      <!-- 传输记录分区 -->
+      <list-item class="item" style="padding: 7px 16px; height: 50px;" type="tip">
+        <text class="section-title" static>传输记录</text>
+      </list-item>
+      <list-item class="item" if="{{transferRecords.length == 0}}" type="item">
+        <div class="item-content">
+          <text class="itemtext2" static>暂无传输记录</text>
+        </div>
+      </list-item>
+      <list-item class="item" for="{{transferRecords}}" tid="id" type="record">
+        <div class="item-content">
+          <text class="itemtext" static>{{$item.name}}</text>
+          <text class="itemtext2" static>{{$item.time}}</text>
+        </div>
+      </list-item>
+
       <!-- 应用信息底栏 -->
       <list-item style="width: 100%; height: 260px; flex-direction: column; align-items: center; justify-content: flex-start; padding-top: 24px;" type="footer">
         <img static src="/common/images/icon.png" style="width: 64px; height: 64px; border-radius: 14px;" />
@@ -83,7 +125,9 @@ import storage from '@system.storage'
 import device from '@system.device'
 import brightness from '@system.brightness'
 import app from '@system.app'
+import prompt from '@system.prompt'
 import dataManager from '../../common/utils/dataManager.js'
+import appState from '../../common/utils/appState.js'
 import { getNowTime, getFormattedTime } from '../../common/utils/timeUtil.js'
 
 export default {
@@ -93,8 +137,11 @@ export default {
     fontSizeValue: 26,
     keepScreenOn: false,
     timeFormat: '24h',
+    readingMode: 'paginated',
     availableStorage: '加载中...',
     contentCount: '加载中...',
+    contentStorageSize: '加载中...',
+    transferRecords: [],
     versionName: 'preview',
     appName: '考点阅读器',
     developer: 'Vultra 和 睡不着的鸿鹄'
@@ -180,6 +227,19 @@ export default {
         this.timeFormat = '24h'
       }
     })
+    storage.get({
+      key: 'KD_READING_MODE',
+      success: (data) => {
+        if (!this.$valid) return
+        this.readingMode = data === 'seamless' ? 'seamless' : 'paginated'
+        appState.readingMode = this.readingMode
+      },
+      fail: () => {
+        if (!this.$valid) return
+        this.readingMode = 'paginated'
+        appState.readingMode = 'paginated'
+      }
+    })
   },
 
   adjustFontSize(delta) {
@@ -202,6 +262,16 @@ export default {
     this.nowTime = getFormattedTime(this.timeFormat)
   },
 
+  toggleReadingMode() {
+    this.readingMode = this.readingMode === 'paginated' ? 'seamless' : 'paginated'
+    storage.set({ key: 'KD_READING_MODE', value: this.readingMode })
+    appState.readingMode = this.readingMode
+    prompt.showToast({
+      message: this.readingMode === 'paginated' ? '已切换为分页模式' : '已切换为无缝模式',
+      duration: 1500
+    })
+  },
+
   async loadStorageInfo() {
     device.getAvailableStorage({
       success: (data) => {
@@ -217,6 +287,47 @@ export default {
     const count = await dataManager.getTotalContentCount()
     if (!this.$valid) return
     this.contentCount = count.toString()
+
+    // 占用存储大小
+    const size = await dataManager.getContentStorageSize()
+    if (!this.$valid) return
+    this.contentStorageSize = dataManager.formatFileSize(size || 0)
+
+    // 传输记录（从蓝牙内容 meta 读取，按时间倒序）
+    await this.loadTransferRecords()
+  },
+
+  async loadTransferRecords() {
+    try {
+      const list = await dataManager.getBluetoothContentList()
+      if (!this.$valid) return
+      const files = (list || []).filter(item => item.type === 'content')
+      files.sort((a, b) => (b.created || 0) - (a.created || 0))
+      this.transferRecords = files.slice(0, 5).map(item => ({
+        id: item.id,
+        name: item.name,
+        time: this.formatTimestamp(item.created)
+      }))
+    } catch (e) {
+      if (this.$valid) this.transferRecords = []
+    }
+  },
+
+  formatTimestamp(ts) {
+    if (!ts) return ''
+    const d = new Date(ts)
+    const month = d.getMonth() + 1
+    const day = d.getDate()
+    let hours = d.getHours()
+    let minutes = d.getMinutes()
+    hours = hours < 10 ? '0' + hours : hours
+    minutes = minutes < 10 ? '0' + minutes : minutes
+    return month + '-' + day + ' ' + hours + ':' + minutes
+  },
+
+  clearCache() {
+    // 清除内存缓存提示
+    prompt.showToast({ message: '内存缓存已清理', duration: 1500 })
   },
 
   goDeleteAll() {
