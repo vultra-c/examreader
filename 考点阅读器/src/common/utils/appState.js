@@ -10,9 +10,6 @@ const state = {
   // 跳转目标百分比（无缝模式 percentJump -> reader）
   jumpToPercent: null,
 
-  // 搜索结果跳转：关键词（reader 加载分页后直接在 pages 中搜索）
-  searchKeyword: null,
-
   // 当前阅读模式（'paginated' 分页 / 'seamless' 无缝）
   readingMode: 'paginated',
 
@@ -75,7 +72,6 @@ export function setContentName(name) {
 export function resetJumpState() {
   state.jumpToPage = null
   state.jumpToPercent = null
-  state.searchKeyword = null
   state.needBackToReader = false
 }
 

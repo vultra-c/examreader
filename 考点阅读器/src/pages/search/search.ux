@@ -158,12 +158,12 @@ export default {
   onResultClick(item) {
     appState.readerPath = item.path
 
-    // 传递搜索关键词，reader 加载分页后直接在 pages 中搜索所在页
-    appState.searchKeyword = this.searchText.trim()
-
     router.push({
       uri: '/pages/reader',
-      params: { path: item.path }
+      params: {
+        path: item.path,
+        searchKeyword: this.searchText.trim()
+      }
     })
   },
 
