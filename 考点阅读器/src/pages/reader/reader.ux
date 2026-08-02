@@ -1,18 +1,26 @@
 <template>
   <div class="page">
 
-    <!-- 无缝模式：使用 list 虚拟渲染，避免长文本一次性渲染导致卡顿
-         list 只渲染可见的 list-item，长文本分段后不会卡顿 -->
-    <list if="{{readingMode === 'seamless'}}"
-          id="seamlessList"
-          class="seamless-list"
-          @click="onTxtClick"
-          @scroll="onScroll"
-          @scrollbottom="onReachBottom">
-      <list-item for="{{seamlessSegments}}" type="seg" class="seg-item">
-        <text style="width: 296px; text-align: left; color: #FFFFFF; font-size: {{fontSize}}px; font-weight: bold; line-height: {{lineHeight}}px;">{{$item}}</text>
-      </list-item>
-    </list>
+    <!-- 无缝模式：直接套用弦电子书 detail.ux 的 scroll 结构
+         关键：scroll-top 属性绑定 + position:absolute 内容容器 + 文本按行分块渲染
+         不使用 list（list 在长文本时无法显示内容） -->
+    <scroll
+      id="seamlessScroll"
+      if="{{readingMode === 'seamless'}}"
+      style="position: absolute; width: 336px; height: 460px; top: 10px;"
+      scroll-y="{{true}}"
+      scroll-top="{{seamlessScrollTopValue}}"
+      @scroll="onScroll"
+      @scrollbottom="onReachBottom"
+      @click="onTxtClick"
+    >
+      <div id="seamlessContainer" style="position: absolute; width: 336px; flex-direction: column;">
+        <div for="{{seamlessBlocks}}" style="width: 336px; flex-direction: column;">
+          <text style="width: 336px; text-align: left; color: #FFFFFF; font-size: {{fontSize}}px; font-weight: bold; line-height: {{lineHeight}}px; padding-left: 20px; padding-right: 20px;">{{$item}}</text>
+        </div>
+        <div style="width: 336px; height: 40px;"></div>
+      </div>
+    </scroll>
 
     <!-- 分页模式：scroll + text（仅渲染当前页内容） -->
     <scroll if="{{readingMode !== 'seamless'}}"
@@ -94,7 +102,8 @@ export default {
     // 无缝模式相关
     readingMode: 'paginated',
     fullContent: '',
-    seamlessSegments: [],
+    seamlessBlocks: [],
+    seamlessScrollTopValue: 0,
     seamlessScrollTop: 0,
     readingPercent: 0,
     seamlessMaxScroll: 1,
@@ -185,9 +194,9 @@ export default {
         await this.loadContent()
         if (!this.$valid) return
         this.saveProgress()
-      } else if (this.seamlessSegments.length > 0) {
+      } else if (this.seamlessBlocks.length > 0) {
         // 无缝模式：字号变化只需重算滚动范围
-        this.seamlessMaxScroll = this.estimateMaxScrollFromSegments(this.seamlessSegments)
+        this.seamlessMaxScroll = this.estimateMaxScroll(this.fullContent)
       }
     }
     // 处理跳页请求（pageJump / percentJump）
@@ -268,16 +277,10 @@ export default {
       if (this.readingMode === 'seamless') {
         // 无缝模式：progress 是滚动偏移量（像素）
         if (progress != null && progress !== undefined && progress >= 0) {
-          this.seamlessScrollTop = progress
-          this.seamlessRestoring = true
+          this.seamlessScrollTopValue = progress
           this.$nextTick(() => {
             if (!this.$valid) return
-            const scroll = this.$element('seamlessList')
-            if (scroll && progress > 0) {
-              scroll.scrollTo({ top: progress })
-            }
-            this.seamlessRestoring = false
-            this.updateSeamlessPercent(progress)
+            this.seamlessScrollTopValue = progress
           })
         }
       } else {
@@ -317,10 +320,7 @@ export default {
         const targetScroll = Math.round(percent / 100 * this.seamlessMaxScroll)
         this.$nextTick(() => {
           if (!this.$valid) return
-          const scroll = this.$element('seamlessList')
-          if (scroll) {
-            scroll.scrollTo({ top: targetScroll })
-          }
+          this.seamlessScrollTopValue = targetScroll
           this.seamlessScrollTop = targetScroll
           this.readingPercent = percent
           this.saveProgress()
@@ -351,11 +351,16 @@ export default {
   async loadContent() {
     this.pagesLoaded = false
 
-    // 无缝模式：加载分段内容用于 list 虚拟渲染，避免长文本卡顿
+    // 无缝模式：加载全文并按行分块，使用 scroll + 多个 text 元素渲染
+    // 套用弦电子书 detail.ux 的 scroll 结构，避免长文本一次性渲染导致卡顿
     if (this.readingMode === 'seamless') {
-      const segments = await dataManager.getReaderContentSegments(this.path, 20)
+      const fullContent = await dataManager.getReaderFullContent(this.path)
       if (!this.$valid) return
-      this.seamlessSegments = segments
+      this.fullContent = fullContent
+
+      // 按行拆分为 blocks，每行一个 text 元素（与弦电子书 detail.ux blocks 结构一致）
+      const blocks = fullContent.split('\n')
+      this.seamlessBlocks = blocks
 
       const name = dataManager.getUnifiedNodeName(this.path)
       if (name) {
@@ -364,9 +369,10 @@ export default {
       }
 
       // 估算总滚动范围用于百分比计算
-      this.seamlessMaxScroll = this.estimateMaxScrollFromSegments(segments)
+      this.seamlessMaxScroll = this.estimateMaxScroll(fullContent)
       this.readingPercent = 0
       this.seamlessScrollTop = 0
+      this.seamlessScrollTopValue = 0
       this.pagesLoaded = true
       // 清理分页缓存数据释放内存
       this.pages = []
@@ -447,7 +453,6 @@ export default {
   onScroll(e) {
     if (this.readingMode === 'seamless') {
       // 无缝模式：跟踪滚动位置
-      if (this.seamlessRestoring) return
       const scrollTop = e.scrollTop || (e.detail && e.detail.scrollTop) || 0
       this.seamlessScrollTop = scrollTop
       this.updateSeamlessPercent(scrollTop)
@@ -598,17 +603,4 @@ export default {
 
 <style>
   @import '../../common/style.css';
-  .seamless-list {
-    position: absolute;
-    left: 0px;
-    top: 10px;
-    width: 336px;
-    height: 460px;
-  }
-  .seg-item {
-    width: 336px;
-    padding-left: 20px;
-    padding-right: 20px;
-    padding-bottom: 10px;
-  }
 </style>
