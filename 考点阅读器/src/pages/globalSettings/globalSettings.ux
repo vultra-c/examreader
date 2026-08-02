@@ -101,12 +101,14 @@
       </list-item>
 
       <!-- 应用信息底栏 -->
-      <list-item style="width: 100%; height: 260px; flex-direction: column; align-items: center; justify-content: flex-start; padding-top: 24px;" type="footer">
+      <list-item style="width: 100%; height: 320px; flex-direction: column; align-items: center; justify-content: flex-start; padding-top: 24px;" type="footer">
         <img static src="/common/images/icon.png" style="width: 64px; height: 64px; border-radius: 14px;" />
         <text static style="font-size: 26px; font-weight: bold; color: white; text-align: center; margin-top: 10px;">{{appName}}</text>
         <text static style="font-size: 22px; font-weight: bold; color: rgba(255,255,255,0.4); text-align: center; margin-top: 6px;">版本 {{versionName}}</text>
         <text static style="font-size: 20px; font-weight: bold; color: rgba(255,255,255,0.3); text-align: center; margin-top: 8px;">开发：{{developer}}</text>
+        <text static style="font-size: 18px; font-weight: bold; color: rgba(255,255,255,0.3); text-align: center; margin-top: 6px;">{{thanks}}</text>
         <text static style="font-size: 16px; font-weight: bold; color: rgba(255,255,255,0.25); text-align: center; margin-top: 6px; width: 300px;">部分资源来源：喵喵电子书vela端设计稿</text>
+        <text static style="font-size: 16px; font-weight: bold; color: rgba(255,255,255,0.2); text-align: center; margin-top: 8px; width: 300px; line-height: 24px;">提醒：请勿上传长度过长的文件，可能导致应用卡顿或崩溃</text>
       </list-item>
     </list>
 
@@ -144,7 +146,8 @@ export default {
     transferRecords: [],
     versionName: 'preview',
     appName: '考点阅读器',
-    developer: 'Vultra 和 睡不着的鸿鹄'
+    developer: 'Vultra',
+    thanks: '特别感谢 @无源流沙 和 @爅峫'
   },
 
   onInit() {
