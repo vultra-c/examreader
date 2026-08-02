@@ -129,17 +129,20 @@ export default {
     if (!this.$valid) return
 
     // 搜索结果跳转（分页模式：跳转到关键词所在页）
-    if (appState.searchResultPos != null && this.readingMode === 'paginated') {
+    if (appState.searchResultPos != null) {
       const pos = appState.searchResultPos
       appState.searchResultPos = null
-      const page = await dataManager.findPageByCharPosition(this.path, pos, this.fontSize)
-      if (!this.$valid) return
-      if (page >= 0 && page < this.totalPages) {
-        this.currentPage = page
-        this.updatePageContent()
+      if (this.readingMode === 'paginated') {
+        const page = await dataManager.findPageByCharPosition(this.path, pos, this.fontSize)
+        if (!this.$valid) return
+        if (page >= 0 && page < this.totalPages) {
+          this.currentPage = page
+          this.updatePageContent()
+        }
+        this.saveProgress()
+        return
       }
-      this.saveProgress()
-      return
+      // 无缝模式：忽略位置，继续正常加载
     }
 
     await this.loadReadingProgress()
@@ -164,9 +167,32 @@ export default {
       if (!this.$valid) return
 
       // 搜索结果跳转（分页模式：跳转到关键词所在页）
-      if (appState.searchResultPos != null && this.readingMode === 'paginated') {
+      if (appState.searchResultPos != null) {
         const pos = appState.searchResultPos
         appState.searchResultPos = null
+        if (this.readingMode === 'paginated') {
+          const page = await dataManager.findPageByCharPosition(this.path, pos, this.fontSize)
+          if (!this.$valid) return
+          if (page >= 0 && page < this.totalPages) {
+            this.currentPage = page
+            this.updatePageContent()
+          }
+          this.saveProgress()
+          return
+        }
+      }
+
+      await this.loadReadingProgress()
+      // 处理跳转请求
+      this.applyJumpToPage()
+      return
+    }
+
+    // 搜索结果跳转（分页模式，未发生模式变化时）
+    if (appState.searchResultPos != null) {
+      const pos = appState.searchResultPos
+      appState.searchResultPos = null
+      if (this.readingMode === 'paginated' && this.pagesLoaded) {
         const page = await dataManager.findPageByCharPosition(this.path, pos, this.fontSize)
         if (!this.$valid) return
         if (page >= 0 && page < this.totalPages) {
@@ -176,11 +202,6 @@ export default {
         this.saveProgress()
         return
       }
-
-      await this.loadReadingProgress()
-      // 处理跳转请求
-      this.applyJumpToPage()
-      return
     }
 
     // 字号变化：分页模式动态重新分页，无缝模式重算滚动估算

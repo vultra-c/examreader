@@ -17,16 +17,6 @@
       <text class="clear-icon" static>×</text>
     </div>
 
-    <!-- History search section (shown when no search performed and keyboard hidden) -->
-    <div class="history-section" show="{{!hasSearched && !showKeyboard && historyList.length > 0}}">
-      <text class="history-title" static>历史搜索</text>
-      <div class="history-chips">
-        <div class="history-chip" for="{{item in historyList}}" @click="onHistoryClick($item)">
-          <text class="chip-text">{{$item}}</text>
-        </div>
-      </div>
-    </div>
-
     <!-- Results list (hidden while keyboard is open) -->
     <list class="result-list" show="{{hasSearched && !showKeyboard}}">
       <list-item class="result-item" type="result" for="{{results}}" tid="path" @click="onResultClick($item)">
@@ -55,13 +45,9 @@
 <script>
 import router from '@system.router'
 import prompt from '@system.prompt'
-import storage from '@system.storage'
 import dataManager from '../../common/utils/dataManager.js'
 import { getNowTime } from '../../common/utils/timeUtil.js'
 import appState from '../../common/utils/appState.js'
-
-const STORAGE_KEY_HISTORY = 'KD_SEARCH_HISTORY'
-const MAX_HISTORY = 6
 
 export default {
   private: {
@@ -70,8 +56,7 @@ export default {
     searchText: '',
     showKeyboard: false,
     results: [],
-    hasSearched: false,
-    historyList: []
+    hasSearched: false
   },
   protected: {
     scope: 'global',
@@ -85,7 +70,6 @@ export default {
         this.nowTime = getNowTime()
       }
     }, 60000)
-    this.loadHistory()
   },
 
   onDestroy() {
@@ -93,49 +77,6 @@ export default {
       clearInterval(this.timer)
       this.timer = null
     }
-  },
-
-  onShow() {
-    if (this.$valid) {
-      this.loadHistory()
-    }
-  },
-
-  // Load search history from storage
-  loadHistory() {
-    storage.get({
-      key: STORAGE_KEY_HISTORY,
-      success: (data) => {
-        if (!this.$valid) return
-        if (data) {
-          try {
-            this.historyList = JSON.parse(data) || []
-          } catch (e) {
-            this.historyList = []
-          }
-        } else {
-          this.historyList = []
-        }
-      },
-      fail: () => {
-        if (!this.$valid) return
-        this.historyList = []
-      }
-    })
-  },
-
-  // Save a keyword to history (dedup, move to front, cap at MAX_HISTORY)
-  saveHistory(keyword) {
-    let list = this.historyList.filter(item => item !== keyword)
-    list.unshift(keyword)
-    if (list.length > MAX_HISTORY) {
-      list = list.slice(0, MAX_HISTORY)
-    }
-    this.historyList = list
-    storage.set({
-      key: STORAGE_KEY_HISTORY,
-      value: JSON.stringify(list)
-    })
   },
 
   // Toggle the on-screen keyboard
@@ -169,12 +110,6 @@ export default {
     this.results = []
   },
 
-  // Click a history chip: fill the search box and search immediately
-  onHistoryClick(keyword) {
-    this.searchText = keyword
-    this.doSearch()
-  },
-
   // Run a content search and display results
   async doSearch() {
     const keyword = this.searchText.trim()
@@ -184,7 +119,6 @@ export default {
     }
     this.showKeyboard = false
     this.hasSearched = true
-    this.saveHistory(keyword)
 
     let list
     if (this.scope === 'single' && this.searchPath) {
@@ -210,9 +144,10 @@ export default {
   onResultClick(item) {
     appState.readerPath = item.path
 
-    // 分页模式：设置搜索结果位置，reader 页面会跳转到关键词所在页
-    // 无缝模式：直接打开文件，不跳转到特定位置
-    if (appState.readingMode === 'paginated' && item.position != null && item.position >= 0) {
+    // 始终设置搜索结果位置，reader 页面会根据自身阅读模式决定是否跳转
+    // 分页模式：跳转到关键词所在页
+    // 无缝模式：reader 会忽略该位置，直接打开文件
+    if (item.position != null && item.position >= 0) {
       appState.searchResultPos = item.position
     }
 
@@ -290,44 +225,6 @@ export default {
   .clear-icon {
     font-size: 30px;
     color: rgba(255, 255, 255, 0.6);
-    text-align: center;
-  }
-
-  /* History search section */
-  .history-section {
-    position: absolute;
-    left: 0px;
-    top: 172px;
-    width: 336px;
-    flex-direction: column;
-    padding: 0px 6px;
-  }
-  .history-title {
-    font-size: 22px;
-    font-weight: bold;
-    color: rgba(255, 255, 255, 0.4);
-    margin-bottom: 12px;
-    margin-left: 10px;
-  }
-  .history-chips {
-    flex-direction: row;
-    flex-wrap: wrap;
-    padding: 0px 6px;
-  }
-  .history-chip {
-    height: 40px;
-    padding: 0px 16px;
-    margin-right: 8px;
-    margin-bottom: 8px;
-    background-color: #1C1C1E;
-    border-radius: 20px;
-    justify-content: center;
-    align-items: center;
-  }
-  .chip-text {
-    font-size: 20px;
-    font-weight: bold;
-    color: #FFFFFF;
     text-align: center;
   }
 
