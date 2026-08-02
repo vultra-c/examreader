@@ -107,7 +107,7 @@ export default {
   },
   protected: {
     path: '',
-    searchKeyword: ''
+    targetPage: -1
   },
 
   onInit() {
@@ -129,22 +129,13 @@ export default {
     await this.loadContent()
     if (!this.$valid) return
 
-    // 搜索结果跳转（分页模式：直接在已加载的 pages 中搜索关键词所在页）
-    if (this.searchKeyword && this.searchKeyword.length > 0) {
-      const keyword = this.searchKeyword
-      this.searchKeyword = ''
-      if (this.readingMode === 'paginated' && this.pages.length > 0) {
-        const lowerKeyword = keyword.toLowerCase()
-        for (let i = 0; i < this.pages.length; i++) {
-          if (this.pages[i] && this.pages[i].toLowerCase().indexOf(lowerKeyword) >= 0) {
-            this.currentPage = i
-            this.updatePageContent()
-            break
-          }
-        }
-        this.saveProgress()
-        return
-      }
+    // 搜索结果跳转：直接跳到指定页码
+    if (this.targetPage != null && this.targetPage >= 0 && this.targetPage < this.totalPages) {
+      this.currentPage = this.targetPage
+      this.targetPage = -1
+      this.updatePageContent()
+      this.saveProgress()
+      return
     }
 
     await this.loadReadingProgress()

@@ -45,6 +45,7 @@
 <script>
 import router from '@system.router'
 import prompt from '@system.prompt'
+import storage from '@system.storage'
 import dataManager from '../../common/utils/dataManager.js'
 import { getNowTime } from '../../common/utils/timeUtil.js'
 import appState from '../../common/utils/appState.js'
@@ -122,7 +123,7 @@ export default {
 
     let list
     if (this.scope === 'single' && this.searchPath) {
-      // 单文件搜索：搜索指定考点中的内容
+      // 单文件搜索
       const matches = await dataManager.searchContentInFile(this.searchPath, keyword)
       const name = dataManager.getUnifiedNodeName(this.searchPath)
       list = (matches || []).map((m, i) => ({
@@ -133,9 +134,8 @@ export default {
         position: m.position
       }))
     } else {
-      // 全局搜索：搜索手环内所有考点内容
+      // 全局搜索
       list = await dataManager.searchContent(keyword)
-      // 为每条结果添加唯一 id，避免同文件多结果被列表去重
       if (list && list.length > 0) {
         list = list.map((item, i) => {
           return {
@@ -154,15 +154,31 @@ export default {
     this.results = list || []
   },
 
-  // Open a result in the reader page
-  onResultClick(item) {
-    appState.readerPath = item.path
+  // 点击搜索结果：在搜索页直接计算页码，然后传给 reader
+  async onResultClick(item) {
+    // 从 storage 读取字号和阅读模式
+    const fontSizeStr = await new Promise((resolve) => {
+      storage.get({ key: 'KD_FONT_SIZE', success: (d) => resolve(d), fail: () => resolve(null) })
+    })
+    const modeStr = await new Promise((resolve) => {
+      storage.get({ key: 'KD_READING_MODE', success: (d) => resolve(d), fail: () => resolve(null) })
+    })
+
+    let fontSize = fontSizeStr ? parseInt(fontSizeStr) : 26
+    if (isNaN(fontSize)) fontSize = 26
+    const readingMode = modeStr === 'seamless' ? 'seamless' : 'paginated'
+
+    // 分页模式下：在搜索页直接计算关键词在第几页
+    let targetPage = 0
+    if (readingMode === 'paginated' && item.position != null && item.position >= 0) {
+      targetPage = await dataManager.findPageByCharPosition(item.path, item.position, fontSize)
+    }
 
     router.push({
       uri: '/pages/reader',
       params: {
         path: item.path,
-        searchKeyword: this.searchText.trim()
+        targetPage: targetPage
       }
     })
   },
@@ -187,7 +203,6 @@ export default {
 <style>
   @import '../../common/style.css';
 
-  /* Search input box - pill-shaped, no border */
   .search-box {
     position: absolute;
     left: 6px;
@@ -204,7 +219,6 @@ export default {
     width: 34px;
     height: 34px;
   }
-  /* Both placeholder and input text use the same font-size for consistent vertical alignment */
   .search-text {
     font-size: 24px;
     font-weight: bold;
@@ -220,7 +234,6 @@ export default {
     lines: 1;
   }
 
-  /* Clear button - circular, positioned over the right side of the search box */
   .clear-btn {
     position: absolute;
     left: 286px;
@@ -238,7 +251,6 @@ export default {
     text-align: center;
   }
 
-  /* Results list */
   .result-list {
     position: absolute;
     left: 6px;
@@ -247,7 +259,6 @@ export default {
     height: 308px;
   }
 
-  /* Result item card */
   .result-item {
     width: 100%;
     height: 80px;
@@ -280,7 +291,6 @@ export default {
     margin-top: 4px;
   }
 
-  /* Empty hint shown when a search returns nothing */
   .empty-hint {
     position: absolute;
     left: 0px;
