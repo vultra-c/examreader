@@ -1,20 +1,20 @@
 <template>
   <div class="page">
 
-    <!-- 考点内容（全屏滚动区域，复刻弦电子书 detail.ux 布局）
-         scroll 覆盖全屏，文字始终铺满全屏
-         顶部/底部遮罩栏叠加在文字上方（半透明渐变）
-         padding 固定不变，无论 showSetting 状态如何，文字位置始终一致
-         注意：text 必须加 lines: -1 否则内容会被截断
-         注意：不能在父级 div 上放 @swipe，否则会拦截 scroll 的垂直滑动事件 -->
+    <!-- 考点内容（直接套用弦电子书 detail.ux scroll 结构）
+         关键：内容容器必须 position: absolute 才能让文字自由展开、scroll 才能检测到内容超出视口高度
+         scroll 高度 = 480 - verticalMargin*2 = 460px，top = verticalMargin = 10px
+         文字宽度 336px 全宽，不设 margin-left
+         不设 lines: -1（弦电子书不设，Vela text 默认显示全部行）
+         不在父 div 设 @swipe，不干扰 scroll 原生垂直滚动 -->
     <scroll id="contentScroll" scroll-y="{{true}}"
             @click="onTxtClick"
             @scroll="onScroll"
             @scrollbottom="onReachBottom"
-            style="position: absolute; left: 0px; top: 0px; width: 336px; height: 480px;">
-      <div style="width: 336px; flex-direction: column; padding-top: 20px; padding-bottom: 40px;">
-        <text if="{{readingMode === 'seamless'}}" style="width: 296px; margin-left: 20px; text-align: left; color: #FFFFFF; font-size: {{fontSize}}px; font-weight: bold; line-height: {{lineHeight}}px; lines: -1;">{{fullContent}}</text>
-        <text if="{{readingMode !== 'seamless'}}" style="width: 296px; margin-left: 20px; text-align: left; color: #FFFFFF; font-size: {{fontSize}}px; font-weight: bold; line-height: {{lineHeight}}px; lines: -1;">{{currentPageContent}}</text>
+            style="position: absolute; left: 0px; top: 10px; width: 336px; height: 460px;">
+      <div style="position: absolute; width: 336px; flex-direction: column; padding-left: 20px; padding-right: 20px; padding-bottom: 40px;">
+        <text if="{{readingMode === 'seamless'}}" style="width: 296px; text-align: left; color: #FFFFFF; font-size: {{fontSize}}px; font-weight: bold; line-height: {{lineHeight}}px;">{{fullContent}}</text>
+        <text if="{{readingMode !== 'seamless'}}" style="width: 296px; text-align: left; color: #FFFFFF; font-size: {{fontSize}}px; font-weight: bold; line-height: {{lineHeight}}px;">{{currentPageContent}}</text>
       </div>
     </scroll>
 
@@ -449,7 +449,7 @@ export default {
       }
     }
     const estimatedHeight = totalLines * this.lineHeight + 40
-    return Math.max(1, estimatedHeight - 480)
+    return Math.max(1, estimatedHeight - 460)
   },
 
   /**
