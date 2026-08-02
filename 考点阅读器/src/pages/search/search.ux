@@ -19,7 +19,7 @@
 
     <!-- Results list (hidden while keyboard is open) -->
     <list class="result-list" show="{{hasSearched && !showKeyboard}}">
-      <list-item class="result-item" type="result" for="{{results}}" tid="path" @click="onResultClick($item)">
+      <list-item class="result-item" type="result" for="{{results}}" tid="id" @click="onResultClick($item)">
         <div class="result-content">
           <text class="result-name">{{$item.name}}</text>
           <text class="result-snippet">{{$item.snippet}}</text>
@@ -125,7 +125,8 @@ export default {
       // 单文件搜索：搜索指定考点中的内容
       const matches = await dataManager.searchContentInFile(this.searchPath, keyword)
       const name = dataManager.getUnifiedNodeName(this.searchPath)
-      list = (matches || []).map(m => ({
+      list = (matches || []).map((m, i) => ({
+        id: this.searchPath + '_' + i,
         name: name,
         path: this.searchPath,
         snippet: m.snippet,
@@ -134,6 +135,19 @@ export default {
     } else {
       // 全局搜索：搜索手环内所有考点内容
       list = await dataManager.searchContent(keyword)
+      // 为每条结果添加唯一 id，避免同文件多结果被列表去重
+      if (list && list.length > 0) {
+        list = list.map((item, i) => {
+          return {
+            name: item.name,
+            path: item.path,
+            snippet: item.snippet,
+            position: item.position,
+            type: item.type,
+            id: item.path + '_' + i
+          }
+        })
+      }
     }
 
     if (!this.$valid) return
