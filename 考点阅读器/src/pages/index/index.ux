@@ -25,6 +25,9 @@
     <text style="position: absolute; left: 78px; top: 6px; width: 180px; line-height: 30px; font-weight: bold; font-size: 24px; color: rgba(255,255,255,0.6); text-align: center;">{{nowTime}}</text>
     <text static style="position: absolute; left: 78px; top: 36px; width: 180px; line-height: 42px; font-weight: bold; font-size: 32px; color: white; text-align: center;">主页</text>
 
+    <!-- 右下角全局搜索图标（与返回键同大小 72x72） -->
+    <img static src="/common/images/search.png" @click="goSearch" style="position: absolute; left: 258px; top: 402px; width: 72px; height: 72px;" />
+
   </div>
 </template>
 
@@ -154,6 +157,10 @@ export default {
 
   goSettings() {
     router.push({ uri: '/pages/globalSettings' })
+  },
+
+  goSearch() {
+    router.push({ uri: '/pages/search', params: { scope: 'global' } })
   },
 
   exitApp() {

@@ -1,20 +1,28 @@
 <template>
   <div class="page">
 
-    <!-- 考点内容（直接套用弦电子书 detail.ux scroll 结构）
-         关键：内容容器必须 position: absolute 才能让文字自由展开、scroll 才能检测到内容超出视口高度
-         scroll 高度 = 480 - verticalMargin*2 = 460px，top = verticalMargin = 10px
-         文字宽度 336px 全宽，不设 margin-left
-         不设 lines: -1（弦电子书不设，Vela text 默认显示全部行）
-         不在父 div 设 @swipe，不干扰 scroll 原生垂直滚动 -->
-    <scroll id="contentScroll" scroll-y="{{true}}"
+    <!-- 无缝模式：使用 list 虚拟渲染，避免长文本一次性渲染导致卡顿
+         list 只渲染可见的 list-item，长文本分段后不会卡顿 -->
+    <list if="{{readingMode === 'seamless'}}"
+          id="seamlessList"
+          class="seamless-list"
+          @click="onTxtClick"
+          @scroll="onScroll"
+          @scrollbottom="onReachBottom">
+      <list-item for="{{seamlessSegments}}" type="seg" class="seg-item">
+        <text style="width: 296px; text-align: left; color: #FFFFFF; font-size: {{fontSize}}px; font-weight: bold; line-height: {{lineHeight}}px;">{{$item}}</text>
+      </list-item>
+    </list>
+
+    <!-- 分页模式：scroll + text（仅渲染当前页内容） -->
+    <scroll if="{{readingMode !== 'seamless'}}"
+            id="contentScroll" scroll-y="{{true}}"
             @click="onTxtClick"
             @scroll="onScroll"
             @scrollbottom="onReachBottom"
             style="position: absolute; left: 0px; top: 10px; width: 336px; height: 460px;">
       <div style="position: absolute; width: 336px; flex-direction: column; padding-left: 20px; padding-right: 20px; padding-bottom: 40px;">
-        <text if="{{readingMode === 'seamless'}}" style="width: 296px; text-align: left; color: #FFFFFF; font-size: {{fontSize}}px; font-weight: bold; line-height: {{lineHeight}}px;">{{fullContent}}</text>
-        <text if="{{readingMode !== 'seamless'}}" style="width: 296px; text-align: left; color: #FFFFFF; font-size: {{fontSize}}px; font-weight: bold; line-height: {{lineHeight}}px;">{{currentPageContent}}</text>
+        <text style="width: 296px; text-align: left; color: #FFFFFF; font-size: {{fontSize}}px; font-weight: bold; line-height: {{lineHeight}}px;">{{currentPageContent}}</text>
       </div>
     </scroll>
 
@@ -62,7 +70,6 @@ import router from '@system.router'
 import prompt from '@system.prompt'
 import storage from '@system.storage'
 import brightness from '@system.brightness'
-import vibrator from '@system.vibrator'
 import dataManager from '../../common/utils/dataManager.js'
 import { getFormattedTimeNow } from '../../common/utils/timeUtil.js'
 import appState from '../../common/utils/appState.js'
@@ -87,6 +94,7 @@ export default {
     // 无缝模式相关
     readingMode: 'paginated',
     fullContent: '',
+    seamlessSegments: [],
     seamlessScrollTop: 0,
     readingPercent: 0,
     seamlessMaxScroll: 1,
@@ -115,6 +123,21 @@ export default {
     if (!this.$valid) return
     await this.loadContent()
     if (!this.$valid) return
+
+    // 搜索结果跳转（分页模式：跳转到关键词所在页）
+    if (appState.searchResultPos != null && this.readingMode === 'paginated') {
+      const pos = appState.searchResultPos
+      appState.searchResultPos = null
+      const page = await dataManager.findPageByCharPosition(this.path, pos, this.fontSize)
+      if (!this.$valid) return
+      if (page >= 0 && page < this.totalPages) {
+        this.currentPage = page
+        this.updatePageContent()
+      }
+      this.saveProgress()
+      return
+    }
+
     await this.loadReadingProgress()
   },
 
@@ -135,6 +158,21 @@ export default {
       this.modeChanged = false
       await this.loadContent()
       if (!this.$valid) return
+
+      // 搜索结果跳转（分页模式：跳转到关键词所在页）
+      if (appState.searchResultPos != null && this.readingMode === 'paginated') {
+        const pos = appState.searchResultPos
+        appState.searchResultPos = null
+        const page = await dataManager.findPageByCharPosition(this.path, pos, this.fontSize)
+        if (!this.$valid) return
+        if (page >= 0 && page < this.totalPages) {
+          this.currentPage = page
+          this.updatePageContent()
+        }
+        this.saveProgress()
+        return
+      }
+
       await this.loadReadingProgress()
       // 处理跳转请求
       this.applyJumpToPage()
@@ -147,9 +185,9 @@ export default {
         await this.loadContent()
         if (!this.$valid) return
         this.saveProgress()
-      } else if (this.fullContent) {
+      } else if (this.seamlessSegments.length > 0) {
         // 无缝模式：字号变化只需重算滚动范围
-        this.seamlessMaxScroll = this.estimateMaxScroll(this.fullContent)
+        this.seamlessMaxScroll = this.estimateMaxScrollFromSegments(this.seamlessSegments)
       }
     }
     // 处理跳页请求（pageJump / percentJump）
@@ -234,7 +272,7 @@ export default {
           this.seamlessRestoring = true
           this.$nextTick(() => {
             if (!this.$valid) return
-            const scroll = this.$element('contentScroll')
+            const scroll = this.$element('seamlessList')
             if (scroll && progress > 0) {
               scroll.scrollTo({ top: progress })
             }
@@ -279,7 +317,7 @@ export default {
         const targetScroll = Math.round(percent / 100 * this.seamlessMaxScroll)
         this.$nextTick(() => {
           if (!this.$valid) return
-          const scroll = this.$element('contentScroll')
+          const scroll = this.$element('seamlessList')
           if (scroll) {
             scroll.scrollTo({ top: targetScroll })
           }
@@ -313,11 +351,11 @@ export default {
   async loadContent() {
     this.pagesLoaded = false
 
-    // 无缝模式：加载全文内容，跳过分页计算（性能优化）
+    // 无缝模式：加载分段内容用于 list 虚拟渲染，避免长文本卡顿
     if (this.readingMode === 'seamless') {
-      const fullContent = await dataManager.getReaderFullContent(this.path)
+      const segments = await dataManager.getReaderContentSegments(this.path, 20)
       if (!this.$valid) return
-      this.fullContent = fullContent
+      this.seamlessSegments = segments
 
       const name = dataManager.getUnifiedNodeName(this.path)
       if (name) {
@@ -326,7 +364,7 @@ export default {
       }
 
       // 估算总滚动范围用于百分比计算
-      this.seamlessMaxScroll = this.estimateMaxScroll(fullContent)
+      this.seamlessMaxScroll = this.estimateMaxScrollFromSegments(segments)
       this.readingPercent = 0
       this.seamlessScrollTop = 0
       this.pagesLoaded = true
@@ -453,6 +491,31 @@ export default {
   },
 
   /**
+   * 估算无缝模式分段内容的总可滚动高度（基于分段数组）
+   * @param {Array<string>} segments 分段内容数组
+   * @returns {number} 最大可滚动像素值
+   */
+  estimateMaxScrollFromSegments(segments) {
+    if (!segments || segments.length === 0) return 1
+    const charsPerLine = Math.max(1, Math.floor(296 / this.fontSize))
+    let totalLines = 0
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i]
+      if (!seg) continue
+      const lines = seg.split('\n')
+      for (let j = 0; j < lines.length; j++) {
+        if (lines[j].length === 0) {
+          totalLines++
+        } else {
+          totalLines += Math.ceil(lines[j].length / charsPerLine)
+        }
+      }
+    }
+    const estimatedHeight = totalLines * this.lineHeight + 40
+    return Math.max(1, estimatedHeight - 460)
+  },
+
+  /**
    * 更新无缝模式阅读百分比显示
    * 仅当百分比变化 >= 1% 时更新，避免频繁 re-render
    * @param {number} scrollTop 当前滚动位置
@@ -466,7 +529,6 @@ export default {
 
   prevPage() {
     if (this.currentPage > 0) {
-      vibrator.vibrate({ duration: 20 })
       this.currentPage--
       this.updatePageContent()
       this.saveProgress()
@@ -475,7 +537,6 @@ export default {
 
   nextPage() {
     if (this.currentPage < this.totalPages - 1) {
-      vibrator.vibrate({ duration: 20 })
       this.currentPage++
       this.updatePageContent()
       this.saveProgress()
@@ -537,4 +598,17 @@ export default {
 
 <style>
   @import '../../common/style.css';
+  .seamless-list {
+    position: absolute;
+    left: 0px;
+    top: 10px;
+    width: 336px;
+    height: 460px;
+  }
+  .seg-item {
+    width: 336px;
+    padding-left: 20px;
+    padding-right: 20px;
+    padding-bottom: 10px;
+  }
 </style>

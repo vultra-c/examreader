@@ -519,6 +519,90 @@ function _streamPaginate(id, chunkCount, fontSize) {
   })
 }
 
+// 将文本按行数分段（无缝模式 list 虚拟渲染使用）
+function _splitIntoSegments(content, linesPerSegment) {
+  if (!content || content.length === 0) return ['无内容']
+  const lines = content.split('\n')
+  const segments = []
+  let current = []
+  for (let i = 0; i < lines.length; i++) {
+    current.push(lines[i])
+    if (current.length >= linesPerSegment) {
+      segments.push(current.join('\n'))
+      current = []
+    }
+  }
+  if (current.length > 0) {
+    segments.push(current.join('\n'))
+  }
+  return segments.length > 0 ? segments : ['无内容']
+}
+
+// 流式分段：逐块读取存储，边读边分段，避免将整个大文件加载到内存
+// 用于无缝模式的 list 虚拟渲染，每个分段作为 list-item
+function _streamSegments(id, chunkCount, linesPerSegment) {
+  return new Promise((resolve) => {
+    const lps = linesPerSegment || 20
+    const segments = []
+    let currentLines = []
+    let pendingLine = ''
+    let readIndex = 0
+
+    function processChunk(chunk) {
+      const lines = chunk.split('\n')
+      for (let i = 0; i < lines.length; i++) {
+        let line = lines[i]
+        if (i === 0 && pendingLine !== '') {
+          line = pendingLine + line
+          pendingLine = ''
+        }
+        if (i === lines.length - 1) {
+          pendingLine = line
+          break
+        }
+        currentLines.push(line)
+        if (currentLines.length >= lps) {
+          segments.push(currentLines.join('\n'))
+          currentLines = []
+        }
+      }
+    }
+
+    function readNext() {
+      if (readIndex >= chunkCount) {
+        if (pendingLine !== '') {
+          currentLines.push(pendingLine)
+        }
+        if (currentLines.length > 0) {
+          segments.push(currentLines.join('\n'))
+        }
+        resolve(segments.length > 0 ? segments : ['无内容'])
+        return
+      }
+      storage.get({
+        key: STORAGE_KEY_BT_CHUNK_PREFIX + id + '_' + readIndex,
+        success: (data) => {
+          if (data && data.length > 0) {
+            processChunk(data)
+          }
+          readIndex++
+          readNext()
+        },
+        fail: () => {
+          if (pendingLine !== '') {
+            currentLines.push(pendingLine)
+          }
+          if (currentLines.length > 0) {
+            segments.push(currentLines.join('\n'))
+          }
+          resolve(segments.length > 0 ? segments : ['无内容'])
+        }
+      })
+    }
+    readNext()
+  })
+}
+
 // 删除单个文件正文键（同步清缓存）
 // 同时删除新版分块键和旧版单键
 function _deleteBtFileKey(id) {
@@ -600,7 +684,7 @@ function getNodeByPathStr(pathStr) {
 }
 
 // 分页内容：按行数切分，确保文字铺满全屏
-// 超长行自动折行，每行最多 charsPerLine 个字符
+// 超长行自动折行，每行最多 charsPerLine 字符
 // fontSize 可选，默认 26（对应 11 字/行、15 行/页）
 function splitContentIntoPages(content, fontSize) {
   if (!content) return ['无内容']
@@ -1384,6 +1468,7 @@ export default {
                 name: item.name,
                 path: item.id,
                 snippet: snippet,
+                position: pos,
                 type: 'example'
               })
             }
@@ -1413,6 +1498,7 @@ export default {
                   name: item.name,
                   path: item.id,
                   snippet: snippet,
+                  position: pos,
                   type: 'bluetooth'
                 })
               }
@@ -1426,7 +1512,130 @@ export default {
   },
 
   /**
-   * Get reader pages by path (supports builtin_ prefix for examples)
+   * 在单个文件中搜索关键词，返回匹配位置列表
+   * @param {string} pathStr 文件路径
+   * @param {string} keyword 搜索关键词
+   * @returns {Promise<Array>} [{ position: number, snippet: string }]
+   */
+  searchContentInFile(pathStr, keyword) {
+    return new Promise((resolve) => {
+      if (!keyword || keyword.trim().length === 0) {
+        resolve([])
+        return
+      }
+      const kw = keyword.trim().toLowerCase()
+      this.getReaderFullContent(pathStr).then((content) => {
+        if (!content) {
+          resolve([])
+          return
+        }
+        const lowerContent = content.toLowerCase()
+        const matches = []
+        let pos = 0
+        while (true) {
+          pos = lowerContent.indexOf(kw, pos)
+          if (pos < 0) break
+          const start = Math.max(0, pos - 10)
+          const end = Math.min(content.length, pos + kw.length + 20)
+          const snippet = (start > 0 ? '...' : '') + content.substring(start, end) + (end < content.length ? '...' : '')
+          matches.push({ position: pos, snippet: snippet })
+          pos += kw.length
+          if (matches.length >= 20) break
+        }
+        resolve(matches)
+      })
+    })
+  },
+
+  /**
+   * 根据字符位置找到对应的页码（分页模式）
+   * 重新分页并跟踪每页首字符偏移，找到包含该位置的那一页
+   * @param {string} pathStr 文件路径
+   * @param {number} charPosition 字符位置
+   * @param {number} fontSize 字号
+   * @returns {Promise<number>} 页码（0索引）
+   */
+  findPageByCharPosition(pathStr, charPosition, fontSize) {
+    return new Promise((resolve) => {
+      const fs = fontSize || DEFAULT_FONT_SIZE
+      const charsPerLine = Math.max(1, Math.floor(SCREEN_TEXT_WIDTH / fs))
+      const maxLines = Math.max(1, Math.floor(SCREEN_TEXT_HEIGHT / (fs + 4)))
+
+      // 流式分页并跟踪每页首字符偏移
+      function findPageFromContent(content) {
+        if (!content) { resolve(0); return }
+        let pageStart = 0  // 当前页首字符在全文中的偏移
+        let lineCount = 0
+        const lines = content.split('\n')
+        let currentPage = 0
+        let globalCharPos = 0  // 跟踪在全文中的字符位置
+
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i]
+          // 空行
+          if (line.length === 0) {
+            if (lineCount >= maxLines && pageStart < charPosition) {
+              currentPage++
+              pageStart = globalCharPos
+              lineCount = 0
+            }
+            globalCharPos += 1  // \n
+            lineCount++
+            continue
+          }
+          // 超长行折行
+          let remaining = line
+          const subLines = []
+          while (remaining.length > charsPerLine) {
+            subLines.push(remaining.substring(0, charsPerLine))
+            remaining = remaining.substring(charsPerLine)
+          }
+          subLines.push(remaining)
+          for (let j = 0; j < subLines.length; j++) {
+            if (lineCount >= maxLines && pageStart < charPosition) {
+              currentPage++
+              pageStart = globalCharPos
+              lineCount = 0
+            }
+            globalCharPos += subLines[j].length + 1  // +1 for \n
+            lineCount++
+          }
+        }
+        resolve(currentPage)
+      }
+
+      // 获取全文
+      if (pathStr && pathStr.startsWith('builtin_')) {
+        if (_builtinFormattedCache[pathStr]) {
+          findPageFromContent(_builtinFormattedCache[pathStr])
+          return
+        }
+        const item = builtinExamples.find(e => e.id === pathStr)
+        if (item) {
+          let formatted = item.content
+          if (isSubjectSpecific(item.content)) {
+            const parsed = parseContent(item.content)
+            formatted = formatForDisplay(parsed)
+          }
+          _builtinFormattedCache[pathStr] = formatted
+          findPageFromContent(formatted)
+          return
+        }
+        resolve(0)
+        return
+      }
+      if (pathStr && pathStr.startsWith('bt_')) {
+        getBluetoothFileContent(pathStr).then((content) => {
+          findPageFromContent(content)
+        })
+        return
+      }
+      resolve(0)
+    })
+  },
+
+  /**
+   * 获取统一阅读器分页内容
    * @param {string} pathStr 路径
    * @param {number} [fontSize] 字号（内置示例使用预计算缓存，忽略该参数）
    */
@@ -1478,6 +1687,60 @@ export default {
         return
       }
       resolve('无内容')
+    })
+  },
+
+  /**
+   * 获取分段内容（无缝模式 list 虚拟渲染使用，避免一次性渲染全文导致卡顿）
+   * 对大文件采用流式分段，逐块读取存储并按行数分段
+   * @param {string} pathStr 路径
+   * @param {number} [linesPerSegment=20] 每段行数
+   * @returns {Promise<Array<string>>} 分段内容数组
+   */
+  getReaderContentSegments(pathStr, linesPerSegment) {
+    const lps = linesPerSegment || 20
+    return new Promise((resolve) => {
+      // 内置示例：从预计算格式化缓存读取
+      if (pathStr && pathStr.startsWith('builtin_')) {
+        let content = _builtinFormattedCache[pathStr]
+        if (!content) {
+          const item = builtinExamples.find(e => e.id === pathStr)
+          if (item) {
+            content = item.content
+            if (isSubjectSpecific(item.content)) {
+              const parsed = parseContent(item.content)
+              content = formatForDisplay(parsed)
+            }
+            _builtinFormattedCache[pathStr] = content
+          }
+        }
+        resolve(_splitIntoSegments(content || '无内容', lps))
+        return
+      }
+      // 蓝牙传输内容：检查分块存储，大文件用流式分段
+      if (pathStr && pathStr.startsWith('bt_')) {
+        storage.get({
+          key: STORAGE_KEY_BT_CHUNK_PREFIX + pathStr + '_count',
+          success: (countStr) => {
+            const count = parseInt(countStr)
+            if (count && count > 0) {
+              _streamSegments(pathStr, count, lps).then(resolve)
+              return
+            }
+            // 回退到单键/缓存
+            getBluetoothFileContent(pathStr).then((content) => {
+              resolve(_splitIntoSegments(content || '无内容', lps))
+            })
+          },
+          fail: () => {
+            getBluetoothFileContent(pathStr).then((content) => {
+              resolve(_splitIntoSegments(content || '无内容', lps))
+            })
+          }
+        })
+        return
+      }
+      resolve(['无内容'])
     })
   },
 

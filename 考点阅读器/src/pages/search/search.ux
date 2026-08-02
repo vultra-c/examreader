@@ -3,10 +3,10 @@
 <template>
   <div class="page" style="flex-direction: column;" @swipe="onSwipe">
 
-    <!-- Search box (pill-shaped, tap to toggle keyboard) -->
-    <div class="search-box" @click="toggleKeyboard">
-      <img static src="/common/images/search.png" class="search-icon" />
-      <div style="flex: 1; height: 54px; justify-content: center; align-items: center;">
+    <!-- Search box (pill-shaped) -->
+    <div class="search-box">
+      <img src="/common/images/search.png" class="search-icon" @click="doSearch" />
+      <div style="flex: 1; height: 54px; justify-content: center; align-items: center;" @click="toggleKeyboard">
         <text class="search-text" show="{{searchText.length > 0}}">{{searchText}}</text>
         <text class="search-ph" show="{{searchText.length == 0}}">输入要搜索的内容</text>
       </div>
@@ -41,7 +41,7 @@
     <text class="empty-hint" show="{{hasSearched && results.length == 0 && !showKeyboard}}">无结果</text>
 
     <!-- Input method keyboard -->
-    <input-method hide="{{!showKeyboard}}" keyboardtype="QWERTY" screentype="rect" maxlength="5" @complete="onComplete" @delete="onDelete"></input-method>
+    <input-method hide="{{!showKeyboard}}" keyboardtype="QWERTY" screentype="rect" maxlength="5" vibratemode="short" @complete="onComplete" @delete="onDelete"></input-method>
 
     <!-- Top bar (unchanged) -->
     <img static src="/common/images/hd.png" style="position: absolute; left: 0px; top: 0px; width: 336px; height: 102px;" />
@@ -72,6 +72,10 @@ export default {
     results: [],
     hasSearched: false,
     historyList: []
+  },
+  protected: {
+    scope: 'global',
+    searchPath: ''
   },
 
   onInit() {
@@ -181,15 +185,37 @@ export default {
     this.showKeyboard = false
     this.hasSearched = true
     this.saveHistory(keyword)
-    const list = await dataManager.searchContent(keyword)
+
+    let list
+    if (this.scope === 'single' && this.searchPath) {
+      // 单文件搜索：搜索指定考点中的内容
+      const matches = await dataManager.searchContentInFile(this.searchPath, keyword)
+      const name = dataManager.getUnifiedNodeName(this.searchPath)
+      list = (matches || []).map(m => ({
+        name: name,
+        path: this.searchPath,
+        snippet: m.snippet,
+        position: m.position
+      }))
+    } else {
+      // 全局搜索：搜索手环内所有考点内容
+      list = await dataManager.searchContent(keyword)
+    }
+
     if (!this.$valid) return
     this.results = list || []
   },
 
   // Open a result in the reader page
   onResultClick(item) {
-    appState.jumpToPage = 0
     appState.readerPath = item.path
+
+    // 分页模式：设置搜索结果位置，reader 页面会跳转到关键词所在页
+    // 无缝模式：直接打开文件，不跳转到特定位置
+    if (appState.readingMode === 'paginated' && item.position != null && item.position >= 0) {
+      appState.searchResultPos = item.position
+    }
+
     router.push({
       uri: '/pages/reader',
       params: { path: item.path }
