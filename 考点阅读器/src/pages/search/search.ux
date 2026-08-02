@@ -158,12 +158,8 @@ export default {
   onResultClick(item) {
     appState.readerPath = item.path
 
-    // 始终设置搜索结果位置，reader 页面会根据自身阅读模式决定是否跳转
-    // 分页模式：跳转到关键词所在页
-    // 无缝模式：reader 会忽略该位置，直接打开文件
-    if (item.position != null && item.position >= 0) {
-      appState.searchResultPos = item.position
-    }
+    // 传递搜索关键词，reader 加载分页后直接在 pages 中搜索所在页
+    appState.searchKeyword = this.searchText.trim()
 
     router.push({
       uri: '/pages/reader',
