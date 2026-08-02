@@ -1561,10 +1561,9 @@ export default {
       const charsPerLine = Math.max(1, Math.floor(SCREEN_TEXT_WIDTH / fs))
       const maxLines = Math.max(1, Math.floor(SCREEN_TEXT_HEIGHT / (fs + 4)))
 
-      // 流式分页并跟踪每页首字符偏移
+      // 逐行分页，跟踪每页首字符偏移，找到包含 charPosition 的页
       function findPageFromContent(content) {
         if (!content) { resolve(0); return }
-        let pageStart = 0  // 当前页首字符在全文中的偏移
         let lineCount = 0
         const lines = content.split('\n')
         let currentPage = 0
@@ -1574,9 +1573,13 @@ export default {
           const line = lines[i]
           // 空行
           if (line.length === 0) {
-            if (lineCount >= maxLines && pageStart < charPosition) {
+            if (lineCount >= maxLines) {
+              // 需要翻页：如果关键词在新页起始位置之前，说明在当前页
+              if (charPosition < globalCharPos) {
+                resolve(currentPage)
+                return
+              }
               currentPage++
-              pageStart = globalCharPos
               lineCount = 0
             }
             globalCharPos += 1  // \n
@@ -1592,15 +1595,20 @@ export default {
           }
           subLines.push(remaining)
           for (let j = 0; j < subLines.length; j++) {
-            if (lineCount >= maxLines && pageStart < charPosition) {
+            if (lineCount >= maxLines) {
+              // 需要翻页：如果关键词在新页起始位置之前，说明在当前页
+              if (charPosition < globalCharPos) {
+                resolve(currentPage)
+                return
+              }
               currentPage++
-              pageStart = globalCharPos
               lineCount = 0
             }
             globalCharPos += subLines[j].length + 1  // +1 for \n
             lineCount++
           }
         }
+        // 遍历结束，关键词在最后一页
         resolve(currentPage)
       }
 
