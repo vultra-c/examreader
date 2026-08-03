@@ -154,24 +154,28 @@ export default {
     this.results = list || []
   },
 
-  // 点击搜索结果：在搜索页直接计算页码，然后传给 reader
+  // 点击搜索结果：搜索页直接分页，搜索关键词在第几页，传给 reader
   async onResultClick(item) {
-    // 从 storage 读取字号和阅读模式
+    // 从 storage 读取字号
     const fontSizeStr = await new Promise((resolve) => {
       storage.get({ key: 'KD_FONT_SIZE', success: (d) => resolve(d), fail: () => resolve(null) })
     })
-    const modeStr = await new Promise((resolve) => {
-      storage.get({ key: 'KD_READING_MODE', success: (d) => resolve(d), fail: () => resolve(null) })
-    })
-
     let fontSize = fontSizeStr ? parseInt(fontSizeStr) : 26
     if (isNaN(fontSize)) fontSize = 26
-    const readingMode = modeStr === 'seamless' ? 'seamless' : 'paginated'
 
-    // 分页模式下：在搜索页直接计算关键词在第几页
+    // 直接调用 getReaderPages 拿到和 reader 完全一样的分页
+    const pages = await dataManager.getReaderPages(item.path, fontSize)
+
+    // 在分页数组中搜索关键词所在页
     let targetPage = 0
-    if (readingMode === 'paginated' && item.position != null && item.position >= 0) {
-      targetPage = await dataManager.findPageByCharPosition(item.path, item.position, fontSize)
+    const keyword = this.searchText.trim().toLowerCase()
+    if (pages && pages.length > 0) {
+      for (let i = 0; i < pages.length; i++) {
+        if (pages[i] && pages[i].toLowerCase().indexOf(keyword) >= 0) {
+          targetPage = i
+          break
+        }
+      }
     }
 
     router.push({
