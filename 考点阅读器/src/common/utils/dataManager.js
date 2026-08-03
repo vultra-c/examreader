@@ -278,19 +278,16 @@ function getBluetoothFileContent(id) {
       // 先尝试读取分块存储（新版）
       _readChunkedContent(id).then((content) => {
         if (content !== null) {
-          _btFileCache.set(id, content)
+          // 不缓存到内存，避免大文件导致 OOM
           resolve(content)
         } else {
           // 分块不存在，回退到旧版单键
           storage.get({
             key: STORAGE_KEY_BT_FILE_PREFIX + id,
             success: (data) => {
-              const content = data || ''
-              _btFileCache.set(id, content)
-              resolve(content)
+              resolve(data || '')
             },
             fail: () => {
-              _btFileCache.set(id, '')
               resolve('')
             }
           })
@@ -1086,7 +1083,8 @@ export default {
           // 分块写入正文
           _writeChunkedContent(id, content || '').then((ok) => {
             if (ok) {
-              _btFileCache.set(id, content || '')
+              // 不缓存大文件到内存，避免 OOM；按需从 storage 读取
+              _btFileCache.delete(id)
               _clearBtPagesCacheForId(id)
               console.log('[DM] Bluetooth content saved (chunked): ' + filename +
                 ' (' + (content || '').length + ' chars, ' +
