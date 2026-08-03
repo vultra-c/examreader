@@ -149,8 +149,11 @@ export default {
       router.back()
       return
     }
+    // initReader 还没完成（异步），第一次 onShow 直接跳过
+    // initReader 会完成所有初始化（包括搜索跳转）
+    if (!this.pagesLoaded) return
 
-    // 批量读取设置（字号/行距/常亮/时间格式/阅读模式），检测变化
+    // 以下逻辑仅在页面已加载后再次 onShow 时执行（如从 readerSettings 返回）
     const fontChanged = await this.loadSettingsBatch()
     if (!this.$valid) return
 
