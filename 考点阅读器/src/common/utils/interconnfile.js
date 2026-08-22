@@ -430,23 +430,31 @@ export default class interconnfile {
         let ok = false;
         let reason = '';
         try {
-            // 与旧链路一致：.json 后缀按闪念小抄结构预校验后再落盘
-            const check = parseKnowledgeJson(fullJson);
-            if (!check.ok) {
-                reason = check.error === 'parse-fail'
-                    ? 'JSON 解析失败，请检查文件格式'
-                    : 'JSON 结构无效（需 {科目:[{title,points,...}]} 结构）';
-            } else {
-                const displayName = st.fileName.replace(/\.json$/i, '');
-                const savedId = await dataManager.saveBluetoothContent(
-                    displayName,
-                    fullJson,
-                    st.folderId,
-                    'json'
-                );
-                ok = !!savedId;
-                if (!ok) reason = '存储写入失败（可能存储空间不足）';
+            // 按文件名后缀分流：.json 按闪念小抄结构预校验；其余按普通文本（TXT）直接落盘
+            const isJson = /\.json$/i.test(st.fileName || '');
+            let fmt = '';
+            let displayName = st.fileName;
+            if (isJson) {
+                const check = parseKnowledgeJson(fullJson);
+                if (!check.ok) {
+                    reason = check.error === 'parse-fail'
+                        ? 'JSON 解析失败，请检查文件格式'
+                        : 'JSON 结构无效（需 {科目:[{title,points,...}]} 结构）';
+                    this.send({ type: "error", message: reason });
+                    this.callback({ msg: "error", error: reason });
+                    return;
+                }
+                fmt = 'json';
+                displayName = st.fileName.replace(/\.json$/i, '');
             }
+            const savedId = await dataManager.saveBluetoothContent(
+                displayName,
+                fullJson,
+                st.folderId,
+                fmt
+            );
+            ok = !!savedId;
+            if (!ok) reason = '存储写入失败（可能存储空间不足）';
         } catch (e) {
             reason = '保存失败: ' + ((e && e.message) || e);
         }

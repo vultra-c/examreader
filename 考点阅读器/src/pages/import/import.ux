@@ -1,6 +1,9 @@
 <template>
   <div class="page" style="flex-direction: column;width: 336px;">
 
+    <!-- 顶部渐变遮罩（与其他页面一致） -->
+    <img static src="/common/images/hd.png" style="position: absolute; left: 0px; top: 0px; width: 336px; height: 102px;" />
+
     <!-- State: waiting for connection -->
     <div style="flex-direction: column;margin-top: 46px;width: 336px;" if="{{state == 'wait'}}">
       <img static src="/common/images/connect.png" style="margin-left: 104px;margin-bottom:24px;margin-top:100px" />
@@ -8,7 +11,7 @@
         等待连接
       </text>
       <text static style="width: 286px;left:25px;font-size: 24px;font-weight:bold;color: rgb(153, 153, 153);text-align: left;margin-top: 10px;padding: 10px;">
-        请在手机端打开《考点传输》并连接手环。
+        请在手机端打开《闪念小抄》并连接手环。
       </text>
     </div>
 

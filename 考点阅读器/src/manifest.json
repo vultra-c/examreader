@@ -1,8 +1,8 @@
 {
   "package": "com.silenthong.kdreader",
-  "name": "考点阅读器",
-  "versionName": "V26.7.0.BAND",
-  "versionCode": 260700,
+  "name": "闪念小抄",
+  "versionName": "V26.7.1.BAND",
+  "versionCode": 260710,
   "minPlatformVersion": 1200,
   "minAPILevel": 1,
   "icon": "/common/images/icon.png",
