@@ -64,20 +64,59 @@ function sleep(ms) {
 }
 
 /**
+ * 获取手环第三方应用列表。
+ * 不同版本 BandBurg 对 thirdpartyapp_get_list 的参数要求不一，
+ * 文档标注无参但实测部分版本需传设备地址；依次尝试
+ * (addr) / (无参) / (addr, pkg)，返回首个成功结果，全部失败返回 null。
+ */
+async function getAppList(verbose) {
+  var addr = getDeviceAddr();
+  var variants = [
+    ['(addr)', function () { return sandbox.wasm.thirdpartyapp_get_list(addr); }],
+    ['()', function () { return sandbox.wasm.thirdpartyapp_get_list(); }],
+    ['(addr, pkg)', function () { return sandbox.wasm.thirdpartyapp_get_list(addr, WATCH_PACKAGE); }]
+  ];
+  for (var i = 0; i < variants.length; i++) {
+    try {
+      var r = await variants[i][1]();
+      if (verbose) sandbox.log('[诊断] thirdpartyapp_get_list' + variants[i][0] + ' ✓');
+      return r;
+    } catch (e) {
+      if (verbose) sandbox.log('[诊断] get_list' + variants[i][0] + ' 失败: ' + errMsg(e));
+    }
+  }
+  return null;
+}
+
+/**
  * 确保底层互连链路可用。
  * 关键：重复运行脚本时（第一次正常、第二次失败的场景），WASM 底层连接
  * 可能已失效或设备地址未刷新，必须显式调用 miwear_connect() 重连，
  * 并从 miwear_get_connected_devices() 重新校准设备地址。
  */
 async function ensureDeviceConnection() {
-  // 1) 显式连接（已连接时通常立即返回）
-  try {
-    if (typeof sandbox.wasm.miwear_connect === 'function') {
-      sandbox.log('[连接] 调用 miwear_connect()...');
-      await sandbox.wasm.miwear_connect();
+  // 1) 显式连接（参数签名未知，依次尝试带地址/不带地址；
+  //    实测部分版本无参会抛 reading 'length' 内部错误）
+  var connected = false;
+  if (typeof sandbox.wasm.miwear_connect === 'function') {
+    var cVariants = [
+      ['(addr)', function () { return sandbox.wasm.miwear_connect(getDeviceAddr()); }],
+      ['()', function () { return sandbox.wasm.miwear_connect(); }]
+    ];
+    for (var ci = 0; ci < cVariants.length && !connected; ci++) {
+      try {
+        await cVariants[ci][1]();
+        connected = true;
+        sandbox.log('[连接] miwear_connect' + cVariants[ci][0] + ' 成功');
+      } catch (e) {
+        var em = errMsg(e);
+        // reading 'length' 类内部错误说明该签名不对，静默换下一个
+        if (em.indexOf("reading '") < 0) {
+          sandbox.log('[连接] miwear_connect' + cVariants[ci][0] + ': ' + em);
+        }
+      }
     }
-  } catch (e) {
-    sandbox.log('[连接] miwear_connect 返回: ' + errMsg(e) + '（已连接时可忽略）');
+    if (!connected) sandbox.log('[连接] miwear_connect 各签名均不适用（可能本就无需调用，继续后续流程）');
   }
   // 2) 从已连设备列表校准地址
   try {
@@ -433,10 +472,8 @@ async function diagnoseAppNotFound() {
   sandbox.log('━━━ 诊断：手环上找不到 ' + WATCH_PACKAGE + ' ━━━');
   var apps = null;
   try {
-    apps = await sandbox.wasm.thirdpartyapp_get_list();
-  } catch (e) {
-    sandbox.log('[诊断] 获取应用列表失败: ' + errMsg(e));
-  }
+    apps = await getAppList(true);
+  } catch (e) {}
   if (apps && apps.length !== undefined) {
     sandbox.log('[诊断] 手环已装第三方应用共 ' + apps.length + ' 个：');
     var found = false;
@@ -460,24 +497,25 @@ async function diagnoseAppNotFound() {
 // 检查手环已装应用（GUI 按钮）
 async function checkInstalledApps() {
   sandbox.log('正在获取手环已装第三方应用列表...');
-  try {
-    var apps = await sandbox.wasm.thirdpartyapp_get_list();
-    if (!apps || apps.length === undefined) {
-      sandbox.log('返回格式异常: ' + JSON.stringify(apps).substring(0, 200));
-      return;
-    }
-    sandbox.log('共 ' + apps.length + ' 个应用：');
-    var found = false;
-    for (var i = 0; i < apps.length; i++) {
-      var pkg = apps[i].packageName || apps[i].package_name || apps[i].package || '';
-      var name = apps[i].appName || apps[i].name || '';
-      var mark = pkg === WATCH_PACKAGE ? ' ← 考点阅读器' : '';
-      if (pkg === WATCH_PACKAGE) found = true;
-      sandbox.log('  · ' + name + ' (' + pkg + ')' + mark);
-    }
-    sandbox.log(found ? '✅ 考点阅读器已安装' : '❌ 考点阅读器未安装，请先安装 release/ 目录下的 RPK');
-  } catch (e) {
-    sandbox.log('获取失败: ' + errMsg(e));
+  await ensureDeviceConnection();
+  var apps = await getAppList(true);
+  if (!apps || apps.length === undefined) {
+    sandbox.log('返回格式异常: ' + JSON.stringify(apps).substring(0, 200));
+    return;
+  }
+  sandbox.log('共 ' + apps.length + ' 个应用：');
+  var found = false;
+  for (var i = 0; i < apps.length; i++) {
+    var pkg = apps[i].packageName || apps[i].package_name || apps[i].package || '';
+    var name = apps[i].appName || apps[i].name || '';
+    var mark = pkg === WATCH_PACKAGE ? ' ← 考点阅读器' : '';
+    if (pkg === WATCH_PACKAGE) found = true;
+    sandbox.log('  · ' + name + ' (' + pkg + ')' + mark);
+  }
+  if (found) {
+    sandbox.log('✅ 考点阅读器已安装');
+  } else {
+    sandbox.log('❌ 列表中没有考点阅读器。若你确认已安装：多为手环未开启开发者/互连调试模式，或安装的版本未声明 system.interconnect，请检查后重装 RPK');
   }
 }
 
