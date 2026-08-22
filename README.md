@@ -51,8 +51,9 @@
 
 ## 签名说明
 
-- 手环端 RPK 签名：`考点阅读器/sign/debug` 与 `sign/release` 使用同一套 RSA2048 密钥对（`certificate.pem` + `private.pem`，取自小米官方 interconnect 开发测试证书，CN=wearable），两端签名一致
-- Android 端 APK 签名：`android-app/keystore/keystore.jks`（密码见 `android-app/keystore.properties`）
+- 手环端 RPK 签名：`考点阅读器/sign/debug` 与 `sign/release` 使用同一套 RSA2048 密钥对（`certificate.pem` + `private.pem`，取自小米官方 interconnect 开发测试证书），两端签名一致
+- Android 端 APK 签名：`android-app/keystore/keystore.jks`（密码见 `android-app/keystore.properties`），证书 DN 与手环端 RPK 证书完全相同（`CN=wearable, OU=xiaomi, O=xiaomi`），同源同身份
+- 成品交付包统一放在 `release/` 目录：手环 RPK 在 `考点阅读器/release/`，APK 在 `考点阅读器/android-app/release/`
 
 ## 技术栈
 

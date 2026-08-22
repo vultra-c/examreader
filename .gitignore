@@ -47,6 +47,9 @@ debug.keystore
 
 # APK 构建产物
 *.apk
+# 例外：已签名的 APK 成品交付包
+!考点阅读器/android-app/release/*.apk
+!考点阅读器/android-app/release/*.idsig
 *.aab
 
 # =====================
