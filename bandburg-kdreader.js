@@ -352,6 +352,11 @@ async function launchWatchApp() {
     return true;
   } catch (e) {
     sandbox.log('启动方式1失败: ' + errMsg(e));
+    // AppInfo not found = 手环上未安装该应用，无需再试其他启动方式，直接给出诊断
+    if (errMsg(e).indexOf('AppInfo not found') >= 0) {
+      await diagnoseAppNotFound();
+      return false;
+    }
   }
 
   // 方式 2: /pages/index
@@ -373,6 +378,61 @@ async function launchWatchApp() {
   }
 
   return false;
+}
+
+/**
+ * 手环上报 AppInfo not found 时的诊断：
+ * 1. 列出手环上所有可互连的第三方应用，确认 kdreader 是否在列
+ * 2. 给出安装指引
+ */
+async function diagnoseAppNotFound() {
+  sandbox.log('━━━ 诊断：手环上找不到 ' + WATCH_PACKAGE + ' ━━━');
+  var apps = null;
+  try {
+    apps = await sandbox.wasm.thirdpartyapp_get_list();
+  } catch (e) {
+    sandbox.log('[诊断] 获取应用列表失败: ' + errMsg(e));
+  }
+  if (apps && apps.length !== undefined) {
+    sandbox.log('[诊断] 手环已装第三方应用共 ' + apps.length + ' 个：');
+    var found = false;
+    for (var i = 0; i < apps.length; i++) {
+      var pkg = apps[i].packageName || apps[i].package_name || apps[i].package || '';
+      var name = apps[i].appName || apps[i].name || '';
+      if (pkg === WATCH_PACKAGE) found = true;
+      sandbox.log('  · ' + name + ' (' + pkg + ')');
+    }
+    if (found) {
+      sandbox.log('✅ 应用已在列表中但启动失败：请尝试重启手环后重试');
+    } else {
+      sandbox.log('❌ 未找到考点阅读器：请先将手环端 RPK 安装到手环再运行本脚本');
+    }
+  }
+  sandbox.log('安装方法：将仓库内 考点阅读器/release/com.silenthong.kdreader.release.V26.5.0.BAND.rpk 通过开发者调试推送/Vela 工具安装到手环，安装后打开一次应用再试');
+}
+
+// 检查手环已装应用（GUI 按钮）
+async function checkInstalledApps() {
+  sandbox.log('正在获取手环已装第三方应用列表...');
+  try {
+    var apps = await sandbox.wasm.thirdpartyapp_get_list();
+    if (!apps || apps.length === undefined) {
+      sandbox.log('返回格式异常: ' + JSON.stringify(apps).substring(0, 200));
+      return;
+    }
+    sandbox.log('共 ' + apps.length + ' 个应用：');
+    var found = false;
+    for (var i = 0; i < apps.length; i++) {
+      var pkg = apps[i].packageName || apps[i].package_name || apps[i].package || '';
+      var name = apps[i].appName || apps[i].name || '';
+      var mark = pkg === WATCH_PACKAGE ? ' ← 考点阅读器' : '';
+      if (pkg === WATCH_PACKAGE) found = true;
+      sandbox.log('  · ' + name + ' (' + pkg + ')' + mark);
+    }
+    sandbox.log(found ? '✅ 考点阅读器已安装' : '❌ 考点阅读器未安装，请先安装 release/ 目录下的 RPK');
+  } catch (e) {
+    sandbox.log('获取失败: ' + errMsg(e));
+  }
 }
 
 // ==================== 响应等待机制 ====================
@@ -875,6 +935,7 @@ function showMainGui() {
       { type: 'button', id: 'btnImport', text: '导入考点到当前文件夹' },
 
       // 其他
+      { type: 'button', id: 'btnCheckApps', text: '检测手环已装应用' },
       { type: 'button', id: 'btnRelaunch', text: '重新启动手环应用' }
     ]
   });
@@ -941,6 +1002,11 @@ function showMainGui() {
   // 刷新
   mainGui.on('button:click', 'btnRefresh', function () {
     requestTree();
+  });
+
+  // 检测手环已装应用（诊断 AppInfo not found）
+  mainGui.on('button:click', 'btnCheckApps', async function () {
+    await checkInstalledApps();
   });
 
   // 重新启动手环应用（当应用崩溃或无法同步时使用）
