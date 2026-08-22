@@ -111,6 +111,8 @@ export default {
   },
 
   onInit() {
+    // 同步先给正确时间（避免设置栏唤出后短暂显示 00:00）
+    this.nowTime = getFormattedTimeNow(this.timeFormat)
     this.timer = setInterval(() => {
       if (this.$valid) {
         this.nowTime = getFormattedTimeNow(this.timeFormat)
