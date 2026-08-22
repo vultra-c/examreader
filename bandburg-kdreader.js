@@ -25,6 +25,7 @@ const TREE_TIMEOUT = 10000;
 
 const state = {
   connected: false,
+  addr: null,          // ensureDeviceConnection 校准后的设备地址
   fileTree: [],
   selectedNode: null,
   targetFolder: 'bt_root',
@@ -47,6 +48,8 @@ function errMsg(e) {
 }
 
 function getDeviceAddr() {
+  // 优先使用 ensureDeviceConnection 缓存的地址（避免每次解析结果不一致）
+  if (state.addr) return state.addr;
   if (sandbox.currentDevice && sandbox.currentDevice.addr) {
     return sandbox.currentDevice.addr;
   }
@@ -54,6 +57,51 @@ function getDeviceAddr() {
     return sandbox.devices[0].addr;
   }
   return null;
+}
+
+function sleep(ms) {
+  return new Promise(function (r) { setTimeout(r, ms); });
+}
+
+/**
+ * 确保底层互连链路可用。
+ * 关键：重复运行脚本时（第一次正常、第二次失败的场景），WASM 底层连接
+ * 可能已失效或设备地址未刷新，必须显式调用 miwear_connect() 重连，
+ * 并从 miwear_get_connected_devices() 重新校准设备地址。
+ */
+async function ensureDeviceConnection() {
+  // 1) 显式连接（已连接时通常立即返回）
+  try {
+    if (typeof sandbox.wasm.miwear_connect === 'function') {
+      sandbox.log('[连接] 调用 miwear_connect()...');
+      await sandbox.wasm.miwear_connect();
+    }
+  } catch (e) {
+    sandbox.log('[连接] miwear_connect 返回: ' + errMsg(e) + '（已连接时可忽略）');
+  }
+  // 2) 从已连设备列表校准地址
+  try {
+    if (typeof sandbox.wasm.miwear_get_connected_devices === 'function') {
+      var devs = await sandbox.wasm.miwear_get_connected_devices();
+      if (Array.isArray(devs) && devs.length > 0) {
+        var d0 = devs[0];
+        var listAddr = (d0 && typeof d0 === 'object') ? (d0.addr || d0.address) : d0;
+        if (listAddr) {
+          if (state.addr && state.addr !== listAddr) {
+            sandbox.log('[连接] 设备地址变更: ' + state.addr + ' → ' + listAddr);
+          }
+          state.addr = listAddr;
+          state.connected = true;
+        }
+        sandbox.log('[连接] 已连设备: ' + JSON.stringify(devs).substring(0, 150));
+      } else {
+        sandbox.log('[连接] 警告: 已连设备列表为空，请在 BandBurg 中重新连接设备');
+      }
+    }
+  } catch (e) {
+    sandbox.log('[连接] 获取已连设备失败: ' + errMsg(e));
+  }
+  return state.addr || getDeviceAddr();
 }
 
 function getDeviceName() {
@@ -340,43 +388,39 @@ async function sendMessage(tag, payload) {
   }
 }
 
-// 启动手环应用（尝试多种方式）
-async function launchWatchApp() {
+// 单次启动：依次尝试多种 page 参数
+async function launchWatchAppOnce() {
   var addr = getDeviceAddr();
   if (!addr) return false;
 
-  // 方式 1: 不指定 page
-  try {
-    await sandbox.wasm.thirdpartyapp_launch(addr, WATCH_PACKAGE, '');
-    sandbox.log('手环应用已启动');
-    return true;
-  } catch (e) {
-    sandbox.log('启动方式1失败: ' + errMsg(e));
-    // AppInfo not found = 手环上未安装该应用，无需再试其他启动方式，直接给出诊断
-    if (errMsg(e).indexOf('AppInfo not found') >= 0) {
-      await diagnoseAppNotFound();
-      return false;
+  var pages = ['', '/pages/index', 'pages/index'];
+  for (var i = 0; i < pages.length; i++) {
+    try {
+      await sandbox.wasm.thirdpartyapp_launch(addr, WATCH_PACKAGE, pages[i]);
+      sandbox.log('手环应用已启动' + (pages[i] ? ' (' + pages[i] + ')' : ''));
+      return true;
+    } catch (e) {
+      var msg = errMsg(e);
+      sandbox.log('启动(page=' + (pages[i] || '默认') + ')失败: ' + msg);
+      // 注册表里查无此包，换 page 参数也没意义，交给上层重试/诊断
+      if (msg.indexOf('AppInfo not found') >= 0) break;
     }
   }
+  return false;
+}
 
-  // 方式 2: /pages/index
-  try {
-    await sandbox.wasm.thirdpartyapp_launch(addr, WATCH_PACKAGE, '/pages/index');
-    sandbox.log('手环应用已启动 (/pages/index)');
-    return true;
-  } catch (e) {
-    sandbox.log('启动方式2失败: ' + errMsg(e));
+// 启动手环应用：每轮先重连底层链路，最多 3 轮（解决“第一次能用第二次不行”）
+async function launchWatchApp() {
+  for (var round = 1; round <= 3; round++) {
+    await ensureDeviceConnection();
+    var ok = await launchWatchAppOnce();
+    if (ok) return true;
+    if (round < 3) {
+      sandbox.log('第 ' + round + '/3 轮启动失败，2 秒后自动重试...');
+      await sleep(2000);
+    }
   }
-
-  // 方式 3: pages/index
-  try {
-    await sandbox.wasm.thirdpartyapp_launch(addr, WATCH_PACKAGE, 'pages/index');
-    sandbox.log('手环应用已启动 (pages/index)');
-    return true;
-  } catch (e) {
-    sandbox.log('启动方式3失败: ' + errMsg(e));
-  }
-
+  await diagnoseAppNotFound();
   return false;
 }
 
@@ -403,10 +447,12 @@ async function diagnoseAppNotFound() {
       sandbox.log('  · ' + name + ' (' + pkg + ')');
     }
     if (found) {
-      sandbox.log('✅ 应用已在列表中但启动失败：请尝试重启手环后重试');
+      sandbox.log('✅ 应用在列表中但启动失败：多为互连服务状态残留，请重启手环后重试');
     } else {
-      sandbox.log('❌ 未找到考点阅读器：请先将手环端 RPK 安装到手环再运行本脚本');
+      sandbox.log('❌ 列表中没有考点阅读器：请先将手环端 RPK 安装到手环再运行本脚本');
     }
+  } else {
+    sandbox.log('[诊断] 无法获取应用列表——多为底层互连状态残留：请在 BandBurg 断开并重新连接设备（或重启手环），再重新运行本脚本');
   }
   sandbox.log('安装方法：将仓库内 考点阅读器/release/com.silenthong.kdreader.release.V26.5.0.BAND.rpk 通过开发者调试推送/Vela 工具安装到手环，安装后打开一次应用再试');
 }
@@ -1009,9 +1055,10 @@ function showMainGui() {
     await checkInstalledApps();
   });
 
-  // 重新启动手环应用（当应用崩溃或无法同步时使用）
+  // 重新启动手环应用（当应用崩溃或无法同步时使用）：先重连底层链路再启动
   mainGui.on('button:click', 'btnRelaunch', async function () {
-    sandbox.log('正在重新启动手环应用...');
+    sandbox.log('正在重新连接并启动手环应用...');
+    await ensureDeviceConnection();
     var launched = await launchWatchApp();
     if (launched) {
       sandbox.log('手环应用已启动，等待 3 秒后同步文件树...');
@@ -1102,8 +1149,8 @@ async function main() {
   sandbox.log('=== 考点传输 BandBurg 脚本 ===');
   sandbox.log('参考: BandBurg + AstroBox-NG');
 
-  // 检查设备
-  var addr = getDeviceAddr();
+  // 确保底层连接（重复运行脚本时必须显式重连）
+  var addr = await ensureDeviceConnection();
   if (!addr) {
     sandbox.log('错误: 未找到已连接设备，请先在 BandBurg 中连接设备');
     return;
@@ -1174,7 +1221,7 @@ async function main() {
   sandbox.log('3 秒后自动同步文件树...');
   setTimeout(function () {
     requestTree();
-  }, 2000);
+  }, 3000);
 }
 
 // 运行主函数
