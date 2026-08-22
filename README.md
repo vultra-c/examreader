@@ -101,6 +101,7 @@ examreader/
 │   │   └── build_apk.sh               # APK 构建脚本（需 Java17+Android SDK）
 │   └── package.json
 │
+├── bandburg-kdreader.js           # BandBurg 传输脚本（TXT/JSON，免装 APK）
 ├── android_src/
 │   └── com.bandbbs.ebook-android/  # Android 端
 │       ├── app/
@@ -154,6 +155,17 @@ npm run release      # 发布签名 RPK 到 dist/
 cd 考点阅读器/android-app
 bash build_apk.sh    # 产出考点传输.apk 并完成签名对齐
 ```
+
+### BandBurg 脚本传输（免装 APK）
+
+在 [BandBurg](https://bandburg.com) 的「脚本」中导入根目录的 `bandburg-kdreader.js` 并运行，即可在浏览器里完成与手环端的全部交互：
+
+- 自动启动手环端考点阅读器并同步文件树（新建文件夹 / 刷新）
+- 选择 `.txt` 文件 → 按普通文本传输，进入原阅读器
+- 选择 `.json` 文件 → 本地预校验 Snapnotes 结构（`{"科目":[{title,...}]}`），校验通过后保留 `.json` 后缀传输，手环自动路由到知识点阅读器，并在日志中显示科目及条目数
+- 分片传输带逐片确认；手环返回错误（如 JSON 校验失败、存储不足）时立即中止并显示原因
+
+可直接用 `考点阅读器/samples/knowledge-sample.json` 实测。
 
 ## 版本要求
 

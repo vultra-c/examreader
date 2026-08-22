@@ -4,7 +4,10 @@
  * 功能：
  *  1. 启动手环上的考点阅读器应用
  *  2. 同步文件树（获取/新建文件夹/删除/重命名）
- *  3. 传输 TXT 考点文件（分片传输协议）
+ *  3. 传输考点文件（分片传输协议）：
+ *     - .txt  → 普通文本阅读器（传输时去掉后缀，与旧行为一致）
+ *     - .json → 知识点阅读器（Snapnotes 结构，保留 .json 后缀，
+ *       手环端 interconnfile.js 据此后缀路由；发送前本地校验结构）
  *
  * 通信协议：JSON 消息 + tag 路由
  *   发送: thirdpartyapp_send_message(addr, pkg, JSON.stringify({tag, ...payload}))
@@ -417,6 +420,42 @@ function cancelAllPending() {
   state.pendingResponses.clear();
 }
 
+/**
+ * 本地预校验知识点 JSON（与手环端 jsonParser.js 同规则）：
+ *   { "<科目>": [ { title 必填, desc/raw/points/formulas 可选 }, ... ] }
+ * @returns {{ok:boolean, subjects?:Array<{name,count}>, error?:string}}
+ */
+function validateKnowledgeJson(text) {
+  if (!text || typeof text !== 'string' || text.trim().length === 0) {
+    return { ok: false, error: '文件内容为空' };
+  }
+  var parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    return { ok: false, error: 'JSON 解析失败，请检查文件格式' };
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { ok: false, error: 'JSON 结构无效：顶层必须是对象 {"科目": [...]}' };
+  }
+  var subjects = [];
+  var names = Object.keys(parsed);
+  for (var i = 0; i < names.length; i++) {
+    var list = parsed[names[i]];
+    if (!Array.isArray(list)) continue;
+    var count = 0;
+    for (var j = 0; j < list.length; j++) {
+      // 与 cleanItem 同规则：必须为对象且含非空字符串 title
+      if (list[j] && typeof list[j] === 'object' && list[j].title && typeof list[j].title === 'string') count++;
+    }
+    if (count > 0) subjects.push({ name: names[i], count: count });
+  }
+  if (subjects.length === 0) {
+    return { ok: false, error: '没有有效的知识点条目（每个条目需含字符串 title 字段）' };
+  }
+  return { ok: true, subjects: subjects };
+}
+
 // ==================== 文件树同步 ====================
 
 function registerTreeHandler() {
@@ -550,11 +589,28 @@ function registerFileHandler() {
       case 'chapter_chunk_complete': resolveResponse('file_chunk_complete', payload); break;
       case 'chapter_saved':     resolveResponse('file_chapter_saved', payload); break;
       case 'transfer_finished': resolveResponse('file_finished', payload); break;
-      case 'error':             resolveResponse('file_error', payload); break;
+      case 'error':
+        // 手环报错（如 JSON 校验失败、存储不足）：立即终止当前等待，抛出具体原因
+        failAllFilePending(payload.message || '手环返回错误');
+        break;
       case 'cancel':            resolveResponse('file_cancel', payload); break;
       default: sandbox.log('[警告] 未知文件消息: ' + type);
     }
   });
+}
+
+// 手环返回 error 时快速失败：拒绝所有正在挂起的 file 协议响应
+// （否则要等满 15 秒超时才能看到失败原因）
+function failAllFilePending(message) {
+  var keys = ['file_ready', 'file_next_chunk', 'file_chunk_complete', 'file_chapter_saved', 'file_finished'];
+  for (var i = 0; i < keys.length; i++) {
+    var pending = state.pendingResponses.get(keys[i]);
+    if (pending) {
+      clearTimeout(pending.timer);
+      state.pendingResponses.delete(keys[i]);
+      pending.reject(new Error(message));
+    }
+  }
 }
 
 function splitContent(content, chunkSize) {
@@ -814,8 +870,8 @@ function showMainGui() {
       { type: 'input', id: 'newFolderName', placeholder: '输入文件夹名称', value: '' },
       { type: 'button', id: 'btnNewFolder', text: '新建文件夹' },
 
-      // 选项二：导入考点
-      { type: 'file', id: 'fileInput', label: '选择TXT考点文件', accept: '.txt' },
+      // 选项二：导入考点（TXT 或 JSON）
+      { type: 'file', id: 'fileInput', label: '选择TXT/JSON考点文件', accept: '.txt,.json' },
       { type: 'button', id: 'btnImport', text: '导入考点到当前文件夹' },
 
       // 其他
@@ -902,7 +958,7 @@ function showMainGui() {
   // 导入考点 — 将选中的 TXT 文件传输到当前文件夹
   mainGui.on('button:click', 'btnImport', async function () {
     if (!state.selectedFile) {
-      sandbox.log('请先选择 TXT 文件');
+      sandbox.log('请先选择 TXT 或 JSON 考点文件');
       return;
     }
     if (state.transferring) {
@@ -932,9 +988,11 @@ function showMainGui() {
       // 使用统一的文件读取函数，自动适配多种 file 对象格式
       var text = await readFileAsText(state.selectedFile);
       var rawName = state.selectedFile.name || 'untitled';
-      var fileName = rawName.replace(/\.txt$/i, '');
+      var isJson = /\.json$/i.test(rawName);
+      // TXT 去掉后缀传输（旧格式）；JSON 必须保留 .json 后缀，手环据此路由到知识点阅读器
+      var fileName = isJson ? rawName : rawName.replace(/\.txt$/i, '');
       // 如果文件名也是 base64 编码，解码它
-      if (isBase64(fileName) && fileName.length >= 8) {
+      if (!isJson && isBase64(fileName) && fileName.length >= 8) {
         sandbox.log('[调试] 文件名疑似 base64: ' + fileName);
         var decodedName = decodeBase64ToText(fileName);
         if (decodedName && decodedName.length > 0) {
@@ -943,7 +1001,22 @@ function showMainGui() {
         }
       }
 
-      sandbox.log('开始传输: ' + fileName + ' (' + text.length + ' 字符) → ' + state.targetFolderName + ' (folder ID: ' + state.targetFolder + ')');
+      // JSON 知识点文件：发送前本地预校验（与手环端同规则），避免无效数据占用蓝牙带宽
+      if (isJson) {
+        var check = validateKnowledgeJson(text);
+        if (!check.ok) {
+          sandbox.log('❌ JSON 校验未通过：' + check.error);
+          sandbox.log('   参考 samples/knowledge-sample.json 的结构');
+          return;
+        }
+        var subjectDesc = [];
+        for (var si = 0; si < check.subjects.length; si++) {
+          subjectDesc.push(check.subjects[si].name + '(' + check.subjects[si].count + '条)');
+        }
+        sandbox.log('✅ JSON 校验通过，共 ' + check.subjects.length + ' 个科目：' + subjectDesc.join('、'));
+      }
+
+      sandbox.log('开始传输: ' + fileName + ' (' + text.length + ' 字符, ' + (isJson ? '知识点JSON' : 'TXT文本') + ') → ' + state.targetFolderName + ' (folder ID: ' + state.targetFolder + ')');
       if (text.length > 50000) {
         sandbox.log('文件较大，传输可能需要较长时间');
       }
