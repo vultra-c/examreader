@@ -17,7 +17,8 @@
 // ==================== 常量 ====================
 
 const WATCH_PACKAGE = 'com.silenthong.kdreader';
-const CHUNK_SIZE = 8000;
+// Snapnotes 协议分片上限：10KB（UTF-8 字节，与 JsonFilePusher.CHUNK_SIZE 一致）
+const SN_CHUNK_BYTES = 10 * 1024;
 const RESPONSE_TIMEOUT = 15000;
 const TREE_TIMEOUT = 10000;
 
@@ -730,9 +731,11 @@ function registerFileHandler() {
     switch (type) {
       case 'ready':             resolveResponse('file_ready', payload); break;
       case 'next_chunk':        resolveResponse('file_next_chunk', payload); break;
-      case 'chapter_chunk_complete': resolveResponse('file_chunk_complete', payload); break;
-      case 'chapter_saved':     resolveResponse('file_chapter_saved', payload); break;
       case 'transfer_finished': resolveResponse('file_finished', payload); break;
+      case 'storage_info':
+        // 手环存储信息回包（Snapnotes 协议）
+        sandbox.log('[存储] 总:' + Math.round((payload.totalStorage || 0) / 1048576) + 'MB 可用:' + Math.round((payload.actualAvailable || 0) / 1048576) + 'MB');
+        break;
       case 'error':
         // 手环报错（如 JSON 校验失败、存储不足）：立即终止当前等待，抛出具体原因
         failAllFilePending(payload.message || '手环返回错误');
@@ -757,12 +760,48 @@ function failAllFilePending(message) {
   }
 }
 
-function splitContent(content, chunkSize) {
+// ==================== Snapnotes 文件协议（断点续传） ====================
+// 与手环端 interconnfile.js / Snapnotes-android JsonFilePusher 对齐：
+//   发(stat): startTransfer{filename,totalChunks,totalBytes,folderId} / d{chunkIndex,totalChunks,data} /
+//             transferComplete / cancel
+//   收(type): ready{nextChunkIndex ← 断点续传起点} / next_chunk / transfer_finished / error
+// 分片按 UTF-8 字节上限 10KB 切，不切断多字节字符。
+
+function utf8ByteLength(str) {
+  var bytes = 0;
+  for (var i = 0; i < str.length; i++) {
+    var c = str.charCodeAt(i);
+    if (c >= 0xd800 && c <= 0xdbff && i + 1 < str.length) {
+      var c2 = str.charCodeAt(i + 1);
+      if (c2 >= 0xdc00 && c2 <= 0xdfff) { bytes += 4; i++; continue; }
+    }
+    if (c < 0x80) bytes += 1;
+    else if (c < 0x800) bytes += 2;
+    else bytes += 3;
+  }
+  return bytes;
+}
+
+// 按字节数上限切片（逐码点累加，与 JsonFilePusher.chunkUtf8Text 同规则）
+function splitContentUtf8(content, maxBytes) {
   if (!content || content.length === 0) return [''];
   var chunks = [];
-  for (var i = 0; i < content.length; i += chunkSize) {
-    chunks.push(content.substring(i, Math.min(i + chunkSize, content.length)));
+  var buf = '';
+  var bufBytes = 0;
+  for (var i = 0; i < content.length; ) {
+    var codePoint = content.codePointAt(i);
+    var ch = String.fromCodePoint(codePoint);
+    var cb = codePoint > 0xffff ? 4 : (codePoint >= 0x800 ? 3 : (codePoint >= 0x80 ? 2 : 1));
+    if (buf.length > 0 && bufBytes + cb > maxBytes) {
+      chunks.push(buf);
+      buf = '';
+      bufBytes = 0;
+    }
+    buf += ch;
+    bufBytes += cb;
+    i += ch.length;
   }
+  if (buf.length > 0) chunks.push(buf);
   return chunks.length > 0 ? chunks : [''];
 }
 
@@ -770,87 +809,76 @@ async function transferFile(fileName, content, targetFolder) {
   if (state.transferring) throw new Error('正在传输中');
   state.transferring = true;
 
-  var wordCount = content.length;
-  var chunks = splitContent(content, CHUNK_SIZE);
-  var totalChunks = chunks.length;
-
   try {
-    sandbox.log('开始传输: ' + fileName + ' (' + wordCount + ' 字符, ' + totalChunks + ' 片)');
-
-    // 步骤 1: startTransfer → 等待 ready
-    sandbox.log('[调试] transferFile: folder=' + targetFolder + ', fileName=' + fileName);
-    var readyPromise = waitForResponse('file', 'file_ready', RESPONSE_TIMEOUT);
-    var startMsg = {
-      stat: 'startTransfer',
-      filename: fileName,
-      total: 1,
-      wordCount: wordCount,
-      startFrom: 0,
-      folder: targetFolder
-    };
-    sandbox.log('[调试] startTransfer 消息: ' + JSON.stringify(startMsg));
-    await sendMessage('file', startMsg);
-    await readyPromise;
-    sandbox.log('手环已就绪，开始传输数据...');
-
-    // 步骤 2: 逐片传输
-    for (var i = 0; i < totalChunks; i++) {
-      var isLast = i === totalChunks - 1;
-      var innerData = JSON.stringify({
-        index: 0,
-        name: fileName,
-        content: chunks[i],
-        wordCount: wordCount,
-        chunkNum: i,
-        totalChunks: totalChunks
-      });
-
-      var waitKey = isLast ? 'file_chunk_complete' : 'file_next_chunk';
-      var chunkPromise = waitForResponse('file', waitKey, RESPONSE_TIMEOUT);
-
-      await sendMessage('file', {
-        stat: 'd',
-        count: 0,
-        data: innerData
-      });
-
-      await chunkPromise;
-
-      var percent = Math.round((i + 1) * 100 / totalChunks);
-      sandbox.log('传输进度: ' + percent + '% (' + (i + 1) + '/' + totalChunks + ')');
-    }
-
-    // 步骤 3: chapter_complete → 等待 chapter_saved
-    sandbox.log('等待手环保存...');
-    var savedPromise = waitForResponse('file', 'file_chapter_saved', RESPONSE_TIMEOUT);
-    await sendMessage('file', { stat: 'chapter_complete', count: 0 });
-    await savedPromise;
-
-    // 步骤 4: transfer_complete → 等待 transfer_finished
-    var finishedPromise = waitForResponse('file', 'file_finished', RESPONSE_TIMEOUT);
-    await sendMessage('file', { stat: 'transfer_complete' });
-    await finishedPromise;
-
-    sandbox.log('传输完成: ' + fileName + ' (' + wordCount + ' 字符)');
-
-    // 传输完成后刷新文件树
+    // 自动断点续传：失败后最多重试 2 次，手环端从缺失分片继续，不重传已收内容
+    await runSnTransfer(fileName, content, targetFolder, 0);
     setTimeout(function () { requestTree(); }, 500);
-
-  } catch (error) {
-    // 清理所有 pending
-    cancelPendingResponse('file_ready');
-    cancelPendingResponse('file_next_chunk');
-    cancelPendingResponse('file_chunk_complete');
-    cancelPendingResponse('file_chapter_saved');
-    cancelPendingResponse('file_finished');
-
-    // 发送取消
-    try { await sendMessage('file', { stat: 'cancel' }); } catch (_) {}
-
-    sandbox.log('传输失败: ' + errMsg(error));
-    throw error;
   } finally {
     state.transferring = false;
+  }
+}
+
+async function runSnTransfer(fileName, content, targetFolder, attempt) {
+  var chunks = splitContentUtf8(content, SN_CHUNK_BYTES);
+  var totalChunks = chunks.length;
+  var totalBytes = utf8ByteLength(content);
+
+  try {
+    sandbox.log('开始传输: ' + fileName + ' (' + totalBytes + ' 字节, ' + totalChunks + ' 片)' + (attempt > 0 ? ' [断点续传 #' + attempt + ']' : ''));
+
+    // 步骤 1: startTransfer → 等待 ready（nextChunkIndex 即断点续传起点）
+    var readyPromise = waitForResponse('file', 'file_ready', RESPONSE_TIMEOUT);
+    await sendMessage('file', {
+      stat: 'startTransfer',
+      filename: fileName,
+      totalChunks: totalChunks,
+      totalBytes: totalBytes,
+      folderId: targetFolder
+    });
+    var ready = await readyPromise;
+    var startIndex = (ready && typeof ready.nextChunkIndex === 'number') ? ready.nextChunkIndex : 0;
+    if (startIndex > 0 && startIndex < totalChunks) {
+      sandbox.log('⚡ 断点续传：从第 ' + (startIndex + 1) + '/' + totalChunks + ' 片继续（前 ' + startIndex + ' 片已收）');
+    }
+
+    // 步骤 2: 从续传起点逐片传输，每片等 next_chunk 流控
+    for (var i = startIndex; i < totalChunks; i++) {
+      var chunkPromise = waitForResponse('file', 'file_next_chunk', RESPONSE_TIMEOUT);
+      await sendMessage('file', {
+        stat: 'd',
+        chunkIndex: i,
+        totalChunks: totalChunks,
+        data: chunks[i]
+      });
+      await chunkPromise;
+      if ((i - startIndex + 1) % 5 === 0 || i === totalChunks - 1) {
+        sandbox.log('传输进度: ' + Math.round((i + 1) * 100 / totalChunks) + '% (' + (i + 1) + '/' + totalChunks + ')');
+      }
+    }
+
+    // 步骤 3: transferComplete → 等待 transfer_finished（手环组装+校验+落盘）
+    sandbox.log('等待手环保存...');
+    var finishedPromise = waitForResponse('file', 'file_finished', RESPONSE_TIMEOUT);
+    await sendMessage('file', { stat: 'transferComplete' });
+    await finishedPromise;
+
+    sandbox.log('✅ 传输完成: ' + fileName);
+  } catch (error) {
+    cancelPendingResponse('file_ready');
+    cancelPendingResponse('file_next_chunk');
+    cancelPendingResponse('file_finished');
+
+    // 瞬时失败自动断点续传（不发 cancel，保留手环端已收分片）
+    if (attempt < 2) {
+      sandbox.log('⚠️ 传输中断，自动断点续传… (' + errMsg(error) + ')');
+      await new Promise(function (r) { setTimeout(r, 1000); });
+      return runSnTransfer(fileName, content, targetFolder, attempt + 1);
+    }
+
+    // 重试用尽：放弃并发送 cancel 让手环清理状态
+    try { await sendMessage('file', { stat: 'cancel' }); } catch (_) {}
+    sandbox.log('❌ 传输失败: ' + errMsg(error));
+    throw error;
   }
 }
 

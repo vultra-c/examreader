@@ -12,6 +12,9 @@
       </div>
     </div>
 
+    <!-- 搜索范围提示：主页=全部考点；子文件夹内=仅该文件夹；考点内=单文件 -->
+    <text class="scope-hint" static>范围：{{scopeLabel}}</text>
+
     <!-- Clear button (separate element to avoid click conflicts) -->
     <div class="clear-btn" show="{{searchText.length > 0}}" @click="clearSearch">
       <text class="clear-icon" static>×</text>
@@ -57,11 +60,20 @@ export default {
     searchText: '',
     showKeyboard: false,
     results: [],
-    hasSearched: false
+    hasSearched: false,
+    scopeName: ''
   },
   protected: {
     scope: 'global',
     searchPath: ''
+  },
+
+  computed: {
+    scopeLabel() {
+      if (this.scope === 'single') return '当前考点'
+      if (this.scope === 'folder') return this.scopeName || '当前文件夹'
+      return '全部考点'
+    }
   },
 
   onInit() {
@@ -71,6 +83,10 @@ export default {
         this.nowTime = getNowTime()
       }
     }, 60000)
+    // 文件夹范围时显示文件夹名
+    if (this.scope === 'folder' && this.searchPath) {
+      this.scopeName = dataManager.getNodeName(this.searchPath) || '当前文件夹'
+    }
   },
 
   onDestroy() {
@@ -123,7 +139,7 @@ export default {
 
     let list
     if (this.scope === 'single' && this.searchPath) {
-      // 单文件搜索
+      // 单文件搜索（考点阅读设置进入）
       const matches = await dataManager.searchContentInFile(this.searchPath, keyword)
       const name = dataManager.getUnifiedNodeName(this.searchPath)
       list = (matches || []).map((m, i) => ({
@@ -131,7 +147,20 @@ export default {
         name: name,
         path: this.searchPath,
         snippet: m.snippet,
-        position: m.position
+        position: m.position,
+        fmt: (name || '').toLowerCase().indexOf('.json') === name.length - 5 ? 'json' : ''
+      }))
+    } else if (this.scope === 'folder' && this.searchPath) {
+      // 文件夹内搜索：只搜该文件夹子树内的内容
+      list = await dataManager.searchContentInFolder(this.searchPath, keyword)
+      list = (list || []).map((item, i) => ({
+        name: item.name,
+        path: item.path,
+        snippet: item.snippet,
+        position: item.position,
+        type: item.type,
+        fmt: item.fmt || '',
+        id: item.path + '_' + i
       }))
     } else {
       // 全局搜索
@@ -144,14 +173,16 @@ export default {
             snippet: item.snippet,
             position: item.position,
             type: item.type,
+            fmt: item.fmt || '',
             id: item.path + '_' + i
           }
         })
       }
     }
 
+    // 全局结果同样带上 fmt（dataManager 已返回），统一映射
     if (!this.$valid) return
-    this.results = list || []
+    this.results = (list || []).map(item => ({ fmt: '', ...item }))
   },
 
   // 点击搜索结果：搜索页直接分页，搜索关键词在第几页，传给 reader
@@ -162,6 +193,12 @@ export default {
     })
     let fontSize = fontSizeStr ? parseInt(fontSizeStr) : 26
     if (isNaN(fontSize)) fontSize = 26
+
+    // JSON 知识点文件：直接打开知识点阅读器（无页码概念）
+    if (item.fmt === 'json') {
+      router.push({ uri: '/pages/jsonReader', params: { path: item.path } })
+      return
+    }
 
     // 直接调用 getReaderPages 拿到和 reader 完全一样的分页
     const pages = await dataManager.getReaderPages(item.path, fontSize)
@@ -206,6 +243,18 @@ export default {
 
 <style>
   @import '../../common/style.css';
+
+  .scope-hint {
+    position: absolute;
+    left: 0px;
+    top: 168px;
+    width: 336px;
+    font-size: 20px;
+    color: rgba(255,255,255,0.35);
+    text-align: center;
+    lines: 1;
+    text-overflow: ellipsis;
+  }
 
   .search-box {
     position: absolute;
@@ -258,9 +307,9 @@ export default {
   .result-list {
     position: absolute;
     left: 6px;
-    top: 172px;
+    top: 200px;
     width: 324px;
-    height: 308px;
+    height: 280px;
   }
 
   .result-item {
@@ -298,7 +347,7 @@ export default {
   .empty-hint {
     position: absolute;
     left: 0px;
-    top: 220px;
+    top: 240px;
     width: 336px;
     font-size: 24px;
     color: rgba(255, 255, 255, 0.4);

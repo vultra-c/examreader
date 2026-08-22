@@ -1,6 +1,7 @@
 <script>
 import interconnfile from './common/utils/interconnfile.js'
 import interconnTree from './common/utils/interconnTree.js'
+import interconnHs from './common/utils/interconnHs.js'
 import interconn from './common/utils/interconn.js'
 import dataManager from './common/utils/dataManager.js'
 import router from '@system.router'
@@ -13,6 +14,8 @@ import brightness from '@system.brightness'
 globalThis.conn = new interconn();
 globalThis.connfile = globalThis.conn.register(interconnfile);
 globalThis.conntree = globalThis.conn.register(interconnTree);
+// Snapnotes-android 握手/心跳（tag="__hs__"），与 JsonFilePusher 配套
+globalThis.connhs = globalThis.conn.register(interconnHs);
 
 export default {
   onInit() {

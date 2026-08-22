@@ -1590,9 +1590,83 @@ export default {
                   path: item.id,
                   snippet: snippet,
                   position: pos,
-                  type: 'bluetooth'
+                  type: 'bluetooth',
+                  fmt: item.fmt || ''
                 })
               }
+            }
+            searchNext()
+          })
+        }
+        searchNext()
+      })
+    })
+  },
+
+  /**
+   * 在单个文件中搜索关键词，返回匹配位置列表
+   * @param {string} pathStr 文件路径
+   * @param {string} keyword 搜索关键词
+   * @returns {Promise<Array>} [{ position: number, snippet: string }]
+   */
+  /**
+   * 在指定文件夹子树内搜索考点内容
+   * @param {string} folderId 文件夹 id（bt_root 表示主页全局）
+ * @param {string} keyword 关键词
+   */
+  searchContentInFolder(folderId, keyword) {
+    return new Promise((resolve) => {
+      if (!keyword || keyword.trim().length === 0) {
+        resolve([])
+        return
+      }
+      const kw = keyword.trim().toLowerCase()
+      getBluetoothMeta().then((metaList) => {
+        const list = metaList || []
+        // 收集 folderId 子树内的所有内容项：沿 folder/parentId 向上回溯判定归属
+        const inFolder = list.filter(m => {
+          if (m.type !== 'content') return false
+          let cur = m
+          let depth = 0
+          while (cur && depth < 20) {
+            if (cur.id === folderId) return true
+            if (folderId === 'bt_root') return true
+            const pid = cur.folder || cur.parentId || 'bt_root'
+            if (pid === 'bt_root') return false
+            cur = list.find(x => x.id === pid)
+            depth++
+          }
+          return false
+        })
+
+        const results = []
+        const MAX_RESULTS = 50
+        let idx = 0
+        const searchNext = () => {
+          if (idx >= inFolder.length || results.length >= MAX_RESULTS) {
+            resolve(results)
+            return
+          }
+          const item = inFolder[idx++]
+          getBluetoothFileContent(item.id).then((content) => {
+            const lowerContent = (content || '').toLowerCase()
+            const lowerName = (item.name || '').toLowerCase()
+            if (lowerContent.includes(kw) || lowerName.includes(kw)) {
+              const pos = lowerContent.indexOf(kw)
+              let snippet = ''
+              if (pos >= 0) {
+                const start = Math.max(0, pos - 10)
+                const end = Math.min(lowerContent.length, pos + kw.length + 20)
+                snippet = (start > 0 ? '...' : '') + content.substring(start, end) + (end < content.length ? '...' : '')
+              }
+              results.push({
+                name: item.name,
+                path: item.id,
+                snippet: snippet,
+                position: pos,
+                type: 'bluetooth',
+                fmt: item.fmt || ''
+              })
             }
             searchNext()
           })

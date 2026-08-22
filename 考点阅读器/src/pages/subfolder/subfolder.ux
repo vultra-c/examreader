@@ -18,6 +18,9 @@
       </list-item>
     </list>
 
+    <!-- 右下角搜索图标：范围限定为当前文件夹 -->
+    <img static src="/common/images/search.png" @click="goSearch" style="position: absolute; left: 258px; top: 402px; width: 72px; height: 72px;" />
+
     <!-- 顶部栏 -->
     <img static src="/common/images/hd.png" style="position: absolute; left: 0px; top: 0px; width: 336px; height: 102px;" />
     <img static src="/common/images/back.png" @click="goBack" style="position: absolute; left: 6px; top: 6px; width: 72px; height: 72px;" />
@@ -151,6 +154,14 @@ export default {
 
   goSettings() {
     router.push({ uri: '/pages/globalSettings' })
+  },
+
+  goSearch() {
+    // 只搜当前文件夹子树内的内容
+    router.push({
+      uri: '/pages/search',
+      params: { scope: 'folder', searchPath: this.path }
+    })
   },
 
   onLongPress(item) {

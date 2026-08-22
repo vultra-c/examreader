@@ -437,7 +437,8 @@ export default {
   }
   .jr-header {
     flex-direction: column;
-    margin-top: 110px;
+    /* 与主页一致：内容从 86px 起，滚动时钻入顶部渐变遮罩形成过渡 */
+    margin-top: 86px;
   }
   .jr-subject-badge {
     background-color: rgba(120, 153, 187, 0.16);

@@ -14,7 +14,12 @@
 - 长文性能优化：无缝滚动模式采用虚拟窗口渲染（只渲染视口附近约几十行，上下等高占位补齐），几万字长文不再卡顿/崩溃
 - 双格式解析：TXT 按原有章节格式解析；`.json` 文件自动按知识点结构解析（显示逻辑提取自 [闪念小抄 Snapnotes-band](https://github.com/WenHuaYiYang/Snapnotes-band)）
 - 知识点阅读：科目列表 → 条目列表 → 详情（描述/原文分页/编号要点/公式），返回手势逐层回退；右上角设置页可调字号/行距/常亮/删除文件（与 TXT 阅读设置共用存储键）
-- 蓝牙传输：通过 `@system.interconnect` API 接收手机端推送的 TXT / JSON 文件
+- 蓝牙传输（双协议）：
+  - **Snapnotes 协议**（适配 [Snapnotes-android](https://github.com/vultra-c/Snapnotes-android)）：`__hs__` 三方握手/心跳保活、`file` 链路 startTransfer/d/transferComplete 状态机、`get_storage_info` 存储查询、`startFormula` 公式图片接收（base64 落盘 internal://files/formulas/）；手机端拉起 `/pages/import` 直达传输页
+  - **断点续传**：传输中断后重发 startTransfer，手环从第一个缺失分片继续（ready.nextChunkIndex），BandBurg 脚本失败自动重试 2 次
+  - 旧版考点传输协议保留兼容（chapter 分片模式）
+- 搜索分级：主页搜索=全部考点；子文件夹内搜索=仅该文件夹子树；考点设置内=单文件；JSON 结果直达知识点阅读器
+- 输入法：内置 [Vela_input_method](https://github.com/NEORUAA/Vela_input_method) 全拼连打键盘（整词候选）
 - 阅读进度同步：记录阅读位置，下次打开自动恢复
 - 亮屏设置：支持保持屏幕常亮
 - 删除管理：支持删除单个文件/文件夹/全部考点
@@ -173,7 +178,7 @@ bash build_apk.sh    # 产出考点传输.apk 并完成签名对齐
 
 | 端 | 版本号 | 版本名 |
 |------|--------|--------|
-| 手环端 | 260600 | V26.6.0.BAND（章节目录 + 长文虚拟渲染 + 知识点设置页 + JSON 样式优化） |
+| 手环端 | 260700 | V26.7.0.BAND（适配 Snapnotes-android 协议 + 断点续传 + 搜索分级 + 连打输入法 + 官方签名） |
 
 两端版本需匹配才能正常建立蓝牙连接。
 

@@ -1,8 +1,8 @@
 {
   "package": "com.silenthong.kdreader",
   "name": "考点阅读器",
-  "versionName": "V26.6.0.BAND",
-  "versionCode": 260600,
+  "versionName": "V26.7.0.BAND",
+  "versionCode": 260700,
   "minPlatformVersion": 1200,
   "minAPILevel": 1,
   "icon": "/common/images/icon.png",
@@ -79,9 +79,12 @@
       "pages/deleteConfirm": {
         "component": "deleteConfirm"
       },
-      "pages/push": {
-        "component": "push"
-      },
+    "pages/push": {
+      "component": "push"
+    },
+    "pages/import": {
+      "component": "import"
+    },
       "pages/search": {
         "component": "search"
       }
