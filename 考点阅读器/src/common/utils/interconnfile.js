@@ -23,6 +23,7 @@
  */
 import { interconnModule } from './interconn.js';
 import dataManager from './dataManager.js';
+import { parseKnowledgeJson } from './jsonParser.js';
 
 export default class interconnfile {
     static "__interconnModule__" = true;
@@ -205,14 +206,30 @@ export default class interconnfile {
             // 保存章节内容到手环存储
             try {
                 // 多章节时使用 "文件名 - 第N章" 作为显示名
-                const displayName = this.totalChapters > 1
+                let displayName = this.totalChapters > 1
                     ? this.currentBookName + ' - 第' + (this.currentChapterMeta.index + 1) + '章'
                     : this.currentBookName;
-                console.log('[BT-File] Saving to folder: ' + this.targetFolder + ', name: ' + displayName);
+
+                // JSON 知识点文件检测：文件名以 .json 结尾时按闪念小抄（Snapnotes）结构解析保存
+                let fmt = '';
+                if (displayName && displayName.toLowerCase().indexOf('.json') === displayName.length - 5) {
+                    const check = parseKnowledgeJson(this.currentChapterMeta.content);
+                    if (!check.ok) {
+                        const errText = check.error === 'parse-fail'
+                            ? 'JSON 解析失败，请检查文件格式'
+                            : 'JSON 结构无效（需 {科目:[{title,points,...}]} 结构）';
+                        console.error('[BT-File] JSON validation failed: ' + check.error);
+                        this.send({ type: "error", message: errText, count: 0 });
+                        return;
+                    }
+                    fmt = 'json';
+                }
+                console.log('[BT-File] Saving to folder: ' + this.targetFolder + ', name: ' + displayName + ', fmt: ' + (fmt || 'txt'));
                 const savedId = await dataManager.saveBluetoothContent(
                     displayName,
                     this.currentChapterMeta.content,
-                    this.targetFolder
+                    this.targetFolder,
+                    fmt
                 );
                 if (!savedId) {
                     throw new Error('存储写入失败（可能存储空间不足）');

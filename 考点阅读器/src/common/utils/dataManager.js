@@ -792,7 +792,8 @@ export default {
           .map(item => ({
             id: item.id,
             name: item.name,
-            type: item.type || 'content'
+            type: item.type || 'content',
+            fmt: item.fmt || ''
           }))
         resolve(items)
       })
@@ -815,7 +816,8 @@ export default {
             .map(item => ({
               id: item.id,
               name: item.name,
-              type: item.type || 'content'
+              type: item.type || 'content',
+              fmt: item.fmt || ''
             }))
           resolve(items)
         })
@@ -1057,12 +1059,13 @@ export default {
    * 保存蓝牙传输的 txt 内容
    * 生成 id → 存 meta 到 KD_BT_META → 分块存正文到 KD_BT_C_{id}_{i}
    * 使用分块存储避免单个 value 过大导致 OOM 崩溃和存储系统损坏
-   * @param {string} filename 文件名（不含后缀）
+   * @param {string} filename 文件名（不含后缀；JSON 文件保留 .json 后缀）
    * @param {string} content  正文内容
    * @param {string} targetFolder 目标文件夹 ID（'bt_root' 表示根目录）
+   * @param {string} [fmt] 内容格式：'' = 纯文本（默认），'json' = 知识点 JSON（Snapnotes 结构）
    * @returns {Promise<string|null>} 新内容 ID（失败返回 null）
    */
-  saveBluetoothContent(filename, content, targetFolder) {
+  saveBluetoothContent(filename, content, targetFolder, fmt) {
     return new Promise((resolve) => {
       getBluetoothMeta().then((metaList) => {
         const id = 'bt_' + Date.now()
@@ -1073,6 +1076,7 @@ export default {
           folder: targetFolder || 'bt_root',
           created: Date.now()
         }
+        if (fmt === 'json') meta.fmt = 'json'
         const updated = metaList.concat([meta])
         saveBluetoothMeta(updated).then((metaOk) => {
           if (!metaOk) {
@@ -1271,6 +1275,19 @@ export default {
         resolve(tree)
       })
     })
+  },
+
+  /**
+   * 判断某个蓝牙文件是否为知识点 JSON（Snapnotes 结构）
+   * @param {string} id 文件 ID
+   * @returns {boolean}
+   */
+  isBluetoothJson(id) {
+    if (_btMetaCache) {
+      const item = _btMetaCache.find(it => it.id === id)
+      if (item && item.fmt === 'json') return true
+    }
+    return false
   },
 
   /**

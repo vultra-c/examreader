@@ -12,7 +12,7 @@
       <list-item for="{{visibleItems}}" tid="id" class="item" type="item" @click="onItemClick($item)" @longpress="onLongPress($item)">
         <div class="item-content">
           <text class="itemtext">{{$item.name}}</text>
-          <text class="itemtext2">{{$item.type === 'folder' ? '文件夹' : '考点'}}</text>
+          <text class="itemtext2">{{$item.subtitle}}</text>
         </div>
         <img static src="/common/images/enter.png" class="arrow" />
       </list-item>
@@ -93,7 +93,13 @@ export default {
   async loadData() {
     const children = await dataManager.getVisibleChildren(this.path)
     if (!this.$valid) return
-    this.allItems = children || []
+    const items = children || []
+    // 补充副标题文案：JSON 知识点文件显示「知识点 JSON」
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i]
+      it.subtitle = it.type === 'folder' ? '文件夹' : (it.fmt === 'json' ? '知识点 JSON' : '考点')
+    }
+    this.allItems = items
     this.visibleItems = this.allItems
   },
 
@@ -106,10 +112,12 @@ export default {
     }
     this.isNavigating = true
 
-    // 子文件夹内容：直接用 item.id 作为路径
+    // 子文件夹内容：直接用 item.id 作为路径；JSON 知识点走 jsonReader
     if (this.path && this.path.startsWith('bt_')) {
       if (item.type === 'folder') {
         router.push({ uri: '/pages/subfolder', params: { path: item.id } })
+      } else if (item.fmt === 'json') {
+        router.push({ uri: '/pages/jsonReader', params: { path: item.id } })
       } else {
         router.push({ uri: '/pages/reader', params: { path: item.id } })
       }

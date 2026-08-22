@@ -101,12 +101,14 @@ export default {
     const items = []
     if (folders) {
       folders.forEach((folder) => {
-        const subtitle = folder.type === 'folder' ? '文件夹' : '考点'
+        const isJson = folder.fmt === 'json'
+        const subtitle = folder.type === 'folder' ? '文件夹' : (isJson ? '知识点 JSON' : '考点')
         items.push({
           id: folder.id,
           name: folder.name,
           subtitle: subtitle,
           type: folder.type || 'content',
+          fmt: folder.fmt || '',
           path: folder.id
         })
       })
@@ -125,10 +127,15 @@ export default {
     }
     this.isNavigating = true
 
-    // 主页直接显示根级文件夹和文件
+    // 主页直接显示根级文件夹和文件；JSON 知识点文件走 jsonReader（闪念小抄显示逻辑）
     if (item.type === 'folder') {
       router.push({
         uri: '/pages/subfolder',
+        params: { path: item.id }
+      })
+    } else if (item.fmt === 'json') {
+      router.push({
+        uri: '/pages/jsonReader',
         params: { path: item.id }
       })
     } else {

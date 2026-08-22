@@ -9,11 +9,13 @@
     "start": "aiot server --watch --open-nuttx",
     "build": "aiot build",
     "release": "aiot release --enable-jsc",
-    "watch": "aiot watch --open-nuttx"
+    "watch": "aiot watch --open-nuttx",
+    "postinstall": "node scripts/patch-aiotpack.js"
   },
   "devDependencies": {
     "@aiot-toolkit/velasim": "^0.1.25",
-    "aiot-toolkit": "^2.0.5"
+    "aiot-toolkit": "^2.0.5",
+    "terser-webpack-plugin": "^5.6.1"
   },
   "dependencies": {
     "@aiot-toolkit/jsc": "^1.0.7"

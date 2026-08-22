@@ -109,6 +109,8 @@ public class MainActivity extends Activity {
     // State
     private String selectedFileName;
     private String selectedFileContent;
+    /** True when the picked file is a knowledge-point JSON (.json). */
+    private boolean selectedFileIsJson = false;
     private volatile boolean transferring = false;
     private volatile boolean destroyed = false;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -539,7 +541,10 @@ public class MainActivity extends Activity {
     private void onSelectFileClick() {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("text/plain");
+        // Accept both TXT and knowledge-point JSON files
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES,
+                new String[]{"text/plain", "application/json", "application/octet-stream"});
         startActivityForResult(intent, REQUEST_OPEN_FILE);
     }
 
@@ -560,7 +565,33 @@ public class MainActivity extends Activity {
 
         try {
             selectedFileContent = TxtTransferHandler.readTxtFromUri(this, uri);
+
+            // Detect file type by extension: .json files are knowledge-point files
+            // (Snapnotes structure) and keep the ".json" suffix in transfer name so
+            // the band app can route them to its JSON reader.
+            selectedFileIsJson = selectedFileName != null
+                    && selectedFileName.toLowerCase().endsWith(".json");
+            if (selectedFileIsJson && !validateKnowledgeJson(selectedFileContent)) {
+                // Invalid JSON — reject before transfer instead of failing on the band
+                selectedFileContent = null;
+                selectedFileIsJson = false;
+                tvSelectedFile.setText(getString(R.string.file_read_error) + selectedFileName);
+                tvSelectedFile.setTextColor(getColor(R.color.error));
+                tvSelectedFile.setBackgroundResource(R.drawable.bg_file_empty);
+                tvProgress.setText(R.string.json_invalid);
+                updateSendButtonState();
+                return;
+            }
+
             tvProgress.setText(getString(R.string.file_loaded, selectedFileContent.length()));
+            if (selectedFileIsJson) {
+                int subjectCount = countKnowledgeSubjects(selectedFileContent);
+                if (subjectCount > 0) {
+                    Toast.makeText(this,
+                            getString(R.string.json_valid, subjectCount),
+                            Toast.LENGTH_SHORT).show();
+                }
+            }
 
             // Large file warning
             if (selectedFileContent.length() > LARGE_FILE_THRESHOLD) {
@@ -571,12 +602,49 @@ public class MainActivity extends Activity {
         } catch (Exception e) {
             Log.w(TAG, "readTxtFromUri failed", e);
             selectedFileContent = null;
+            selectedFileIsJson = false;
             tvSelectedFile.setText(getString(R.string.file_read_error) + selectedFileName);
             tvSelectedFile.setTextColor(getColor(R.color.error));
             tvSelectedFile.setBackgroundResource(R.drawable.bg_file_empty);
             tvProgress.setText(getString(R.string.file_read_error) + safeMessage(e));
         }
         updateSendButtonState();
+    }
+
+    /**
+     * Validate that a picked JSON file matches the knowledge-point structure:
+     * an object whose values are arrays of point entries.
+     * Returns true when it parses and contains at least one subject array.
+     */
+    private static boolean validateKnowledgeJson(String content) {
+        try {
+            JSONObject root = new JSONObject(content);
+            JSONArray names = root.names();
+            if (names == null || names.length() == 0) return false;
+            for (int i = 0; i < names.length(); i++) {
+                if (root.optJSONArray(names.optString(i)) != null) return true;
+            }
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** Count subjects (top-level arrays) inside a knowledge-point JSON. */
+    private static int countKnowledgeSubjects(String content) {
+        try {
+            JSONObject root = new JSONObject(content);
+            JSONArray names = root.names();
+            int n = 0;
+            if (names != null) {
+                for (int i = 0; i < names.length(); i++) {
+                    if (root.optJSONArray(names.optString(i)) != null) n++;
+                }
+            }
+            return n;
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     private void onNewFolderClick() {
@@ -692,7 +760,9 @@ public class MainActivity extends Activity {
         progressBar.setProgress(0);
         tvProgress.setText(getString(R.string.preparing_transfer, targetFolderPath));
 
-        final String fileName = TxtTransferHandler.getFileNameWithoutExtension(selectedFileName);
+        final String fileName = selectedFileIsJson
+                ? selectedFileName   // JSON：保留 .json 后缀，手环据此识别知识点文件
+                : TxtTransferHandler.getFileNameWithoutExtension(selectedFileName);
         final int charCount = selectedFileContent.length();
         txtTransfer.sendTxtFile(fileName, selectedFileContent, targetFolderId,
                 new TxtTransferHandler.TransferProgressListener() {

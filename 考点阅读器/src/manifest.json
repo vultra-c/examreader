@@ -55,6 +55,9 @@
       "pages/reader": {
         "component": "reader"
       },
+      "pages/jsonReader": {
+        "component": "jsonReader"
+      },
       "pages/globalSettings": {
         "component": "globalSettings"
       },
