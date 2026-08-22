@@ -50,7 +50,7 @@
         <div class="jr-raw" if="{{rawVisible}}">
           <text class="jr-raw-label" static>原文</text>
           <div class="jr-raw-paragraphs">
-            <text class="jr-raw-para" for="{{visibleRawParagraphs}}">{{$item}}</text>
+            <text class="jr-raw-para" for="{{visibleRawParagraphs}}" style="font-size: {{fontSize}}px; line-height: {{paraLineHeight}}px;">{{$item}}</text>
           </div>
           <div class="jr-raw-pager" if="{{rawTotalPages > 1}}">
             <div class="jr-pager-btn {{rawPage <= 1 ? 'jr-pager-btn--disabled' : ''}}" @click="prevRawPage">
@@ -68,7 +68,7 @@
           <div class="jr-point-index">
             <text class="jr-point-index-text">{{$idx + 1}}</text>
           </div>
-          <text class="jr-point-text">{{$item}}</text>
+          <text class="jr-point-text" style="font-size: {{fontSize}}px;">{{$item}}</text>
         </div>
 
         <!-- 公式（文本形式展示） -->
@@ -88,6 +88,7 @@
     <!-- 顶部栏（与其他页面一致） -->
     <img static src="/common/images/hd.png" style="position: absolute; left: 0px; top: 0px; width: 336px; height: 102px;" />
     <img static src="/common/images/back.png" @click="goBack" style="position: absolute; left: 6px; top: 6px; width: 72px; height: 72px;" />
+    <img static src="/common/images/more.png" @click="goSettings" style="position: absolute; left: 258px; top: 6px; width: 72px; height: 72px;" />
     <text static style="position: absolute; left: 78px; top: 6px; width: 180px; line-height: 30px; font-weight: bold; font-size: 24px; color: rgba(255,255,255,0.6); text-align: center;">{{nowTime}}</text>
     <text static style="position: absolute; left: 78px; top: 36px; width: 180px; line-height: 42px; font-weight: bold; font-size: 32px; color: white; text-align: center; lines: 1; text-overflow: ellipsis;">{{pageTitle}}</text>
 
@@ -97,9 +98,11 @@
 <script>
 import router from '@system.router'
 import storage from '@system.storage'
+import brightness from '@system.brightness'
 import dataManager from '../../common/utils/dataManager.js'
 import { parseKnowledgeJson, getItems } from '../../common/utils/jsonParser.js'
 import { getFormattedTimeNow } from '../../common/utils/timeUtil.js'
+import appState from '../../common/utils/appState.js'
 
 // 原文分页参数（与闪念小抄 content.ux 一致：每页 320 字，按段累加不拆段）
 const RAW_PAGE_CHAR_LIMIT = 320
@@ -109,6 +112,10 @@ export default {
     nowTime: '00:00',
     timer: null,
     timeFormat: '24h',
+    // 详情页排版（设置页可调，与 TXT 阅读器共用同一组存储键）
+    fontSize: 26,
+    lineHeight: 30,
+    paraLineHeight: 40,
     loaded: false,
     loadError: '',
     // 视图状态：subjects → list → detail
@@ -145,7 +152,71 @@ export default {
       }
     }, 60000)
     this.loadTimeFormat()
+    this.loadDisplaySettings()
     this.loadJson()
+  },
+
+  onShow() {
+    if (!this.$valid) return
+    // 从删除确认返回：文件已被删除，自动退回列表页（与 reader 页行为一致）
+    if (appState.refreshReader) {
+      appState.refreshReader = false
+      router.back()
+      return
+    }
+    // 从设置页返回：字号/行距可能已变化
+    this.loadDisplaySettings()
+  },
+
+  loadDisplaySettings() {
+    storage.get({
+      key: 'KD_FONT_SIZE',
+      success: (data) => {
+        if (!this.$valid) return
+        let fs = data ? parseInt(data) : 26
+        if (isNaN(fs) || fs < 20) fs = 20
+        if (fs > 36) fs = 36
+        this.fontSize = fs
+      },
+      fail: () => {
+        if (!this.$valid) return
+        this.fontSize = 26
+      }
+    })
+    storage.get({
+      key: 'KD_LINE_HEIGHT',
+      success: (data) => {
+        if (!this.$valid) return
+        let lh = data ? parseInt(data) : 30
+        if (isNaN(lh) || lh < 20) lh = 30
+        if (lh > 50) lh = 50
+        this.lineHeight = lh
+        this.paraLineHeight = lh + 10
+      },
+      fail: () => {
+        if (!this.$valid) return
+        this.lineHeight = 30
+        this.paraLineHeight = 40
+      }
+    })
+    storage.get({
+      key: 'KD_KEEP_SCREEN_ON',
+      success: (data) => {
+        if (!this.$valid) return
+        brightness.setKeepScreenOn({ keepScreenOn: data === 'true' })
+      },
+      fail: () => {
+        if (!this.$valid) return
+        brightness.setKeepScreenOn({ keepScreenOn: false })
+      }
+    })
+  },
+
+  goSettings() {
+    router.push({
+      uri: '/pages/jsonReaderSettings',
+      params: { path: this.path }
+    })
   },
 
   onDestroy() {
@@ -389,7 +460,10 @@ export default {
   .jr-desc {
     color: #98989E;
     font-size: 22px;
+    line-height: 32px;
     margin-top: 8px;
+    lines: 3;
+    text-overflow: ellipsis;
   }
   .jr-divider {
     width: 296px;
@@ -398,10 +472,14 @@ export default {
     margin: 14px 0 8px 0;
   }
 
-  /* 原文区块 */
+  /* 原文区块：卡片底色，与列表卡片风格呼应 */
   .jr-raw {
     flex-direction: column;
     margin-top: 8px;
+    width: 296px;
+    background-color: rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    padding: 14px 16px;
   }
   .jr-raw-label {
     color: #C9A86A;
@@ -414,7 +492,6 @@ export default {
   }
   .jr-raw-paragraphs {
     flex-direction: column;
-    width: 296px;
   }
   .jr-raw-para {
     color: #E8E8EC;
@@ -427,13 +504,16 @@ export default {
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
-    width: 296px;
-    margin: 6px 0 16px 0;
+    margin: 10px 0 4px 0;
   }
+  /* 翻页按钮：加高加宽，手环上易点中 */
   .jr-pager-btn {
     background-color: rgba(120, 153, 187, 0.2);
-    border-radius: 10px;
-    padding: 6px 16px;
+    border-radius: 12px;
+    width: 110px;
+    height: 56px;
+    align-items: center;
+    justify-content: center;
   }
   .jr-pager-btn--disabled {
     opacity: 0.35;
@@ -442,6 +522,7 @@ export default {
     color: #7899BB;
     font-size: 22px;
     font-weight: bold;
+    text-align: center;
   }
   .jr-pager-info {
     color: #98989E;
@@ -478,16 +559,23 @@ export default {
     line-height: 38px;
   }
 
-  /* 公式区块 */
+  /* 公式区块：金色标签风，与原文标签呼应 */
   .jr-formula {
     flex-direction: column;
-    margin-top: 8px;
+    margin-top: 12px;
+    width: 296px;
+    background-color: rgba(201, 168, 106, 0.08);
+    border-radius: 12px;
+    padding: 14px 16px;
   }
   .jr-formula-text {
     color: #E8E8EC;
     font-size: 24px;
     line-height: 36px;
     margin-bottom: 10px;
+    background-color: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    padding: 6px 12px;
   }
 
   /* 空状态 */

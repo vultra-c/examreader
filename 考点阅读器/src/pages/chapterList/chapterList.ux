@@ -1,0 +1,152 @@
+<template>
+  <div class="page" style="flex-direction: column;" @swipe="onSwipe">
+
+    <!-- 加载占位 -->
+    <div if="{{loading}}" style="position: absolute; left: 0px; top: 102px; width: 336px; height: 240px; flex-direction: column; justify-content: center; align-items: center;">
+      <text static style="line-height: 36px; font-size: 24px; color: rgba(255,255,255,0.5); text-align: center;">正在解析章节…</text>
+    </div>
+
+    <!-- 空状态 -->
+    <div if="{{!loading && chapterRows.length === 0}}" style="position: absolute; left: 0px; top: 102px; width: 336px; height: 240px; flex-direction: column; justify-content: center; align-items: center;">
+      <text static style="line-height: 36px; font-weight: bold; font-size: 24px; color: rgba(255,255,255,0.4); text-align: center;">未检测到章节结构</text>
+      <text static style="line-height: 32px; font-size: 20px; color: rgba(255,255,255,0.3); text-align: center; margin-top: 8px;">短文件或无章节标题的文本不提供目录</text>
+    </div>
+
+    <!-- 章节列表（主页同款模板） -->
+    <list class="list" if="{{!loading && chapterRows.length > 0}}">
+      <list-item for="{{chapterRows}}" tid="id" class="item" type="folder" @click="onChapterClick($item)">
+        <div class="item-content">
+          <text class="itemtext">{{$item.title}}</text>
+          <text class="itemtext2">{{$item.subtitle}}</text>
+        </div>
+        <img static src="/common/images/enter.png" class="arrow" />
+      </list-item>
+    </list>
+
+    <!-- 顶部栏 -->
+    <img static src="/common/images/hd.png" style="position: absolute; left: 0px; top: 0px; width: 336px; height: 102px;" />
+    <img static src="/common/images/back.png" @click="goBack" style="position: absolute; left: 6px; top: 6px; width: 72px; height: 72px;" />
+    <text static style="position: absolute; left: 78px; top: 6px; width: 180px; line-height: 30px; font-weight: bold; font-size: 24px; color: rgba(255,255,255,0.6); text-align: center;">{{nowTime}}</text>
+    <text static style="position: absolute; left: 78px; top: 36px; width: 180px; line-height: 42px; font-weight: bold; font-size: 32px; color: white; text-align: center; lines: 1; text-overflow: ellipsis;">章节目录</text>
+
+  </div>
+</template>
+
+<script>
+import router from '@system.router'
+import storage from '@system.storage'
+import dataManager from '../../common/utils/dataManager.js'
+import { getFormattedTimeNow } from '../../common/utils/timeUtil.js'
+import appState from '../../common/utils/appState.js'
+
+export default {
+  private: {
+    nowTime: '00:00',
+    timer: null,
+    timeFormat: '24h',
+    loading: true,
+    chapterRows: [],
+    totalLength: 0,
+    contentPath: ''
+  },
+  protected: {
+    path: ''
+  },
+
+  onInit() {
+    this.nowTime = getFormattedTimeNow(this.timeFormat)
+    this.timer = setInterval(() => {
+      if (this.$valid) {
+        this.nowTime = getFormattedTimeNow(this.timeFormat)
+      }
+    }, 60000)
+    this.loadTimeFormat()
+    this.contentPath = this.path
+    this.loadChapters()
+  },
+
+  onDestroy() {
+    if (this.timer) {
+      clearInterval(this.timer)
+      this.timer = null
+    }
+  },
+
+  loadTimeFormat() {
+    storage.get({
+      key: 'KD_TIME_FORMAT',
+      success: (data) => {
+        if (!this.$valid) return
+        if (data) this.timeFormat = data
+        this.nowTime = getFormattedTimeNow(this.timeFormat)
+      },
+      fail: () => {
+        if (!this.$valid) return
+        this.nowTime = getFormattedTimeNow(this.timeFormat)
+      }
+    })
+  },
+
+  async loadChapters() {
+    // 轻量索引：dataManager 只扫描一次正文，缓存 {title,start} 列表，
+    // 不复制正文 —— 与 com.bandbbs.ebook 的分章模型一致
+    const result = await dataManager.getReaderChapters(this.contentPath)
+    if (!this.$valid) return
+    this.totalLength = result.totalLength || 0
+
+    const rows = []
+    const list = result.list || []
+    for (let i = 0; i < list.length; i++) {
+      const ch = list[i]
+      const percent = this.totalLength > 0 ? Math.round(ch.start / this.totalLength * 100) : 0
+      rows.push({
+        id: 'ch_' + i,
+        title: ch.title,
+        subtitle: '进度 ' + percent + '%',
+        start: ch.start
+      })
+    }
+    this.chapterRows = rows
+    this.loading = false
+  },
+
+  async onChapterClick(row) {
+    // 分页模式：字符偏移 → 页码；无缝模式：字符偏移 → 百分比。
+    // 复用 pageJump / percentJump 同一条回跳链路（needBackToReader）
+    if (appState.readingMode === 'seamless') {
+      let percent = this.totalLength > 0 ? Math.round(row.start / this.totalLength * 100) : 0
+      if (percent > 100) percent = 100
+      appState.jumpToPercent = percent
+      appState.needBackToReader = true
+      router.back()
+      return
+    }
+
+    const fontSize = appState.fontSize || 26
+    const page = await dataManager.findPageByCharPosition(this.contentPath, row.start, fontSize)
+    if (!this.$valid) return
+    appState.jumpToPage = page
+    appState.needBackToReader = true
+    router.back()
+  },
+
+  goBack() {
+    router.back()
+  },
+
+  onSwipe(e) {
+    if (e.direction === 'right') {
+      router.back()
+    }
+  },
+
+  onBackPress() {
+    router.back()
+    return true
+  }
+}
+</script>
+
+<style>
+  @import '../../common/style.css';
+</style>

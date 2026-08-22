@@ -111,6 +111,10 @@ function saveDeletedSet(deletedSet) {
 let _btMetaCache = null
 // 内存缓存：已读过的正文 Map<id, string>
 const _btFileCache = new Map()
+
+// 章节目录缓存（参考 com.bandbbs.ebook 的分章模型：
+// 只保存 {title,start} 轻量索引，正文按需读取）
+const _btChaptersCache = new Map()
 // 蓝牙内容分页缓存 Map<id_fontSize, pages>
 const _btPagesCache = new Map()
 // 迁移单例 Promise，保证只跑一次
@@ -652,6 +656,78 @@ function _clearBtPagesCacheForId(id) {
   for (let i = 0; i < keysToDelete.length; i++) {
     _btPagesCache.delete(keysToDelete[i])
   }
+  // 章节目录缓存同步失效
+  _btChaptersCache.delete(id)
+}
+
+// ==================== 章节分段（学习 com.bandbbs.ebook ChapterSplitter） ====================
+
+// 章节标题识别规则（保守策略，避免把「1. xxx」这类普通考点行误判为章节）：
+// 1. 第X章/卷/节/部/篇/回/本（含中文数字与阿拉伯数字）
+// 2. 番外
+// 3. 英文 Chapter N
+const CHAPTER_TITLE_PATTERNS = [
+  /^第\s{0,1}[一二三四五六七八九十百千万零〇\d]+\s{0,1}(章|卷|节|部|篇|回|本)(.{0,30})$/,
+  /^番外\s{0,2}[一二三四五六七八九十百千万零〇\d]*.{0,30}$/,
+  /^\s*(Chapter|CHAPTER)\s+\d+.*$/
+]
+
+// 无章节结构时的兜底分段大小（字符），约一屏半的内容
+const CHAPTER_FALLBACK_CHARS = 3500
+
+function isChapterHeading(line) {
+  const t = line.trim()
+  if (t.length === 0 || t.length > 40) return false
+  for (let i = 0; i < CHAPTER_TITLE_PATTERNS.length; i++) {
+    if (CHAPTER_TITLE_PATTERNS[i].test(t)) return true
+  }
+  return false
+}
+
+/**
+ * 构建章节索引：只记录每章的起始偏移量，不复制正文，内存占用极小。
+ * 有明确章节标题按标题切；检测不到章节结构时按固定字数在换行处兜底切段
+ * （对应电子书「按字数分章」策略）。单章内容返回空数组表示无目录。
+ */
+function buildChapterIndex(content) {
+  if (!content || content.length === 0) return []
+  const lines = content.split('\n')
+  const chapters = []
+  let offset = 0
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (isChapterHeading(line)) {
+      chapters.push({ title: line.trim(), start: offset })
+    }
+    offset += line.length + 1
+  }
+
+  if (chapters.length >= 2) {
+    // 前言：第一章之前若有实质内容，补一节
+    if (chapters[0].start > 200) {
+      chapters.unshift({ title: '前言', start: 0 })
+    }
+    return chapters
+  }
+
+  // 兜底：按固定字数在换行边界切段
+  const total = content.length
+  if (total <= CHAPTER_FALLBACK_CHARS) return []
+  const fallback = []
+  let start = 0
+  let idx = 1
+  while (start < total) {
+    fallback.push({ title: '第 ' + idx + ' 节', start: start })
+    idx++
+    let next = start + CHAPTER_FALLBACK_CHARS
+    if (next < total) {
+      // 对齐到下一个换行处，避免切断句子
+      const nl = content.indexOf('\n', next)
+      if (nl >= 0 && nl < next + 300) next = nl + 1
+    }
+    start = next
+  }
+  return fallback.length > 1 ? fallback : []
 }
 
 // 根据路径数组获取节点（保留用于内置树路径解析；knowledgeTree 为空时返回 null）
@@ -1764,6 +1840,33 @@ export default {
         return
       }
       resolve(['无内容'])
+    })
+  },
+
+  /**
+   * 获取章节目录（轻量索引，参考 com.bandbbs.ebook 分章加载模型）
+   * 仅支持蓝牙传输的长文本；返回 { list: [{title,start}], totalLength }
+   * list 为空表示无章节结构（或文件太短无需目录）
+   */
+  getReaderChapters(pathStr) {
+    return new Promise((resolve) => {
+      if (!pathStr || pathStr.indexOf('bt_') !== 0 || pathStr.indexOf('bt_folder_') === 0) {
+        resolve({ list: [], totalLength: 0 })
+        return
+      }
+      if (_btChaptersCache.has(pathStr)) {
+        resolve(_btChaptersCache.get(pathStr))
+        return
+      }
+      this.getReaderFullContent(pathStr).then((content) => {
+        if (!this || !content || content.length === 0) {
+          resolve({ list: [], totalLength: 0 })
+          return
+        }
+        const result = { list: buildChapterIndex(content), totalLength: content.length }
+        _btChaptersCache.set(pathStr, result)
+        resolve(result)
+      })
     })
   },
 

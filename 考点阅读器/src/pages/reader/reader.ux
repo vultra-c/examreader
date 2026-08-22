@@ -15,10 +15,11 @@
       @click="onTxtClick"
     >
       <div id="seamlessContainer" style="position: absolute; width: 336px; flex-direction: column;">
+        <div style="width: 336px; height: {{seamlessTopPad}}px;"></div>
         <div for="{{seamlessBlocks}}" style="width: 336px; flex-direction: column;">
           <text style="width: 336px; text-align: left; color: #FFFFFF; font-size: {{fontSize}}px; font-weight: bold; line-height: {{lineHeight}}px; padding-left: 20px; padding-right: 20px;">{{$item}}</text>
         </div>
-        <div style="width: 336px; height: 40px;"></div>
+        <div style="width: 336px; height: {{seamlessBottomPad}}px;"></div>
       </div>
     </scroll>
 
@@ -103,7 +104,15 @@ export default {
     readingPercent: 0,
     seamlessMaxScroll: 1,
     seamlessRestoring: false,
-    modeChanged: false
+    modeChanged: false,
+    // 无缝模式虚拟窗口：只渲染视口附近约几十行，上下用等高占位块补齐。
+    // 长文（几十章/几万字）DOM 节点数恒定，彻底解决导入长文本后的严重卡顿与崩溃
+    seamlessTopPad: 0,
+    seamlessBottomPad: 40,
+    // 行索引（非模板绑定，仅虚拟窗口计算用）
+    lineStarts: [],
+    lineRows: [],
+    estTotalRows: 1
   },
   protected: {
     path: '',
@@ -170,14 +179,18 @@ export default {
       return
     }
 
-    // 字号变化：分页模式动态重新分页，无缝模式重算滚动估算
+    // 字号变化：分页模式动态重新分页，无缝模式重算行索引与窗口
     if (fontChanged && this.pagesLoaded) {
       if (this.readingMode === 'paginated') {
         await this.loadContent()
         if (!this.$valid) return
         this.saveProgress()
-      } else if (this.seamlessBlocks.length > 0) {
-        this.seamlessMaxScroll = this.estimateMaxScroll(this.fullContent)
+      } else if ((this._winEnd || 0) > 0 || this.seamlessBlocks.length > 0) {
+        this.buildSeamlessIndex(this.fullContent)
+        this.seamlessMaxScroll = Math.max(1, this.estTotalRows * this.lineHeight + 40 - 460)
+        this._winStart = -1
+        this._winEnd = -1
+        this.updateSeamlessWindow(this.seamlessScrollTop || 0)
       }
     }
     // 处理跳页请求（pageJump / percentJump）
@@ -259,9 +272,12 @@ export default {
         // 无缝模式：progress 是滚动偏移量（像素）
         if (progress != null && progress !== undefined && progress >= 0) {
           this.seamlessScrollTopValue = progress
+          this.seamlessScrollTop = progress
+          this.updateSeamlessWindow(progress)
           this.$nextTick(() => {
             if (!this.$valid) return
             this.seamlessScrollTopValue = progress
+            this.updateSeamlessWindow(progress)
           })
         }
       } else {
@@ -339,21 +355,22 @@ export default {
       if (!this.$valid) return
       this.fullContent = fullContent
 
-      // 按行拆分为 blocks，每行一个 text 元素（与弦电子书 detail.ux blocks 结构一致）
-      const blocks = fullContent.split('\n')
-      this.seamlessBlocks = blocks
-
       const name = dataManager.getUnifiedNodeName(this.path)
       if (name) {
         this.contentName = name
         this.pageName = name
       }
 
-      // 估算总滚动范围用于百分比计算
-      this.seamlessMaxScroll = this.estimateMaxScroll(fullContent)
+      // 分段加载（学习 com.bandbbs.ebook：正文不整体进渲染树）：
+      // 先建轻量行索引（纯数字数组），再只把视口附近的行交给渲染器
+      this.buildSeamlessIndex(fullContent)
+      this.seamlessMaxScroll = Math.max(1, this.estTotalRows * this.lineHeight + 40 - 460)
       this.readingPercent = 0
       this.seamlessScrollTop = 0
       this.seamlessScrollTopValue = 0
+      this._winStart = -1
+      this._winEnd = -1
+      this.updateSeamlessWindow(0)
       this.pagesLoaded = true
       // 清理分页缓存数据释放内存
       this.pages = []
@@ -433,10 +450,11 @@ export default {
 
   onScroll(e) {
     if (this.readingMode === 'seamless') {
-      // 无缝模式：跟踪滚动位置
+      // 无缝模式：跟踪滚动位置并更新虚拟窗口
       const scrollTop = e.scrollTop || (e.detail && e.detail.scrollTop) || 0
       this.seamlessScrollTop = scrollTop
       this.updateSeamlessPercent(scrollTop)
+      this.updateSeamlessWindow(scrollTop)
     } else {
       // 分页模式
       if (this.atScrollBottom) {
@@ -511,6 +529,96 @@ export default {
     if (Math.abs(newPercent - this.readingPercent) >= 1) {
       this.readingPercent = newPercent
     }
+  },
+
+  /**
+   * 建立无缝模式行索引（分段加载第一步，纯数字数组，内存开销极小）：
+   *   lineStarts[i] = 第 i 个逻辑行在全文中的起始偏移
+   *   lineRows[i]   = 第 i 行之前累计的渲染行数（超长行按估算折行计入多行）
+   */
+  buildSeamlessIndex(content) {
+    const cpl = Math.max(1, Math.floor(296 / this.fontSize))
+    const starts = [0]
+    let idx = content.indexOf('\n')
+    while (idx >= 0) {
+      starts.push(idx + 1)
+      idx = content.indexOf('\n', idx + 1)
+    }
+    const n = starts.length
+    const rows = new Array(n)
+    let acc = 0
+    for (let i = 0; i < n; i++) {
+      rows[i] = acc
+      const end = i === n - 1 ? content.length : starts[i + 1] - 1
+      const len = end - starts[i]
+      acc += len === 0 ? 1 : Math.ceil(len / cpl)
+    }
+    this.lineStarts = starts
+    this.lineRows = rows
+    this.estTotalRows = Math.max(1, acc)
+  },
+
+  /**
+   * 按滚动位置更新可见窗口（虚拟渲染核心）：
+   * 只把 [winStart, winEnd) 范围的逻辑行交给渲染树，上下用精确高度的占位块补齐，
+   * 滚动总高度不变、DOM 节点数恒定，长文本不再卡顿或崩溃。
+   * 窗口未跨过阈值时不重建，避免频繁刷数据。
+   */
+  updateSeamlessWindow(scrollTop) {
+    const content = this.fullContent
+    if (!content || !this.lineRows || this.lineRows.length === 0) return
+    if (this._winStart === undefined) {
+      this._winStart = -1
+      this._winEnd = -1
+    }
+    const lh = this.lineHeight
+    const firstRow = Math.max(0, Math.min(this.estTotalRows - 1, Math.floor(scrollTop / lh)))
+
+    // 二分找到包含 firstRow 的逻辑行
+    let lo = 0
+    let hi = this.lineRows.length - 1
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1
+      if (this.lineRows[mid] <= firstRow) lo = mid
+      else hi = mid - 1
+    }
+    const centerLine = lo
+
+    const aboveLines = 12
+    const visibleRows = Math.ceil(460 / lh)
+    const belowRows = visibleRows + 24
+    const start = Math.max(0, centerLine - aboveLines)
+    const n = this.lineRows.length
+    let end = centerLine
+    let covered = 0
+    while (end < n && covered < belowRows) {
+      const nextEnd = end + 1
+      covered += (nextEnd < n ? this.lineRows[nextEnd] : this.estTotalRows) - this.lineRows[end]
+      end = nextEnd
+    }
+
+    if (start === this._winStart && end === this._winEnd) return
+    this._winStart = start
+    this._winEnd = end
+
+    this.seamlessBlocks = content.substring(
+      this.lineStarts[start],
+      end >= n ? content.length : this.lineStarts[end]
+    ).split('\n')
+    this.seamlessTopPad = this.lineRows[start] * lh
+
+    // 窗口内逻辑行可能折行成多行渲染行，按估算行数精确补偿，保证总高度恒定：
+    // topPad + 窗口实际渲染高度 + bottomPad === estTotalRows * lh + 40
+    const cpl = Math.max(1, Math.floor(296 / this.fontSize))
+    let winRows = 0
+    for (let i = start; i < end; i++) {
+      const s0 = this.lineStarts[i]
+      const e0 = i === n - 1 ? content.length : this.lineStarts[i + 1] - 1
+      const len = e0 - s0
+      winRows += len === 0 ? 1 : Math.ceil(len / cpl)
+    }
+    const bottomRows = Math.max(0, this.estTotalRows - this.lineRows[start] - winRows)
+    this.seamlessBottomPad = bottomRows * lh + 40
   },
 
   prevPage() {

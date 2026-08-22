@@ -1,8 +1,8 @@
 {
   "package": "com.silenthong.kdreader",
   "name": "考点阅读器",
-  "versionName": "V26.5.1.BAND",
-  "versionCode": 260531,
+  "versionName": "V26.6.0.BAND",
+  "versionCode": 260600,
   "minPlatformVersion": 1200,
   "minAPILevel": 1,
   "icon": "/common/images/icon.png",
@@ -55,9 +55,15 @@
       "pages/reader": {
         "component": "reader"
       },
-      "pages/jsonReader": {
-        "component": "jsonReader"
-      },
+    "pages/jsonReader": {
+      "component": "jsonReader"
+    },
+    "pages/jsonReaderSettings": {
+      "component": "jsonReaderSettings"
+    },
+    "pages/chapterList": {
+      "component": "chapterList"
+    },
       "pages/globalSettings": {
         "component": "globalSettings"
       },

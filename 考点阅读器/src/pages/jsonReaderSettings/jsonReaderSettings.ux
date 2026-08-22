@@ -2,44 +2,6 @@
   <div class="page" style="flex-direction: column;">
 
     <list class="list">
-      <!-- 搜索分区 -->
-      <list-item class="item" style="padding: 7px 16px; height: 50px;" type="tip">
-        <text class="section-title" static>搜索</text>
-      </list-item>
-      <list-item class="item" @click="goSearch" type="item">
-        <div class="item-content">
-          <text class="itemtext" static>搜索考点</text>
-          <text class="itemtext2" static>搜索当前考点内容</text>
-        </div>
-        <img static src="/common/images/enter.png" class="arrow" />
-      </list-item>
-
-      <!-- 阅读导航分区 -->
-      <list-item class="item" style="padding: 7px 16px; height: 50px;" type="tip">
-        <text class="section-title" static>阅读导航</text>
-      </list-item>
-      <list-item class="item" @click="goChapters" if="{{catalogAvailable}}" type="item">
-        <div class="item-content">
-          <text class="itemtext" static>章节目录</text>
-          <text class="itemtext2" static>长文分章加载，点章节直达</text>
-        </div>
-        <img static src="/common/images/enter.png" class="arrow" />
-      </list-item>
-      <list-item class="item" @click="goPageJump" if="{{readingMode !== 'seamless'}}" type="item">
-        <div class="item-content">
-          <text class="itemtext" static>按页数跳转</text>
-          <text class="itemtext2" static>跳转到指定页码</text>
-        </div>
-        <img static src="/common/images/enter.png" class="arrow" />
-      </list-item>
-      <list-item class="item" @click="goPercentJump" type="item">
-        <div class="item-content">
-          <text class="itemtext" static>按百分比跳转</text>
-          <text class="itemtext2" static>跳转到指定进度</text>
-        </div>
-        <img static src="/common/images/enter.png" class="arrow" />
-      </list-item>
-
       <!-- 显示设置分区 -->
       <list-item class="item" style="padding: 7px 16px; height: 50px;" type="tip">
         <text class="section-title" static>显示设置</text>
@@ -47,7 +9,7 @@
       <list-item class="item" type="item">
         <div class="item-content">
           <text class="itemtext" static>字号大小</text>
-          <text class="itemtext2" static>阅读字体大小</text>
+          <text class="itemtext2" static>原文与要点字体大小</text>
         </div>
         <div style="flex-direction: row; align-items: center;">
           <img static src="/common/images/pre.png" @click="adjustFontSize(-1)" style="width: 40px; height: 40px;" />
@@ -58,7 +20,7 @@
       <list-item class="item" type="item">
         <div class="item-content">
           <text class="itemtext" static>行间距</text>
-          <text class="itemtext2" static>阅读行间距</text>
+          <text class="itemtext2" static>原文行间距</text>
         </div>
         <div style="flex-direction: row; align-items: center;">
           <img static src="/common/images/pre.png" @click="adjustLineHeight(-1)" style="width: 40px; height: 40px;" />
@@ -104,6 +66,7 @@ import dataManager from '../../common/utils/dataManager.js'
 import { getNowTime } from '../../common/utils/timeUtil.js'
 import appState from '../../common/utils/appState.js'
 
+// 与 TXT 阅读设置共用同一组存储键：两个阅读器的排版设置互通
 export default {
   private: {
     nowTime: '00:00',
@@ -111,8 +74,6 @@ export default {
     fontSizeValue: 26,
     lineHeightValue: 30,
     keepScreenOn: false,
-    readingMode: 'paginated',
-    catalogAvailable: false,
     contentPath: '',
     contentName: '阅读设置'
   },
@@ -128,28 +89,17 @@ export default {
       }
     }, 60000)
     this.contentPath = this.path
-    const name = dataManager.getUnifiedNodeName(this.path)
+    const name = dataManager.getNodeName(this.path)
     if (name) {
-      this.contentName = name
+      // 去掉 .json 后缀作为标题
+      this.contentName = name.replace(/\.json$/i, '')
     }
     this.loadAllSettings()
   },
 
   onShow() {
-    if (appState.needBackToReader) {
-      appState.needBackToReader = false
-      router.back()
-      return
-    }
     if (!this.$valid) return
     this.loadAllSettings()
-    // 章节目录仅对蓝牙传输的长文本开放（与电子书分章加载同门槛）
-    this.catalogAvailable = !!(
-      appState.readerPath &&
-      appState.readerPath.indexOf('bt_') === 0 &&
-      appState.readerPath.indexOf('bt_folder_') !== 0 &&
-      appState.totalPages > 8
-    )
   },
 
   onDestroy() {
@@ -164,9 +114,7 @@ export default {
       key: 'KD_FONT_SIZE',
       success: (data) => {
         if (!this.$valid) return
-        if (data) {
-          this.fontSizeValue = parseInt(data)
-        }
+        this.fontSizeValue = data ? parseInt(data) : 26
       },
       fail: () => {
         if (!this.$valid) return
@@ -177,9 +125,7 @@ export default {
       key: 'KD_LINE_HEIGHT',
       success: (data) => {
         if (!this.$valid) return
-        if (data) {
-          this.lineHeightValue = parseInt(data)
-        }
+        this.lineHeightValue = data ? parseInt(data) : 30
       },
       fail: () => {
         if (!this.$valid) return
@@ -195,17 +141,6 @@ export default {
       fail: () => {
         if (!this.$valid) return
         this.keepScreenOn = false
-      }
-    })
-    storage.get({
-      key: 'KD_READING_MODE',
-      success: (data) => {
-        if (!this.$valid) return
-        this.readingMode = data === 'seamless' ? 'seamless' : 'paginated'
-      },
-      fail: () => {
-        if (!this.$valid) return
-        this.readingMode = 'paginated'
       }
     })
   },
@@ -230,31 +165,6 @@ export default {
     this.keepScreenOn = !this.keepScreenOn
     storage.set({ key: 'KD_KEEP_SCREEN_ON', value: this.keepScreenOn.toString() })
     brightness.setKeepScreenOn({ keepScreenOn: this.keepScreenOn })
-  },
-
-  goChapters() {
-    router.push({
-      uri: '/pages/chapterList',
-      params: { path: this.contentPath }
-    })
-  },
-
-  goPageJump() {
-    router.push({
-      uri: '/pages/pageJump',
-      params: { path: this.contentPath }
-    })
-  },
-
-  goSearch() {
-    router.push({ uri: '/pages/search', params: { scope: 'single', searchPath: this.contentPath } })
-  },
-
-  goPercentJump() {
-    router.push({
-      uri: '/pages/percentJump',
-      params: { path: this.contentPath }
-    })
   },
 
   goDeleteConfirm() {
