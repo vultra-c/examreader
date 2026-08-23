@@ -1429,8 +1429,15 @@ export default {
           if (data) {
             try { obj = JSON.parse(data) } catch (e) { obj = {} }
           }
-          const page = obj[path]
-          resolve((typeof page === 'number' && page >= 0) ? page : 0)
+          const value = obj[path]
+          // 兼容两种格式：数字（旧版页码/像素）、对象（无缝模式 offset+scroll）
+          if (typeof value === 'number' && value >= 0) {
+            resolve(value)
+          } else if (value && typeof value === 'object') {
+            resolve(value)
+          } else {
+            resolve(0)
+          }
         },
         fail: () => resolve(0)
       })
