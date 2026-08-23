@@ -1,18 +1,21 @@
 <template>
   <div class="page">
 
-    <!-- 无缝模式（增量追加）：全文按行增量追加渲染，滚到底自动追加下一批内容，
-         DOM 节点数随「已读」增长、与文件总长度无关，不会一次性渲染整篇导致卡死 -->
+    <!-- 无缝模式（滚动窗口）：全文按行建轻量索引，只渲染视口附近约 700 行窗口，
+         滚近底部在 $nextTick 延迟追加下一批并裁剪顶部，DOM 恒定、与文件总长无关；
+         scroll-top 绑定 + @scrollbottom 与弦电子书原模板一致（此固件上渲染正常） -->
     <scroll
       id="seamlessScroll"
       if="{{modesLoaded && readingMode === 'seamless'}}"
       style="position: absolute; width: 336px; height: 460px; top: 10px;"
       scroll-y="{{true}}"
-      @scroll="onScroll"
+      scroll-top="{{seamScrollTopVal}}"
+      @scroll="onSeamScroll"
+      @scrollbottom="onSeamBottom"
       @click="onTxtClick"
     >
       <div id="seamlessContainer" style="position: absolute; width: 336px; flex-direction: column;">
-        <div for="{{seamlessBlocks}}" style="width: 336px; flex-direction: column;">
+        <div for="{{seamLines}}" style="width: 336px; flex-direction: column;">
           <text style="width: 336px; text-align: left; color: #FFFFFF; font-size: {{fontSize}}px; font-weight: bold; line-height: {{lineHeight}}px; padding-left: 20px; padding-right: 20px;">{{$item}}</text>
         </div>
         <div style="width: 336px; height: 40px;"></div>
@@ -94,22 +97,20 @@ export default {
     modesLoaded: false,
     readingMode: '',
     fullContent: '',
-    seamlessBlocks: [],
-    seamlessScrollTop: 0,
     readingPercent: 0,
-    seamlessRestoring: false,
     modeChanged: false,
-    // 无缝模式增量追加：全文按行建轻量索引，只渲染「已读到」的行，
-    // 滚到底自动追加下一批，DOM 节点数随阅读进度增长、与文件总长无关
+    // 无缝模式增量渲染：全文按行建轻量索引（纯数字数组），
+    // 只渲染「视口附近」约 700 行窗口，滚近底部自动追加下一批并裁剪顶部，
+    // DOM 节点数恒定、与文件总长无关；scroll-top 绑定补偿裁剪导致的位移
     lineStarts: [],
     lineRows: [],
     estTotalRows: 1,
-    seamLoadLine: 0,
-    seamInitLines: 320,
-    seamBatchLines: 160,
-    seamEstLoadedRows: 0,
-    seamAllLoaded: false,
-    seamBusy: false
+    seamLines: [],
+    seamWinStart: 0,
+    seamRendered: 0,
+    seamScrollTop: 0,
+    seamScrollTopVal: 0,
+    seamPending: false
   },
   protected: {
     path: '',
@@ -183,10 +184,9 @@ export default {
         if (!this.$valid) return
         this.saveProgress()
       } else if (this.readingMode === 'seamless' && this.estTotalRows > 1) {
-        const globalRow = Math.floor((this.seamlessScrollTop || 0) / this.lineHeight)
+        const globalRow = this.seamWinStart + Math.round((this.seamScrollTop || 0) / this.lineHeight)
         this.buildSeamlessIndex(this.fullContent)
-        this.seamReset()
-        this.jumpToRow(globalRow)
+        this.renderWindow(globalRow)
         this.saveProgress()
       }
     }
@@ -290,8 +290,8 @@ export default {
     try {
       if (this.path) {
         if (this.readingMode === 'seamless') {
-          // 无缝模式：保存全局渲染行号（当前视口顶部对应的行）
-          const row = Math.floor((this.seamlessScrollTop || 0) / this.lineHeight)
+          // 无缝模式：保存全局渲染行号（窗口起始行 + 窗口内偏移）
+          const row = this.seamWinStart + Math.round((this.seamScrollTop || 0) / this.lineHeight)
           dataManager.saveReadingProgress(this.path, row)
         } else {
           // 分页模式：保存页码
@@ -353,9 +353,9 @@ export default {
         this.pageName = name
       }
 
-      // 增量加载：建轻量索引（纯数字数组），先渲染首屏内容，滚到底自动追加
+      // 增量加载：建轻量索引（纯数字数组），渲染首屏窗口，滚近底部自动追加并裁剪
       this.buildSeamlessIndex(fullContent)
-      this.seamReset()
+      this.renderWindow(0)
       this.pagesLoaded = true
       // 清理分页缓存数据释放内存
       this.pages = []
@@ -434,29 +434,90 @@ export default {
   },
 
   onScroll(e) {
-    if (this.readingMode === 'seamless') {
-      // 无缝模式：跟踪滚动位置，接近已渲染内容底部时自动追加下一批内容
-      const scrollTop = e.scrollTop || (e.detail && e.detail.scrollTop) || 0
-      this.seamlessScrollTop = scrollTop
-      const loadedHeight = this.seamEstLoadedRows * this.lineHeight + 40
-      // 距底部不足一个视口时追加（seamBusy 防抖，避免连续触发）
-      if (this.seamBusy) return
-      if (loadedHeight - scrollTop - 460 < 120) {
-        this.loadMoreLines()
-      } else {
-        this.updatePercentFromRow(Math.floor(scrollTop / this.lineHeight))
-      }
-    } else {
-      // 分页模式
-      if (this.atScrollBottom) {
-        this.atScrollBottom = false
-      }
+    // 分页模式：页面内容不超一屏，仅复位底部标记
+    if (this.atScrollBottom) {
+      this.atScrollBottom = false
     }
   },
 
+  /**
+   * 无缝模式滚动回调：记录滚动位置，接近已渲染底部时延迟追加下一批。
+   * 关键：绝不在 scroll 事件内同步替换渲染数组（会导致该固件滚动帧重排、内容塌陷重叠），
+   * 一律通过 $nextTick 延后到本帧结束后再追加。
+   */
+  onSeamScroll(e) {
+    const st = (e && e.scrollTop) || (e && e.detail && e.detail.scrollTop) || 0
+    this.seamScrollTop = st
+    this.updatePercentFromRow(this.seamWinStart + Math.round(st / this.lineHeight))
+    if (!this.seamPending) {
+      this.scheduleSeamAppend()
+    }
+  },
 
   /**
-   * 建立无缝模式行索引（分段加载第一步，纯数字数组，内存开销极小）：
+   * 无缝模式滚到底兜底（@scrollbottom，与原弦电子书模板一致）：
+   * 即使 onScroll 未触发，也保证内容能一直追加到全文末尾。
+   */
+  onSeamBottom() {
+    this.seamScrollTop = this.seamRendered * this.lineHeight
+    this.updatePercentFromRow(this.estTotalRows - 1)
+    if (!this.seamPending) {
+      this.scheduleSeamAppend()
+    }
+  },
+
+  /**
+   * 距已渲染底部不足一个视口时，延迟到本帧结束后追加下一批内容。
+   */
+  scheduleSeamAppend() {
+    if (!this.fullContent) return
+    const bottomRow = this.seamWinStart + this.seamRendered
+    if (bottomRow >= this.estTotalRows) return
+    const st = this.seamScrollTop || 0
+    const renderedH = this.seamRendered * this.lineHeight + 40
+    if (renderedH - st - 460 > 140) return
+    this.seamPending = true
+    const self = this
+    this.$nextTick(() => {
+      if (!self.$valid) return
+      self.appendSeamBatch()
+      self.seamPending = false
+    })
+  },
+
+  /**
+   * 追加一批行并裁剪窗口顶部（滚动窗口核心）：
+   *   - 追加后窗口超过 900 行时，从顶部裁掉多余行
+   *   - 裁剪的位移通过 scroll-top 绑定（seamScrollTopVal）同步补偿，视觉上无跳变
+   */
+  appendSeamBatch() {
+    const n = this.lineStarts.length
+    if (n === 0) return
+    const curLine = this.lineIdxFromRow(this.seamWinStart + this.seamRendered)
+    const toLine = Math.min(n, curLine + 240)
+    if (toLine <= curLine) return
+    const sub = this.fullContent.substring(
+      this.lineStarts[curLine],
+      toLine >= n ? this.fullContent.length : this.lineStarts[toLine]
+    )
+    if (!sub) return
+    const newLines = sub.split('\n')
+    this.seamLines = this.seamLines.concat(newLines)
+    this.seamRendered = this.seamLines.length
+    const MAX_WIN = 900
+    if (this.seamRendered > MAX_WIN) {
+      const trim = this.seamRendered - MAX_WIN
+      this.seamWinStart += trim
+      this.seamLines = this.seamLines.slice(trim)
+      this.seamRendered = this.seamLines.length
+      const st = Math.max(0, (this.seamScrollTop || 0) - trim * this.lineHeight)
+      this.seamScrollTop = st
+      this.seamScrollTopVal = st
+    }
+  },
+
+  /**
+   * 建立无缝模式行索引（纯数字数组，内存开销极小）：
    *   lineStarts[i] = 第 i 个逻辑行在全文中的起始偏移
    *   lineRows[i]   = 第 i 行之前累计的渲染行数（超长行按估算折行计入多行）
    */
@@ -483,66 +544,6 @@ export default {
   },
 
   /**
-   * 无缝模式重置：清空已渲染内容，加载首屏约 seamInitLines 行。
-   */
-  seamReset() {
-    this.seamlessBlocks = []
-    this.seamLoadLine = 0
-    this.seamEstLoadedRows = 0
-    this.seamAllLoaded = false
-    this.seamBusy = false
-    this.readingPercent = 0
-    this.seamlessScrollTop = 0
-    this.loadMoreLines(this.seamInitLines)
-  },
-
-  /**
-   * 追加渲染内容（增量加载核心）：把 [seamLoadLine, seamLoadLine+count) 的行并入渲染列表，
-   * 并同步更新「已渲染行数估算」用于判底。count 缺省时按 seamBatchLines 追加一批。
-   */
-  loadMoreLines(count) {
-    const explicit = (typeof count === 'number')
-    if (!this.fullContent || this.seamAllLoaded) return
-    // 自动追加（onScroll 触发）用 seamBusy 防抖；显式调用（初始化/跳转）不拦截
-    if (!explicit && this.seamBusy) return
-    const n = this.lineStarts.length
-    if (this.seamLoadLine >= n) {
-      this.seamAllLoaded = true
-      return
-    }
-    const batch = explicit ? count : this.seamBatchLines
-    const from = this.seamLoadLine
-    const to = Math.min(n, from + batch)
-    if (to <= from) {
-      this.seamAllLoaded = true
-      return
-    }
-    if (!explicit) {
-      this.seamBusy = true
-    }
-    const sub = this.fullContent.substring(
-      this.lineStarts[from],
-      to >= n ? this.fullContent.length : this.lineStarts[to]
-    )
-    if (sub && sub.length > 0) {
-      this.seamlessBlocks = this.seamlessBlocks.concat(sub.split('\n'))
-    }
-    this.seamLoadLine = to
-    this.seamEstLoadedRows = (to < n ? this.lineRows[to] : this.estTotalRows) || 0
-    if (to >= n) {
-      this.seamAllLoaded = true
-    }
-    if (!explicit) {
-      const self = this
-      this.$nextTick(() => {
-        if (self.$valid) {
-          self.seamBusy = false
-        }
-      })
-    }
-  },
-
-  /**
    * 全局渲染行号 → 最近的逻辑行下标（lineRows 逆查）
    */
   lineIdxFromRow(globalRow) {
@@ -560,33 +561,50 @@ export default {
   },
 
   /**
-   * 无缝模式定位到全局渲染行号：补齐到该行之后的内容，再滚动到目标位置。
+   * 渲染指定全局行号起始的窗口（初始/恢复进度/跳转共用）：
+   *   窗口约 700 渲染行，滚动位置通过 seamScrollTopVal 绑定交给引擎。
+   */
+  renderWindow(startRow) {
+    const n = this.lineStarts.length
+    if (n === 0) {
+      this.seamLines = []
+      this.seamRendered = 0
+      this.seamWinStart = 0
+      this.seamScrollTop = 0
+      this.seamScrollTopVal = 0
+      return
+    }
+    let row = startRow
+    if (row < 0) row = 0
+    if (row > this.estTotalRows - 1) row = this.estTotalRows - 1
+    const fromLine = this.lineIdxFromRow(row)
+    let toLine = fromLine + 1
+    while (toLine < n && (this.lineRows[toLine] - this.lineRows[fromLine]) < 700) {
+      toLine++
+    }
+    const sub = this.fullContent.substring(
+      this.lineStarts[fromLine],
+      toLine >= n ? this.fullContent.length : this.lineStarts[toLine]
+    )
+    const lines = sub ? sub.split('\n') : []
+    this.seamWinStart = this.lineRows[fromLine]
+    this.seamLines = lines
+    this.seamRendered = lines.length
+    this.seamScrollTop = Math.max(0, (row - this.seamWinStart) * this.lineHeight)
+    this.seamScrollTopVal = this.seamScrollTop
+    this.updatePercentFromRow(row)
+  },
+
+  /**
+   * 无缝模式定位到全局渲染行号（恢复进度 / 章节跳转 / 百分比跳转共用）
    */
   jumpToRow(globalRow) {
     if (!this.fullContent || this.lineStarts.length === 0) return
     let row = globalRow
     if (row < 0) row = 0
     if (row > this.estTotalRows - 1) row = this.estTotalRows - 1
-    const line = this.lineIdxFromRow(row)
-    // 确保目标行之后还有至少一屏内容可滚动
-    this.loadMoreLines(line + Math.ceil(460 / this.lineHeight) + 4 - this.seamLoadLine)
-    const targetTop = Math.max(0, row * this.lineHeight)
-    this.scrollToSeamless(targetTop)
-    this.updatePercentFromRow(row)
-  },
-
-  /**
-   * 直接滚动无缝列表到指定 px（避免与 scroll-top 绑定冲突）
-   */
-  scrollToSeamless(top) {
-    this.seamlessScrollTop = Math.max(0, top)
-    this.$nextTick(() => {
-      if (!this.$valid) return
-      const sc = this.$element('seamlessScroll')
-      if (sc && sc.scrollTo) {
-        try { sc.scrollTo({ top: this.seamlessScrollTop }) } catch (e) {}
-      }
-    })
+    this.renderWindow(row)
+    this.saveProgress()
   },
 
   updatePercentFromRow(globalRow) {
