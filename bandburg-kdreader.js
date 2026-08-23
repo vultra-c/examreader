@@ -2,7 +2,7 @@
  * 考点传输 — BandBurg 脚本版
  *
  * 功能：
- *  1. 启动手环上的考点阅读器应用
+ *  1. 启动手环上的闪念小抄（考点阅读器）应用
  *  2. 同步文件树（获取/新建文件夹/删除/重命名）
  *  3. 传输考点文件（分片传输协议）：
  *     - .txt  → 普通文本阅读器（传输时去掉后缀，与旧行为一致）
@@ -16,7 +16,8 @@
 
 // ==================== 常量 ====================
 
-const WATCH_PACKAGE = 'com.silenthong.kdreader';
+// 手环端包名：V26.8.0 起与闪念小抄仓库/安卓端对齐为 com.whyy.snapnotes（旧包名 com.silenthong.kdreader 已废弃）
+const WATCH_PACKAGE = 'com.whyy.snapnotes';
 // Snapnotes 协议分片上限：10KB（UTF-8 字节，与 JsonFilePusher.CHUNK_SIZE 一致）
 const SN_CHUNK_BYTES = 10 * 1024;
 const RESPONSE_TIMEOUT = 15000;
@@ -466,7 +467,7 @@ async function launchWatchApp() {
 
 /**
  * 手环上报 AppInfo not found 时的诊断：
- * 1. 列出手环上所有可互连的第三方应用，确认 kdreader 是否在列
+ * 1. 列出手环上所有可互连的第三方应用，确认闪念小抄是否在列
  * 2. 给出安装指引
  */
 async function diagnoseAppNotFound() {
@@ -487,12 +488,12 @@ async function diagnoseAppNotFound() {
     if (found) {
       sandbox.log('✅ 应用在列表中但启动失败：多为互连服务状态残留，请重启手环后重试');
     } else {
-      sandbox.log('❌ 列表中没有考点阅读器：请先将手环端 RPK 安装到手环再运行本脚本');
+      sandbox.log('❌ 列表中没有闪念小抄（com.whyy.snapnotes）：请先将手环端 RPK 安装到手环再运行本脚本');
     }
   } else {
     sandbox.log('[诊断] 无法获取应用列表——多为底层互连状态残留：请在 BandBurg 断开并重新连接设备（或重启手环），再重新运行本脚本');
   }
-  sandbox.log('安装方法：将仓库内 考点阅读器/release/com.silenthong.kdreader.release.V26.5.0.BAND.rpk 通过开发者调试推送/Vela 工具安装到手环，安装后打开一次应用再试');
+  sandbox.log('安装方法：将仓库内 考点阅读器/release/com.whyy.snapnotes.release.V26.8.0.BAND.rpk 通过开发者调试推送/Vela 工具安装到手环，安装后打开一次应用再试');
 }
 
 // 检查手环已装应用（GUI 按钮）
@@ -509,14 +510,14 @@ async function checkInstalledApps() {
   for (var i = 0; i < apps.length; i++) {
     var pkg = apps[i].packageName || apps[i].package_name || apps[i].package || '';
     var name = apps[i].appName || apps[i].name || '';
-    var mark = pkg === WATCH_PACKAGE ? ' ← 考点阅读器' : '';
+    var mark = pkg === WATCH_PACKAGE ? ' ← 闪念小抄' : '';
     if (pkg === WATCH_PACKAGE) found = true;
     sandbox.log('  · ' + name + ' (' + pkg + ')' + mark);
   }
   if (found) {
-    sandbox.log('✅ 考点阅读器已安装');
+    sandbox.log('✅ 闪念小抄已安装');
   } else {
-    sandbox.log('❌ 列表中没有考点阅读器。若你确认已安装：多为手环未开启开发者/互连调试模式，或安装的版本未声明 system.interconnect，请检查后重装 RPK');
+    sandbox.log('❌ 列表中没有闪念小抄（com.whyy.snapnotes）。若你确认已安装：多为手环未开启开发者/互连调试模式，或安装的版本未声明 system.interconnect，请检查后重装 RPK');
   }
 }
 
