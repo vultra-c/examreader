@@ -1,31 +1,23 @@
 <template>
   <div class="page">
 
-    <!-- 无缝模式（套用弦电子书 detail.ux 两段式滚动窗口）：
-         全文切成段落块，只渲染「当前段 + 下一段」两个 segment（自然流布局，text 自动折行），
-         滚到底 @scrollbottom 换段、滚到顶 @scrolltop 回退，换段时按上一段实测高度补偿 scroll-top。
-         DOM 恒定 ~2 段，与文件总长无关，长文不卡顿不叠字。 -->
+    <!-- 无缝模式（V26.8.3 回归全量渲染）：
+         本固件在滚动中动态换段/追加内容不可靠（多次验证均为「只渲染首段、无法继续滚动」），
+         V26.5 全量渲染实测正常。这里全文切成渲染块全量渲染，超长段按 400 字切块
+         避免单 text 节点过大，DOM 与文件行数成正比，滚动稳定不卡顿不叠字。 -->
     <scroll
       id="seamlessScroll"
       if="{{modesLoaded && readingMode === 'seamless'}}"
       style="position: absolute; width: 336px; height: 460px; top: 10px;"
       scroll-y="{{true}}"
-      scroll-top="{{seamScrollTopVal}}"
-      @scroll="onSeamScroll"
-      @scrolltop="onSeamTop"
-      @scrollbottom="onSeamBottom"
+      scroll-top="{{seamlessScrollTopValue}}"
+      @scroll="onScroll"
+      @scrollbottom="onReachBottom"
       @click="onTxtClick"
     >
       <div id="seamlessContainer" style="position: absolute; width: 336px; flex-direction: column;">
-        <div id="seamSeg1" style="flex-direction: column; width: 100%; flex-shrink: 0;">
-          <div for="{{seamSeg1}}" style="width: 336px; flex-direction: column;">
-            <text style="width: 336px; text-align: left; color: #FFFFFF; font-size: {{fontSize}}px; font-weight: bold; line-height: {{lineHeight}}px; padding-left: 20px; padding-right: 20px;">{{$item}}</text>
-          </div>
-        </div>
-        <div id="seamSeg2" if="{{seamSeg2.length > 0}}" style="flex-direction: column; width: 100%; flex-shrink: 0;">
-          <div for="{{seamSeg2}}" style="width: 336px; flex-direction: column;">
-            <text style="width: 336px; text-align: left; color: #FFFFFF; font-size: {{fontSize}}px; font-weight: bold; line-height: {{lineHeight}}px; padding-left: 20px; padding-right: 20px;">{{$item}}</text>
-          </div>
+        <div for="{{seamlessBlocks}}" style="width: 336px; flex-direction: column;">
+          <text style="width: 336px; text-align: left; color: #FFFFFF; font-size: {{fontSize}}px; font-weight: bold; line-height: {{lineHeight}}px; padding-left: 20px; padding-right: 20px;">{{$item}}</text>
         </div>
         <div style="width: 336px; height: 40px;"></div>
       </div>
@@ -102,28 +94,16 @@ export default {
     contentName: '',
     pendingJump: null,
     pagesLoaded: false,
-    // 无缝模式相关
+    // 无缝模式相关（V26.8.3 回归全量渲染：本固件滚动中动态换段不可靠，全量渲染实测稳定）
     modesLoaded: false,
     readingMode: '',
     fullContent: '',
     readingPercent: 0,
     modeChanged: false,
-    // 无缝模式（弦电子书两段式窗口）：
-    //   seamBlocks    段落块数组（超长段按 400 字切块，text 自然折行）
-    //   seamBlockH    每块估算高度 px（用于进度/定位，换段补偿以实测高度为准）
-    //   seamSegments  按字符预算打包的段数组，DOM 只渲染当前段+下一段
-    //   seamSegIdx    当前段下标；seamScrollTop 当前滚动位置（px，相对段首）
-    seamBlocks: [],
-    seamBlockH: [],
-    seamSegments: [],
-    seamSegPxStarts: [],
-    seamSegIdx: 0,
-    seamSeg1: [],
-    seamSeg2: [],
-    seamScrollTop: 0,
-    seamScrollTopVal: 0,
-    seamTotalPx: 0,
-    seamWait: false
+    seamlessBlocks: [],
+    seamlessScrollTopValue: 0,
+    seamlessScrollTop: 0,
+    seamlessMaxScroll: 1
   },
   protected: {
     path: '',
@@ -196,12 +176,10 @@ export default {
         await this.loadContent()
         if (!this.$valid) return
         this.saveProgress()
-      } else if (this.readingMode === 'seamless' && this.seamTotalPx > 1) {
-        // 字号变化：保留当前 px 位置，重建段落/段后定位到同一位置
-        const px = this.currentSeamPx()
-        this.buildSeamBlocks(this.fullContent)
-        this.initSeamSegments()
-        this.renderSeamAtPx(px)
+      } else if (this.readingMode === 'seamless' && this.seamlessBlocks.length > 0) {
+        // 字号变化：重算总滚动范围，保持当前位置
+        this.seamlessMaxScroll = this.estimateMaxScroll(this.fullContent)
+        this.updateSeamlessPercent(this.seamlessScrollTop || 0)
         this.saveProgress()
       }
     }
@@ -285,9 +263,11 @@ export default {
       const progress = await dataManager.getReadingProgress(this.path)
       if (!this.$valid) return
       if (this.readingMode === 'seamless') {
-        // 无缝模式：progress 是全局 px 偏移（视口顶部在全文中的位置）
+        // 无缝模式：progress 是滚动偏移量（像素）
         if (progress != null && progress !== undefined && progress >= 0) {
-          this.renderSeamAtPx(progress)
+          this.seamlessScrollTopValue = progress
+          this.seamlessScrollTop = progress
+          this.updateSeamlessPercent(progress)
         }
       } else {
         // 分页模式：progress 是页码
@@ -305,8 +285,8 @@ export default {
     try {
       if (this.path) {
         if (this.readingMode === 'seamless') {
-          // 无缝模式：保存全局 px 偏移（视口顶部在全文中的位置）
-          dataManager.saveReadingProgress(this.path, Math.round(this.currentSeamPx()))
+          // 无缝模式：保存滚动偏移量
+          dataManager.saveReadingProgress(this.path, this.seamlessScrollTop || 0)
         } else {
           // 分页模式：保存页码
           dataManager.saveReadingProgress(this.path, this.currentPage)
@@ -325,8 +305,10 @@ export default {
       if (this.readingMode === 'seamless' && this.pagesLoaded) {
         if (percent < 0) percent = 0
         if (percent > 100) percent = 100
-        const targetPx = Math.round(percent / 100 * Math.max(1, this.seamTotalPx))
-        this.renderSeamAtPx(targetPx)
+        const targetScroll = Math.round(percent / 100 * Math.max(1, this.seamlessMaxScroll))
+        this.seamlessScrollTop = targetScroll
+        this.seamlessScrollTopValue = targetScroll
+        this.updateSeamlessPercent(targetScroll)
         this.saveProgress()
         prompt.showToast({ message: '已跳转到 ' + percent + '%', duration: 1000 })
         return
@@ -367,10 +349,12 @@ export default {
         this.pageName = name
       }
 
-      // 增量加载：切段落块 → 打包段 → 从顶部渲染首屏
-      this.buildSeamBlocks(fullContent)
-      this.initSeamSegments()
-      this.renderSeamAtPx(0)
+      // 全文切成渲染块（段落分行 + 超长段 400 字切块），全量渲染
+      this.seamlessBlocks = this.splitContentToBlocks(fullContent)
+      this.seamlessMaxScroll = this.estimateMaxScroll(fullContent)
+      this.readingPercent = 0
+      this.seamlessScrollTop = 0
+      this.seamlessScrollTopValue = 0
       this.pagesLoaded = true
       // 清理分页缓存数据释放内存
       this.pages = []
@@ -449,24 +433,37 @@ export default {
   },
 
   onScroll(e) {
-    // 分页模式：页面内容不超一屏，仅复位底部标记
-    if (this.atScrollBottom) {
+    if (this.readingMode === 'seamless') {
+      // 无缝模式：跟踪滚动位置（scrollTop / scrollY 兼容，进度用）
+      const st = (e && (e.scrollTop || e.scrollY)) || (e && e.detail && e.detail.scrollTop) || 0
+      this.seamlessScrollTop = st
+      this.updateSeamlessPercent(st)
+    } else if (this.atScrollBottom) {
+      // 分页模式：页面内容不超一屏，仅复位底部标记
       this.atScrollBottom = false
     }
   },
 
+  onReachBottom() {
+    if (this.readingMode === 'seamless') {
+      // 无缝模式滚动到底部：进度 100%
+      this.readingPercent = 100
+    } else {
+      this.atScrollBottom = true
+    }
+  },
+
   /**
-   * 无缝模式：切段落块（超长段按 400 字切块，避免单 text 节点过大），
-   * 并估算每块高度（用于进度与定位；换段补偿以实测高度优先）。
+   * 无缝模式：全文切成渲染块——按段落分行，超长段按 400 字切块，
+   * 避免单个 text 节点过大（引擎折行开销集中在超长段上会卡顿）。
    */
-  buildSeamBlocks(content) {
-    const cpl = Math.max(1, Math.floor(296 / (this.fontSize * 0.6)))
+  splitContentToBlocks(content) {
     const raw = (content || '').split('\n')
     const blocks = []
     for (let i = 0; i < raw.length; i++) {
       let p = raw[i]
       if (p.length === 0) {
-        blocks.push('')
+        blocks.push(' ')
         continue
       }
       while (p.length > 400) {
@@ -475,208 +472,32 @@ export default {
       }
       blocks.push(p)
     }
-    const n = blocks.length
-    const h = new Array(n)
-    let acc = 0
-    for (let i = 0; i < n; i++) {
-      const len = blocks[i].length
-      const est = len === 0 ? this.lineHeight : Math.ceil(len / cpl) * this.lineHeight
-      h[i] = est
-      acc += est
-    }
-    this.seamBlocks = blocks
-    this.seamBlockH = h
-    this.seamTotalPx = acc
+    return blocks
   },
 
   /**
-   * 无缝模式：把段落块打包成「段」——每段约一屏多内容（~700 字，上限 60 块），
-   * 记录每段的起始 px（用于进度换算与回退补偿）。
+   * 无缝模式：估算内容总可滚动高度（用于百分比进度与跳转，cpl 与分页同款算法）。
    */
-  initSeamSegments() {
-    const blocks = this.seamBlocks
-    const h = this.seamBlockH
-    const segs = []
-    const pxStarts = []
-    let cur = []
-    let curChars = 0
-    let pxAcc = 0
+  estimateMaxScroll(content) {
+    if (!content || content.length === 0) return 1
+    const cpl = Math.max(1, Math.floor(296 / this.fontSize))
+    const blocks = this.splitContentToBlocks(content)
+    let totalLines = 0
     for (let i = 0; i < blocks.length; i++) {
-      if (cur.length === 0) {
-        pxStarts.push(pxAcc)
-      }
-      cur.push(blocks[i])
-      curChars += blocks[i].length
-      pxAcc += h[i]
-      if (curChars >= 700 || cur.length >= 60 || i === blocks.length - 1) {
-        segs.push(cur)
-        cur = []
-        curChars = 0
-      }
+      totalLines += Math.max(1, Math.ceil(blocks[i].length / cpl))
     }
-    this.seamSegments = segs
-    this.seamSegPxStarts = pxStarts
-    this.seamSegIdx = 0
-    this.seamSeg1 = []
-    this.seamSeg2 = []
+    return Math.max(1, totalLines * this.lineHeight)
   },
 
-  /**
-   * 无缝模式：当前视口顶部在全文中的 px 位置。
-   */
-  currentSeamPx() {
-    const starts = this.seamSegPxStarts
-    if (!starts || starts.length === 0) return 0
-    const idx = Math.min(this.seamSegIdx, starts.length - 1)
-    return Math.max(0, starts[idx] + (this.seamScrollTop || 0))
-  },
-
-  /**
-   * 无缝模式：定位到全局 px 位置（初始渲染 / 恢复进度 / 百分比跳转 / 字号变化共用）。
-   * 找到包含该位置的段作为当前段，scroll-top 设为段内偏移。
-   */
-  renderSeamAtPx(globalPx) {
-    const segs = this.seamSegments
-    const starts = this.seamSegPxStarts
-    if (!segs || segs.length === 0) {
-      this.seamSeg1 = []
-      this.seamSeg2 = []
-      this.seamScrollTop = 0
-      this.seamScrollTopVal = 0
-      return
-    }
-    let px = globalPx
-    if (isNaN(px) || px < 0) px = 0
-    if (px > this.seamTotalPx) px = Math.max(0, this.seamTotalPx - 1)
-    // 二分：最后一个 pxStart <= px 的段
-    let lo = 0
-    let hi = segs.length - 1
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >> 1
-      if (starts[mid] <= px) lo = mid
-      else hi = mid - 1
-    }
-    this.seamSegIdx = lo
-    this.seamSeg1 = segs[lo]
-    this.seamSeg2 = lo + 1 < segs.length ? segs[lo + 1] : []
-    const top = Math.max(0, px - starts[lo])
-    this.seamScrollTop = top
-    this.seamScrollTopVal = top
-    this.updateSeamPercent()
-  },
-
-  /**
-   * 无缝模式：估算某段的渲染高度（getBoundingClientRect 失败时兜底）。
-   */
-  estimateSegHeight(seg) {
-    if (!seg || seg.length === 0) return 0
-    const cpl = Math.max(1, Math.floor(296 / (this.fontSize * 0.6)))
-    let chars = 0
-    for (let i = 0; i < seg.length; i++) {
-      chars += seg[i].length + 1
-    }
-    return Math.max(seg.length * this.lineHeight, Math.ceil(chars / cpl) * this.lineHeight)
-  },
-
-  /**
-   * 无缝模式滚动回调：记录位置并刷新百分比（scroll-top 绑定保持与引擎同步）。
-   */
-  onSeamScroll(e) {
-    const st = (e && e.scrollTop) || (e && e.detail && e.detail.scrollTop) || 0
-    this.seamScrollTop = st
-    this.seamScrollTopVal = st
-    this.updateSeamPercent()
-  },
-
-  /**
-   * 无缝模式滚到底：换下一段（复刻弦电子书 loadNextSegment → shiftPagesForward）。
-   */
-  onSeamBottom() {
-    if (this.seamWait) return
-    const segs = this.seamSegments
-    if (!segs || this.seamSegIdx + 1 >= segs.length) return
-    this.seamWait = true
-    const self = this
-    this.$nextTick(() => {
-      if (!self.$valid) return
-      self.shiftSeamForward()
-      self.seamWait = false
-    })
-  },
-
-  /**
-   * 无缝模式滚到顶：回退上一段（复刻弦电子书 loadPrevSegment）。
-   */
-  onSeamTop() {
-    if (this.seamWait || this.seamSegIdx <= 0) return
-    this.seamWait = true
-    const self = this
-    this.$nextTick(() => {
-      if (!self.$valid) return
-      self.shiftSeamBackward()
-      self.seamWait = false
-    })
-  },
-
-  /**
-   * 无缝模式换段（向前）：测上一段实测高度，滚动位置减去该高度补偿，视觉无跳变。
-   */
-  shiftSeamForward() {
-    const self = this
-    const removeH = () => {
-      const el = self.$element('seamSeg1')
-      if (el && el.getBoundingClientRect) {
-        return new Promise((resolve) => {
-          el.getBoundingClientRect({
-            success: (rect) => resolve(rect && rect.height ? rect.height : self.estimateSegHeight(self.seamSeg1)),
-            fail: () => resolve(self.estimateSegHeight(self.seamSeg1))
-          })
-        })
-      }
-      return Promise.resolve(self.estimateSegHeight(self.seamSeg1))
-    }
-    removeH().then((h) => {
-      if (!self.$valid) return
-      self.seamSegIdx += 1
-      const segs = self.seamSegments
-      self.seamSeg1 = segs[self.seamSegIdx]
-      self.seamSeg2 = self.seamSegIdx + 1 < segs.length ? segs[self.seamSegIdx + 1] : []
-      const newTop = Math.max(0, Math.floor((self.seamScrollTop || 0) - Math.max(0, Math.floor(h || 0))))
-      self.seamScrollTop = newTop
-      self.seamScrollTopVal = newTop
-      self.updateSeamPercent()
-    })
-  },
-
-  /**
-   * 无缝模式换段（向后）：上一段高度通过段起始 px 差值精确获得（与估算一致），
-   * 滚动位置加上该高度补偿。
-   */
-  shiftSeamBackward() {
-    const starts = this.seamSegPxStarts
-    if (this.seamSegIdx <= 0 || !starts || starts.length === 0) return
-    const addH = Math.max(0, starts[this.seamSegIdx] - starts[this.seamSegIdx - 1])
-    this.seamSegIdx -= 1
-    const segs = this.seamSegments
-    this.seamSeg1 = segs[this.seamSegIdx]
-    this.seamSeg2 = segs[this.seamSegIdx + 1]
-    const newTop = Math.max(0, (this.seamScrollTop || 0) + addH)
-    this.seamScrollTop = newTop
-    this.seamScrollTopVal = newTop
-    this.updateSeamPercent()
-  },
-
-  updateSeamPercent() {
-    const total = this.seamTotalPx
-    if (!total) {
-      this.readingPercent = 0
-      return
-    }
-    const pct = Math.min(100, Math.max(0, Math.round(this.currentSeamPx() / total * 100)))
+  updateSeamlessPercent(scrollTop) {
+    const max = this.seamlessMaxScroll || 1
+    const pct = Math.min(100, Math.max(0, Math.round(scrollTop / max * 100)))
     if (Math.abs(pct - this.readingPercent) >= 1) {
       this.readingPercent = pct
     }
   },
+
+
 
   prevPage() {
     if (this.currentPage > 0) {
