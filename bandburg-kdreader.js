@@ -1180,7 +1180,14 @@ function showMainGui() {
         }
       }
 
-      // JSON 知识点文件：发送前本地预校验（与手环端同规则），避免无效数据占用蓝牙带宽
+      // JSON 知识点文件：发送前本地预校验（与手环端同规则），避免无效数据占用蓝牙带宽。
+      // 内容嗅探兑底：后缀是 .json 但实际是纯文本（不以 { 开头）时自动按 TXT 传输，不再误判/拒发
+      var jsonLike = /^\s*\{/.test(text);
+      if (isJson && !jsonLike) {
+        sandbox.log('⚠️ 所选文件后缀为 .json 但内容为纯文本，已自动按 TXT 文本传输');
+        isJson = false;
+        fileName = rawName.replace(/\.json$/i, '');
+      }
       if (isJson) {
         var check = validateKnowledgeJson(text);
         if (!check.ok) {
