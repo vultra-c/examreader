@@ -12,7 +12,7 @@ import { interconnModule } from './interconn.js'
 
 // 与 manifest.json 的 versionCode 保持一致
 // 与 manifest.json versionCode 保持一致（V26.8.0 = 260800）
-const BAND_VERSION_CODE = 260810
+const BAND_VERSION_CODE = 260820
 
 const HS_TIMEOUT_MS = 10000   // 发出 count=1 后等 count>=2 的超时
 const HEARTBEAT_MS = 5000     // 心跳周期（与手机端 PING_INTERVAL 对齐）
