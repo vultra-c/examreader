@@ -35,6 +35,8 @@ const state = {
   transferring: false,
   pendingResponses: new Map(),
   selectedFile: null,  // file:change 事件返回的文件对象
+  launchMethod: null,  // 探测出的可用启动签名 {id, route}，缓存复用
+  appListDumped: false, // 是否已打印过应用列表原始字段（仅一次，避免刷屏）
 };
 
 // tag 路由回调表
@@ -82,10 +84,28 @@ async function getAppList(verbose) {
     try {
       var r = await variants[i][1]();
       if (verbose) sandbox.log('[诊断] thirdpartyapp_get_list' + variants[i][0] + ' ✓');
+      // 首次拉取时打印原始字段，揭示 BandBurg 返回的真实字段名（package/id/appId 等）
+      if (verbose && r && r.length !== undefined && r.length > 0 && !state.appListDumped) {
+        state.appListDumped = true;
+        try {
+          sandbox.log('[诊断] 应用列表首条原始字段: ' + JSON.stringify(r[0]));
+        } catch (e) {}
+      }
       return r;
     } catch (e) {
       if (verbose) sandbox.log('[诊断] get_list' + variants[i][0] + ' 失败: ' + errMsg(e));
     }
+  }
+  return null;
+}
+
+// 在应用列表中查找目标包名对应的条目（兼容多种字段名）
+function findWatchAppEntry(apps) {
+  if (!apps || apps.length === undefined) return null;
+  for (var i = 0; i < apps.length; i++) {
+    var a = apps[i] || {};
+    var pkg = a.packageName || a.package_name || a.package || a.pkg || '';
+    if (pkg === WATCH_PACKAGE) return a;
   }
   return null;
 }
@@ -429,23 +449,76 @@ async function sendMessage(tag, payload) {
   }
 }
 
-// 单次启动：依次尝试多种 page 参数
+// 单次启动：自动探测可用签名——从 get_list 取回应用条目，
+// 依次尝试 (id/包名, 路由) 与两参形式，命中即缓存复用。
 async function launchWatchAppOnce() {
   var addr = getDeviceAddr();
   if (!addr) return false;
 
-  var pages = ['', '/pages/index', 'pages/index'];
-  for (var i = 0; i < pages.length; i++) {
+  // 复用上次探测出的可用参数，跳过重新探测
+  if (state.launchMethod) {
     try {
-      await sandbox.wasm.thirdpartyapp_launch(addr, WATCH_PACKAGE, pages[i]);
-      sandbox.log('手环应用已启动' + (pages[i] ? ' (' + pages[i] + ')' : ''));
+      await sandbox.wasm.thirdpartyapp_launch(addr, state.launchMethod.id, state.launchMethod.route);
+      sandbox.log('手环应用已启动（复用 id=' + state.launchMethod.id + (state.launchMethod.route ? ' route=' + state.launchMethod.route : '') + '）');
       return true;
     } catch (e) {
-      var msg = errMsg(e);
-      sandbox.log('启动(page=' + (pages[i] || '默认') + ')失败: ' + msg);
-      // 注册表里查无此包，换 page 参数也没意义，交给上层重试/诊断
-      if (msg.indexOf('AppInfo not found') >= 0) break;
+      state.launchMethod = null;
     }
+  }
+
+  // 从应用列表里拿目标应用条目，收集可用的身份字段
+  var idCandidates = [WATCH_PACKAGE];
+  var entry = null;
+  var apps = null;
+  try {
+    apps = await getAppList(false);
+  } catch (e) {}
+  entry = findWatchAppEntry(apps);
+  if (entry) {
+    var eid = entry.id || entry.appId || entry.app_id;
+    var epkg = entry.packageName || entry.package_name || entry.package;
+    if (eid && idCandidates.indexOf(eid) < 0) idCandidates.push(eid);
+    if (epkg && idCandidates.indexOf(epkg) < 0) idCandidates.push(epkg);
+  } else if (apps && apps.length !== undefined && apps.length > 0) {
+    // 列表里没有目标包名：打印原始条目，便于核对字段名/是否安装
+    try {
+      sandbox.log('[诊断] 应用列表未见 com.whyy.snapnotes，前 ' + Math.min(2, apps.length) + ' 条原始字段：');
+      for (var di = 0; di < Math.min(2, apps.length); di++) {
+        sandbox.log('   ' + JSON.stringify(apps[di]));
+      }
+    } catch (e) {}
+  }
+
+  var routes = ['', '/pages/import', '/pages/index', 'pages/import', 'pages/index'];
+  var lastErr = '';
+  for (var k = 0; k < idCandidates.length; k++) {
+    for (var j = 0; j < routes.length; j++) {
+      try {
+        await sandbox.wasm.thirdpartyapp_launch(addr, idCandidates[k], routes[j]);
+        sandbox.log('手环应用已启动（id=' + idCandidates[k] + (routes[j] ? ' → ' + routes[j] : '') + '）');
+        state.launchMethod = { id: idCandidates[k], route: routes[j] };
+        return true;
+      } catch (e) {
+        lastErr = errMsg(e);
+      }
+    }
+  }
+  // 两参形式（部分版本不接受 route）
+  for (var k2 = 0; k2 < idCandidates.length; k2++) {
+    try {
+      await sandbox.wasm.thirdpartyapp_launch(addr, idCandidates[k2]);
+      sandbox.log('手环应用已启动（两参: ' + idCandidates[k2] + '）');
+      state.launchMethod = { id: idCandidates[k2], route: '' };
+      return true;
+    } catch (e2) {
+      lastErr = errMsg(e2);
+    }
+  }
+  sandbox.log('手环应用启动失败（最后错误: ' + lastErr + '）');
+  if (entry) {
+    sandbox.log('   应用已在列表中但启动失败：多为互连服务状态残留，请重启手环后重试');
+  } else {
+    sandbox.log('   请先在手环上手动打开一次《闪念小抄》（触发互连注册），再重新运行脚本；若已安装并打开过仍不行，请重启手环');
   }
   return false;
 }
@@ -478,22 +551,27 @@ async function diagnoseAppNotFound() {
   } catch (e) {}
   if (apps && apps.length !== undefined) {
     sandbox.log('[诊断] 手环已装第三方应用共 ' + apps.length + ' 个：');
-    var found = false;
+    var entry = findWatchAppEntry(apps);
     for (var i = 0; i < apps.length; i++) {
-      var pkg = apps[i].packageName || apps[i].package_name || apps[i].package || '';
+      var pkg = apps[i].packageName || apps[i].package_name || apps[i].package || apps[i].pkg || '';
       var name = apps[i].appName || apps[i].name || '';
-      if (pkg === WATCH_PACKAGE) found = true;
-      sandbox.log('  · ' + name + ' (' + pkg + ')');
+      sandbox.log('  · ' + (name || '(无名)') + ' (' + pkg + ')');
     }
-    if (found) {
-      sandbox.log('✅ 应用在列表中但启动失败：多为互连服务状态残留，请重启手环后重试');
+    if (entry) {
+      try {
+        sandbox.log('[诊断] 已找到条目原始字段: ' + JSON.stringify(entry));
+      } catch (e) {}
+      sandbox.log('✅ 应用已在列表但启动失败：多为互连注册/状态残留，请重启手环后重试；或在 BandBurg 断开并重新连接设备再跑');
     } else {
-      sandbox.log('❌ 列表中没有闪念小抄（com.whyy.snapnotes）：请先将手环端 RPK 安装到手环再运行本脚本');
+      sandbox.log('❌ 列表中没有 com.whyy.snapnotes——可能原因：');
+      sandbox.log('   ① 安装的 RPK 不是最新版，或从未打开过应用（未触发互连注册）');
+      sandbox.log('   ② 手环未开开发者/互连调试模式');
+      sandbox.log('   ③ 安装的包未声明 system.interconnect 特性');
     }
   } else {
     sandbox.log('[诊断] 无法获取应用列表——多为底层互连状态残留：请在 BandBurg 断开并重新连接设备（或重启手环），再重新运行本脚本');
   }
-  sandbox.log('安装方法：将仓库内 考点阅读器/release/com.whyy.snapnotes.release.V26.8.0.BAND.rpk 通过开发者调试推送/Vela 工具安装到手环，安装后打开一次应用再试');
+  sandbox.log('安装方法：卸载旧包后，通过开发者调试推送/Vela 工具安装 考点阅读器/release/com.whyy.snapnotes.release.V26.8.0.BAND.rpk，安装后在手环上手动打开一次《闪念小抄》再运行本脚本');
 }
 
 // 检查手环已装应用（GUI 按钮）
@@ -506,18 +584,20 @@ async function checkInstalledApps() {
     return;
   }
   sandbox.log('共 ' + apps.length + ' 个应用：');
-  var found = false;
+  var entry = findWatchAppEntry(apps);
   for (var i = 0; i < apps.length; i++) {
-    var pkg = apps[i].packageName || apps[i].package_name || apps[i].package || '';
+    var pkg = apps[i].packageName || apps[i].package_name || apps[i].package || apps[i].pkg || '';
     var name = apps[i].appName || apps[i].name || '';
     var mark = pkg === WATCH_PACKAGE ? ' ← 闪念小抄' : '';
-    if (pkg === WATCH_PACKAGE) found = true;
-    sandbox.log('  · ' + name + ' (' + pkg + ')' + mark);
+    sandbox.log('  · ' + (name || '(无名)') + ' (' + pkg + ')' + mark);
   }
-  if (found) {
-    sandbox.log('✅ 闪念小抄已安装');
+  if (entry) {
+    sandbox.log('✅ 闪念小抄已安装（包名 com.whyy.snapnotes）');
+    try {
+      sandbox.log('[诊断] 条目原始字段: ' + JSON.stringify(entry));
+    } catch (e) {}
   } else {
-    sandbox.log('❌ 列表中没有闪念小抄（com.whyy.snapnotes）。若你确认已安装：多为手环未开启开发者/互连调试模式，或安装的版本未声明 system.interconnect，请检查后重装 RPK');
+    sandbox.log('❌ 列表中没有 com.whyy.snapnotes。若你确认已安装：请在手环上手动打开一次《闪念小抄》再刷新（触发互连注册）；仍无则检查手环开发者/互连调试模式并重装 RPK');
   }
 }
 
@@ -651,7 +731,7 @@ async function requestTree() {
         await new Promise(function (r) { setTimeout(r, waitTime); });
       } else {
         sandbox.log('文件树同步失败: ' + msg);
-        sandbox.log('提示: 如果手环应用反复崩溃，请尝试重启手环后再试');
+        sandbox.log('提示: 若为 AppInfo not found / 超时：① 请确认手环已安装最新 RPK（com.whyy.snapnotes, V26.8.0）并在手环上手动打开一次《闪念小抄》；② 重启手环后再试；③ 若手环应用反复崩溃请重启手环');
       }
     }
   }
