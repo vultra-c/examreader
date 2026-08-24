@@ -1,5 +1,3 @@
-<import name="formula-text" src="../../components/FormulaText/FormulaText.ux"></import>
-
 <template>
   <div class="page" @swipe="onSwipe">
     <!-- 标题栏 -->
@@ -7,68 +5,53 @@
       <text class="topbar-title">化学计算器</text>
     </div>
 
-    <list class="body">
-      <!-- 输入显示 -->
-      <list-item type="input" class="li">
-        <div class="input-box">
-          <text if="{{inputStr}}" class="input-text">{{inputStr}}</text>
-          <text else class="input-hint">输入反应物，用+分隔</text>
-        </div>
-      </list-item>
+    <!-- 输入显示 -->
+    <div class="input-box">
+      <text if="{{inputStr}}" class="input-text">{{inputStr}}</text>
+      <text else class="input-hint">输入反应物，用+分隔</text>
+    </div>
 
-      <!-- 模式切换 -->
-      <list-item type="tabs" class="li">
-        <div class="tab-row">
-          <div class="tab {{mode === 'formula' ? 'tab-on' : ''}}" @click="setFormula">
-            <text class="{{mode === 'formula' ? 'ton' : 'toff'}}">化学式</text>
-          </div>
-          <div class="tab {{mode === 'name' ? 'tab-on' : ''}}" @click="setName">
-            <text class="{{mode === 'name' ? 'ton' : 'toff'}}">名称</text>
-          </div>
-        </div>
-      </list-item>
+    <!-- 模式切换 -->
+    <div class="tab-row">
+      <div class="tab {{mode === 'formula' ? 'tab-on' : ''}}" @click="setFormula">
+        <text class="{{mode === 'formula' ? 'ton' : 'toff'}}">化学式</text>
+      </div>
+      <div class="tab {{mode === 'name' ? 'tab-on' : ''}}" @click="setName">
+        <text class="{{mode === 'name' ? 'ton' : 'toff'}}">名称</text>
+      </div>
+    </div>
 
-      <!-- 化学式键盘行 -->
-      <list-item if="{{mode === 'formula'}}" type="r1" class="li">
-        <div class="kr"><text class="kk" for="{{r1}}" @click="letter($item)">{{$item}}</text></div>
-      </list-item>
-      <list-item if="{{mode === 'formula'}}" type="r2" class="li">
-        <div class="kr"><text class="kk" for="{{r2}}" @click="letter($item)">{{$item}}</text></div>
-      </list-item>
-      <list-item if="{{mode === 'formula'}}" type="r3" class="li">
-        <div class="kr">
-          <text class="kk fn {{shift ? 'w60' : ''}}" @click="toggleShift">{{shift ? '⇪' : '⇧'}}</text>
-          <text class="kk" for="{{r3}}" @click="letter($item)">{{$item}}</text>
-          <text class="kk fn" @click="del()">⌫</text>
-        </div>
-      </list-item>
-      <list-item if="{{mode === 'formula'}}" type="r4" class="li">
-        <div class="kr">
-          <text class="kk fn" @click="char('(')">(</text>
-          <text class="kk fn" @click="char(')')">)</text>
-          <text class="kk blue" @click="plus()">+</text>
-          <text class="kk fn" style="width:64px;" @click="clear()">清空</text>
-        </div>
-      </list-item>
-      <list-item if="{{mode === 'formula'}}" type="r5" class="li">
-        <div class="kr"><text class="kk" for="{{r5}}" @click="digit($item)">{{$item}}</text></div>
-      </list-item>
+    <!-- 化学式键盘 -->
+    <div if="{{mode === 'formula'}}" class="kb-area">
+      <div class="kr"><text class="kk" for="{{r1}}" @click="letter($item)">{{$item}}</text></div>
+      <div class="kr"><text class="kk" for="{{r2}}" @click="letter($item)">{{$item}}</text></div>
+      <div class="kr">
+        <text class="kk fn {{shift ? 'w60' : ''}}" @click="toggleShift">{{shift ? '⇪' : '⇧'}}</text>
+        <text class="kk" for="{{r3}}" @click="letter($item)">{{$item}}</text>
+        <text class="kk fn" @click="del()">⌫</text>
+      </div>
+      <div class="kr">
+        <text class="kk fn" @click="char('(')">(</text>
+        <text class="kk fn" @click="char(')')">)</text>
+        <text class="kk blue" @click="plus()">+</text>
+        <text class="kk fn w64" @click="clear()">清空</text>
+      </div>
+      <div class="kr"><text class="kk" for="{{r5}}" @click="digit($item)">{{$item}}</text></div>
+    </div>
 
-      <!-- 名称目录 -->
-      <list-item if="{{mode === 'name'}}" type="hdr" for="{{catalog}}" class="li">
-        <div class="ni" @click="pick($item)">
+    <!-- 名称目录 -->
+    <div if="{{mode === 'name'}}" class="catalog-area">
+      <scroll scroll-y="true" style="width:316px;height:188px;">
+        <div class="ni" for="{{catalog}}" @click="pick($item)">
           <text class="nt">{{$item}}</text>
         </div>
-      </list-item>
+      </scroll>
+    </div>
 
-      <!-- 计算按钮 -->
-      <list-item type="btn" class="li">
-        <div class="cbtn" @click="calc()">
-          <text class="cbtn-t">开始推导配平</text>
-        </div>
-      </list-item>
-      <list-item type="pad" class="li"><div style="height:16px;"></div></list-item>
-    </list>
+    <!-- 计算按钮 -->
+    <div class="calc-btn" @click="calc()">
+      <text class="calc-btn-t">开始推导配平</text>
+    </div>
   </div>
 </template>
 
@@ -93,7 +76,6 @@ export default {
     this.r2 = ['A','S','D','F','G','H','J','K','L']
     this.r3 = ['Z','X','C','V','B','N','M']
     this.r5 = ['1','2','3','4','5','6','7','8','9','0']
-    // 名称目录
     const seen = {}; const list = []
     for (const g of CATALOG) {
       for (const f of g.items) {
@@ -105,15 +87,14 @@ export default {
     this.catalog = list
   },
 
+  setFormula() { this.mode = 'formula' },
+  setName() { this.mode = 'name' },
   toggleShift() { this.shift = !this.shift },
-  setFormula() { this.mode = "formula" },
-  setName() { this.mode = "name" },
 
   letter(ch) {
     let o = this.shift ? ch.toUpperCase() : (this.expectUpper ? ch.toUpperCase() : ch.toLowerCase())
     this.shift = false
     if (this.inputStr.length > 140) return
-    // 中文名称后面自动补+
     const last = this.inputStr.split('+').pop() || ''
     if (this.inputStr.length > 0 && !/^[A-Za-z0-9()\[\]]+$/.test(last)) o = '+' + o
     this.inputStr += o
@@ -182,57 +163,80 @@ export default {
 <style>
 @import '../../common/style.css';
 
-.body {
-  width: 336px;
-  height: 480px;
-  position: absolute;
-  top: 0;
-  left: 0;
-  padding: 84px 10px 10px 10px;
-}
-
-.li { width: 316px; }
-
+/* 输入显示（绝对定位：标题栏下方） */
 .input-box {
+  position: absolute;
+  top: 88px;
+  left: 10px;
   width: 316px;
-  min-height: 68px;
+  min-height: 60px;
   background-color: #1a1a1c;
   border-radius: 16px;
-  padding: 12px;
+  padding: 10px 14px;
   justify-content: center;
-  margin-bottom: 8px;
 }
 
 .input-text { font-size: 30px; color: #fff; lines: 2; text-overflow: ellipsis; }
 .input-hint { font-size: 22px; color: rgba(255,255,255,0.35); }
 
-.tab-row { flex-direction: row; justify-content: space-between; width: 316px; margin-bottom: 8px; }
-.tab { width: 153px; height: 48px; border-radius: 14px; background-color: #262626; justify-content: center; align-items: center; }
+/* 模式切换 */
+.tab-row {
+  position: absolute;
+  top: 156px;
+  left: 10px;
+  width: 316px;
+  flex-direction: row;
+  justify-content: space-between;
+}
+.tab { width: 153px; height: 44px; border-radius: 14px; background-color: #262626; justify-content: center; align-items: center; }
 .tab-on { background-color: #0D6EFF; }
 .ton { font-size: 24px; font-weight: bold; color: #fff; }
 .toff { font-size: 24px; color: rgba(255,255,255,0.6); }
 
-.kr { flex-direction: row; justify-content: center; margin-bottom: 6px; width: 316px; }
+/* 化学式键盘 */
+.kb-area {
+  position: absolute;
+  top: 208px;
+  left: 10px;
+  width: 316px;
+}
+.kr { flex-direction: row; justify-content: center; margin-bottom: 5px; width: 316px; }
 .kk {
-  width: 28px; height: 44px; border-radius: 8px;
+  width: 28px; height: 34px; border-radius: 8px;
   background-color: #2c2c2e; margin-left: 2px; margin-right: 2px;
   justify-content: center; align-items: center;
-  font-size: 22px; color: #fff;
+  font-size: 21px; color: #fff;
 }
 .fn { background-color: #3a3a3c; font-size: 20px; color: #0D9EFF; width: 40px; }
 .w60 { width: 56px; }
+.w64 { width: 64px; }
 .blue { background-color: #0D6EFF; width: 56px; font-size: 24px; font-weight: bold; }
 
+/* 名称目录 */
+.catalog-area {
+  position: absolute;
+  top: 208px;
+  left: 10px;
+  width: 316px;
+  height: 188px;
+}
 .ni {
-  background-color: #262626; border-radius: 14px;
-  padding: 12px 16px; margin-bottom: 6px; width: 316px;
+  background-color: #262626; border-radius: 12px;
+  padding: 9px 14px; margin-bottom: 6px; width: 316px;
 }
-.nt { font-size: 24px; color: #fff; }
+.nt { font-size: 23px; color: #fff; }
 
-.cbtn {
-  width: 316px; height: 60px; background-color: #0D6EFF;
-  border-radius: 18px; justify-content: center; align-items: center;
-  margin-top: 8px;
+/* 计算按钮 */
+.calc-btn {
+  position: absolute;
+  top: 410px;
+  left: 10px;
+  width: 316px;
+  height: 54px;
+  background-color: #0D6EFF;
+  border-radius: 18px;
+  justify-content: center;
+  align-items: center;
 }
-.cbtn-t { font-size: 28px; font-weight: bold; color: #fff; }
+.calc-btn-t { font-size: 26px; font-weight: bold; color: #fff; }
 </style>

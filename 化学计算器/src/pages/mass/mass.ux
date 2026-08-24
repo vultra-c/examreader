@@ -1,5 +1,3 @@
-<import name="formula-text" src="../../components/FormulaText/FormulaText.ux"></import>
-
 <template>
   <div class="page" @swipe="onSwipe">
     <div class="topbar">
@@ -7,62 +5,61 @@
       <text class="topbar-title">质量计算</text>
     </div>
 
-    <list class="body-list">
-      <list-item type="warn" class="li-full" show="{{!valid}}">
-        <text class="empty-tip">未找到反应数据</text>
-      </list-item>
+    <div if="{{!valid}}" style="position:absolute; top:180px; width:336px;">
+      <text style="text-align:center; color:rgba(255,255,255,0.35); font-size:24px;">未找到反应数据</text>
+    </div>
 
-      <list-item type="selhdr" class="li-full" show="{{valid}}">
-        <text class="group-header">1. 选择已知质量的物质</text>
-      </list-item>
-      <list-item type="selfrow" for="{{selRows}}" class="li-full" show="{{valid}}">
-        <div class="{{knownIdx === $item.idx ? 'mass-row-known' : ''}} mr-row" @click="onSelect($item)">
-          <formula-text segs="{{$item.segs}}" coef="{{$item.coef}}"></formula-text>
-          <text if="{{knownIdx === $item.idx}}" style="font-size: 22px; color: #4da3ff;">已选 ✓</text>
-        </div>
-      </list-item>
-
-      <list-item type="inphdr" class="li-full" show="{{valid}}">
-        <text class="group-header">2. 输入已知质量（g）</text>
-      </list-item>
-      <list-item type="inpdisp" class="li-full" show="{{valid}}">
-        <div class="input-display" style="min-height: 70px;">
-          <text if="{{massStr}}" class="input-display-text">{{massStr}} g</text>
-          <text else class="input-display-hint">点击下方键盘输入</text>
-        </div>
-      </list-item>
-
-      <list-item type="numrow" for="(ridx, row) in npRows" class="li-full" show="{{valid}}">
-        <div class="np-row">
-          <div class="np-key" for="(ki, key) in row.keys" @click="onKey(key)">
-            <text class="np-key-text">{{key === 'del' ? '⌫' : key}}</text>
+    <div if="{{valid}}" style="position:absolute; top:88px; left:10px; width:316px;">
+      <!-- 选择已知物质（横滚） -->
+      <text class="group-header">1. 选择已知质量的物质</text>
+      <scroll scroll-x="true" style="width:316px; height:56px;">
+        <div style="flex-direction: row;">
+          <div class="sel-chip {{knownIdx === $item.idx ? 'sel-on' : ''}}" for="{{selRows}}" @click="onSelect($item)">
+            <text class="{{knownIdx === $item.idx ? 'sel-on-t' : 'sel-t'}}">{{$item.text}}</text>
           </div>
         </div>
-      </list-item>
+      </scroll>
 
-      <list-item type="calcb" class="li-full" show="{{valid}}">
-        <div class="btn-primary" @click="onCompute">
-          <text class="btn-primary-text">计 算</text>
-        </div>
-      </list-item>
+      <!-- 输入质量 -->
+      <text class="group-header" style="margin-top:6px;">2. 输入已知质量（g）</text>
+      <div class="mass-input">
+        <text if="{{massStr}}" class="mass-input-t">{{massStr}} g</text>
+        <text else class="mass-input-h">点击下方键盘输入</text>
+      </div>
 
-      <list-item type="reshdr" class="li-full" show="{{hasResult}}">
-        <text class="group-header">3. 各物质质量</text>
-      </list-item>
-      <list-item type="resrow" for="{{resultRows}}" class="li-full" show="{{hasResult}}">
-        <div class="{{'mass-row ' + ($item.known ? 'mass-row-known' : '')}}">
+      <!-- 数字键盘 -->
+      <div class="np-row">
+        <div class="np-key" for="{{npRow1}}" @click="onKey($item)"><text class="np-key-text">{{$item}}</text></div>
+      </div>
+      <div class="np-row">
+        <div class="np-key" for="{{npRow2}}" @click="onKey($item)"><text class="np-key-text">{{$item}}</text></div>
+      </div>
+      <div class="np-row">
+        <div class="np-key" for="{{npRow3}}" @click="onKey($item)"><text class="np-key-text">{{$item}}</text></div>
+      </div>
+      <div class="np-row">
+        <div class="np-key np-fn" @click="onKey('.')"><text class="np-key-text">.</text></div>
+        <div class="np-key" @click="onKey('0')"><text class="np-key-text">0</text></div>
+        <div class="np-key np-fn" @click="onKey('del')"><text class="np-key-text">⌫</text></div>
+      </div>
+
+      <!-- 计算按钮 -->
+      <div class="btn-primary" style="margin-top:6px;height:56px;" @click="onCompute">
+        <text class="btn-primary-text">计 算</text>
+      </div>
+
+      <!-- 结果 -->
+      <text if="{{hasResult}}" class="group-header" style="margin-top:8px;">3. 各物质质量</text>
+      <scroll scroll-y="true" style="width:316px;height:150px;" if="{{hasResult}}">
+        <div class="mass-row {{$item.known ? 'mass-row-known' : ''}}" for="{{resultRows}}">
           <div style="flex-direction: row; justify-content: space-between; align-items: flex-end;">
-            <formula-text segs="{{$item.segs}}" coef="{{$item.coef}}"></formula-text>
-            <text class="mass-value">{{$item.massText}}<text class="mass-unit"> g</text></text>
+            <text class="mass-f">{{$item.text}}</text>
+            <text class="mass-value">{{$item.massText}} g</text>
           </div>
-          <text style="font-size: 20px; color: rgba(255,255,255,0.5); margin-top: 4px;">n ≈ {{$item.molText}} mol</text>
+          <text style="font-size:18px; color:rgba(255,255,255,0.5); margin-top:2px;">n ≈ {{$item.molText}} mol</text>
         </div>
-      </list-item>
-
-      <list-item type="pad3" class="li-full">
-        <div style="height: 30px;"></div>
-      </list-item>
-    </list>
+      </scroll>
+    </div>
   </div>
 </template>
 
@@ -91,14 +88,30 @@ export default {
 
     this.selRows = []
     for (let i = 0; i < r.coefs.length; i++) {
-      this.selRows.push({ segs: r.segs[i], coef: r.coefs[i], idx: i, sid: 's' + i })
+      this.selRows.push({ text: this.renderSub(r.segs[i], r.coefs[i]), idx: i, sid: 's' + i })
     }
-    this.npRows = [
-      { keys: ['7','8','9'], rid: 'r0' },
-      { keys: ['4','5','6'], rid: 'r1' },
-      { keys: ['1','2','3'], rid: 'r2' },
-      { keys: ['.','0','del'], rid: 'r3' }
-    ]
+    this.npRow1 = ['1','2','3']
+    this.npRow2 = ['4','5','6']
+    this.npRow3 = ['7','8','9']
+  },
+
+  renderSub(segs, coef) {
+    let s = ''
+    for (const seg of segs) {
+      if (seg.t === 'el') {
+        s += coef > 1 ? coef + seg.s : seg.s
+      } else if (seg.t === 'num') {
+        s += this.subDigit(seg.s)
+      } else {
+        s += seg.s
+      }
+    }
+    return s
+  },
+
+  subDigit(num) {
+    const map = { '0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉' }
+    return String(num).split('').map(c => map[c] || c).join('')
   },
 
   onSelect(item) {
@@ -128,7 +141,7 @@ export default {
     const r = this._rxn
     this.resultRows = []
     for (let i = 0; i < out.length; i++) {
-      this.resultRows.push({ segs: r.segs[i], coef: r.coefs[i], massText: fmtNum(out[i].mass), molText: fmtNum(out[i].mol), known: i === this.knownIdx, rid2: 'q' + i })
+      this.resultRows.push({ text: this.renderSub(r.segs[i], r.coefs[i]), massText: fmtNum(out[i].mass), molText: fmtNum(out[i].mol), known: i === this.knownIdx, rid2: 'q' + i })
     }
     this.hasResult = true
   },
@@ -140,5 +153,47 @@ export default {
 
 <style>
 @import '../../common/style.css';
-.li-full { width: 316px; }
+
+.sel-chip {
+  height: 46px;
+  border-radius: 14px;
+  background-color: #262626;
+  padding: 0 18px;
+  margin-right: 8px;
+  justify-content: center;
+  align-items: center;
+}
+.sel-on { background-color: #0D6EFF; }
+.sel-t { font-size: 22px; color: rgba(255,255,255,0.7); }
+.sel-on-t { font-size: 22px; font-weight: bold; color: #fff; }
+
+.mass-input {
+  width: 316px;
+  min-height: 54px;
+  background-color: #1a1a1c;
+  border-radius: 14px;
+  padding: 8px 14px;
+  justify-content: center;
+  margin-bottom: 6px;
+}
+.mass-input-t { font-size: 28px; color: #fff; }
+.mass-input-h { font-size: 20px; color: rgba(255,255,255,0.35); }
+
+.np-row { flex-direction: row; justify-content: center; margin-bottom: 5px; width: 316px; }
+.np-key {
+  width: 96px; height: 44px; border-radius: 12px;
+  background-color: #2c2c2e; margin-left: 4px; margin-right: 4px;
+  justify-content: center; align-items: center;
+}
+.np-key-text { font-size: 26px; color: #fff; }
+.np-fn { background-color: #3a3a3c; }
+
+.mass-row {
+  background-color: #262626; border-radius: 14px;
+  padding: 8px 12px; margin-bottom: 6px; width: 316px;
+  flex-direction: column;
+}
+.mass-row-known { background-color: rgba(13,110,255,0.25); }
+.mass-f { font-size: 24px; color: #fff; }
+.mass-value { font-size: 26px; color: #fff; font-weight: bold; }
 </style>
