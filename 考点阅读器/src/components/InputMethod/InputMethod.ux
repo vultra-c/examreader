@@ -2,12 +2,15 @@
   <!-- 键盘根节点：可见性完全由父组件传入的 hide prop 直接驱动（show="{{!hide}}"），
        不依赖 $watch 链与 setTimeout 定时器 —— 部分手环机型上 watch/定时器链不可靠，
        曾导致 kbdState 停在隐藏态、键盘永不出现（且以 opacity:0 形式驻留挡住下层点击）。
+       注意：if 必须放在根节点内部的包装 div 上（曾把 if 放到根节点导致部分机型
+       挂载/展开时直接崩溃重启），根节点本身只挂 show。
        入场动画只是锦上添花：watch 可靠时类名切到 kbd-play 播放滑入动画，
        watch 失灵时键盘也会立即完整可见可用。 -->
-  <div class="kbd-layer {{kbdState}}" if="{{!hide || keyboardCreated}}" show="{{!hide}}" style="flex-direction: column;">
+  <div class="kbd-layer {{kbdState}}" show="{{!hide}}" style="flex-direction: column;">
     <!-- 键盘内容懒建：外 if 保证键盘从未弹出时整个子树不进 VDOM（chat/search 首进 1s 卡顿根因：
          旧实现 show 只是不可见，200+ 节点/图片在进页瞬间全部创建），首次弹出才创建，
          之后 keyboardCreated 保活、hide 切换只走 show 显隐，不重复重建。 -->
+    <div if="{{!hide || keyboardCreated}}">
       <div style="background-color:black;flex-direction: column;">
       <!-- 拼音小字行：键盘框外上方单独一行，黑底覆盖，仅中/日模式且有 cval 时显示，只展示不可点。
            circle 屏彻底不建此节点（键盘固定 480x321，外置 28px 行会挤压键盘且顶部多一条黑条），
@@ -337,6 +340,7 @@
         </div>
       </div>
       </div>
+    </div>
   </div>
 </template>
 

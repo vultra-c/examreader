@@ -20,9 +20,9 @@
       <text class="sec-label">1 · 选择已知质量的物质</text>
       <scroll scroll-x="true" class="chip-scroll">
         <div class="chip-row">
-          <div class="{{knownIdx === $item.idx ? 'chip-on' : 'chip'}}"
+          <div class="{{knownIdx == $item.idx ? 'chip-on' : 'chip'}}"
                for="{{selRows}}" tid="rid" @click="onSelect($item)">
-            <text class="{{knownIdx === $item.idx ? 'chip-t-on' : 'chip-t'}}">{{$item.text}}</text>
+            <text class="{{knownIdx == $item.idx ? 'chip-t-on' : 'chip-t'}}">{{$item.text}}</text>
           </div>
         </div>
       </scroll>

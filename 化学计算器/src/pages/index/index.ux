@@ -25,19 +25,19 @@
 
     <!-- 模式切换：反应计算 / 元素查询 -->
     <div class="seg">
-      <div class="{{mode === 'reaction' ? 'seg-cell-on' : 'seg-cell'}}" @click="setMode('reaction')">
-        <text class="{{mode === 'reaction' ? 'seg-t-on' : 'seg-t'}}">反应计算</text>
+      <div class="{{mode == 'reaction' ? 'seg-cell-on' : 'seg-cell'}}" @click="setMode('reaction')">
+        <text class="{{mode == 'reaction' ? 'seg-t-on' : 'seg-t'}}">反应计算</text>
       </div>
-      <div class="{{mode === 'element' ? 'seg-cell-on' : 'seg-cell'}}" @click="setMode('element')">
-        <text class="{{mode === 'element' ? 'seg-t-on' : 'seg-t'}}">元素查询</text>
+      <div class="{{mode == 'element' ? 'seg-cell-on' : 'seg-cell'}}" @click="setMode('element')">
+        <text class="{{mode == 'element' ? 'seg-t-on' : 'seg-t'}}">元素查询</text>
       </div>
     </div>
 
     <!-- 输入卡片：点击弹出/收起键盘 -->
     <div class="input-card" @click="toggleKb">
-      <div if="{{inputStr.length === 0}}" class="input-empty">
-        <text class="input-ph-main">{{mode === 'reaction' ? '输入反应物，用 + 连接' : '输入元素，如 Fe O'}}</text>
-        <text class="input-ph-sub">{{mode === 'reaction' ? '例：铁+氧气 或 Fe+O₂' : '含全部输入元素的方程式'}}</text>
+      <div if="{{inputStr.length == 0}}" class="input-empty">
+        <text class="input-ph-main">{{mode == 'reaction' ? '输入反应物，用 + 连接' : '输入元素，如 Fe O'}}</text>
+        <text class="input-ph-sub">{{mode == 'reaction' ? '例：铁+氧气 或 Fe+O₂' : '含全部输入元素的方程式'}}</text>
       </div>
       <text if="{{inputStr.length > 0}}" class="input-value">{{inputStr}}</text>
       <text if="{{showKb}}" class="input-caret">_</text>
@@ -45,7 +45,7 @@
 
     <!-- 主操作 -->
     <div class="act" @click="onAction">
-      <text class="act-t">{{mode === 'reaction' ? '计算反应' : '查询方程'}}</text>
+      <text class="act-t">{{mode == 'reaction' ? '计算反应' : '查询方程'}}</text>
     </div>
 
     <!-- 功能区 A：元素查询结果（替换下方网格） -->
@@ -54,7 +54,7 @@
         <text class="panel-hd-t">匹配方程式</text>
         <text class="panel-hd-n">{{elementResults.length}} 条</text>
       </div>
-      <text if="{{elementResults.length === 0}}" class="panel-none">没有同时含这些元素的方程式</text>
+      <text if="{{elementResults.length == 0}}" class="panel-none">没有同时含这些元素的方程式</text>
       <scroll if="{{elementResults.length > 0}}" scroll-y="true" class="panel-list">
         <div class="eq-item" for="{{elementResults}}" tid="rid" @click="openEquation($item)">
           <text class="eq-item-text">{{$item.text}}</text>
