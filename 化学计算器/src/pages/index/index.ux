@@ -1,0 +1,246 @@
+<template>
+  <div class="page" @swipe="onSwipe">
+    <!-- 标题栏 -->
+    <div class="topbar">
+      <text class="topbar-title">化学计算器</text>
+      <text class="topbar-sub" style="margin-left: 10px;">离线反应推导</text>
+    </div>
+
+    <list class="body-list">
+      <!-- 已输入内容 -->
+      <list-item type="disp" class="li-full">
+        <div class="input-display">
+          <text if="{{inputStr}}" class="input-display-text">{{inputStr}}</text>
+          <text else class="input-display-hint">输入反应物，用 + 分隔（如 HCl+NaOH 或 盐酸+烧碱）</text>
+        </div>
+      </list-item>
+
+      <!-- 模式切换 -->
+      <list-item type="tabs" class="li-full">
+        <div class="tab-row">
+          <div class="tab-item {{mode === 'formula' ? 'tab-active' : ''}}" @click="setMode('formula')">
+            <text class="{{mode === 'formula' ? 'tab-active-text' : 'tab-text'}}">化学式</text>
+          </div>
+          <div class="tab-item {{mode === 'name' ? 'tab-active' : ''}}" @click="setMode('name')">
+            <text class="{{mode === 'name' ? 'tab-active-text' : 'tab-text'}}">名称</text>
+          </div>
+        </div>
+      </list-item>
+
+      <!-- 化学式键盘 -->
+      <block if="{{mode === 'formula'}}">
+        <list-item type="kb1" class="li-full">
+          <div class="kb-row" for="{{kbRow1}}">
+            <div class="kb-key" @click="onLetter($item)"><text class="kb-key-text">{{$item}}</text></div>
+          </div>
+        </list-item>
+        <list-item type="kb2" class="li-full">
+          <div class="kb-row" for="{{kbRow2}}">
+            <div class="kb-key" @click="onLetter($item)"><text class="kb-key-text">{{$item}}</text></div>
+          </div>
+        </list-item>
+        <list-item type="kb3" class="li-full">
+          <div class="kb-row">
+            <div class="kb-key {{shiftOn ? 'kb-key-wide' : ''}} kb-key-fn" @click="onShift">
+              <text class="kb-key-fn-text">{{shiftOn ? '⇪' : '⇧'}}</text>
+            </div>
+            <div class="kb-key" for="{{kbRow3}}" @click="onLetter($item)"><text class="kb-key-text">{{$item}}</text></div>
+            <div class="kb-key kb-key-fn" @click="onDel"><text class="kb-key-fn-text">⌫</text></div>
+          </div>
+        </list-item>
+        <list-item type="kb4" class="li-full">
+          <div class="kb-row">
+            <div class="kb-key kb-key-fn" style="width: 52px;" @click="onChar('(')"><text class="kb-key-fn-text">(</text></div>
+            <div class="kb-key kb-key-fn" style="width: 52px;" @click="onChar(')')"><text class="kb-key-fn-text">)</text></div>
+            <div class="kb-key kb-key-wide" @click="onPlus"><text class="kb-key-wide-text">+</text></div>
+            <div class="kb-key kb-key-fn" style="width: 72px;" @click="onClearAll"><text class="kb-key-fn-text" style="color: #FF6B6B;">清空</text></div>
+          </div>
+        </list-item>
+        <list-item type="kb5" class="li-full">
+          <div class="kb-row" for="{{digitRow}}">
+            <div class="kb-key" @click="onDigit($item)"><text class="kb-key-text">{{$item}}</text></div>
+          </div>
+        </list-item>
+      </block>
+
+      <!-- 名称目录 -->
+      <block if="{{mode === 'name'}}">
+        <list-item type="hdr" for="{{catalogGroups}}">
+          <text class="group-header">{{$item.group}}</text>
+        </list-item>
+        <list-item type="sub" for="{{catalogItems}}">
+          <div class="sub-item" @click="onPickName($item)">
+            <text class="sub-name">{{$item.dispName}}</text>
+            <formula-text segs="{{$item.segs}}"></formula-text>
+          </div>
+        </list-item>
+      </block>
+
+      <!-- 计算按钮 -->
+      <list-item type="btn" class="li-full">
+        <div class="btn-primary" @click="onCalc">
+          <text class="btn-primary-text">开始推导配平</text>
+        </div>
+      </list-item>
+      <list-item type="pad" class="li-full">
+        <div style="height: 30px;"></div>
+      </list-item>
+    </list>
+  </div>
+</template>
+
+<script>
+import router from '@system.router'
+import prompt from '@system.prompt'
+import { splitInputTokens, resolveToken, parseFormula } from '../../common/logic/parser.js'
+import { solveReaction } from '../../common/logic/reactions.js'
+import { NAME_MAP, CATALOG, formulaName } from '../../common/logic/substances.js'
+
+export default {
+  protected: {
+    mode: 'formula',
+    inputStr: '',
+    shiftOn: false,
+    expectUpper: true,
+    catalogGroups: [],
+    catalogItems: []
+  },
+
+  onInit() {
+    this.kbRow1 = ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P']
+    this.kbRow2 = ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L']
+    this.kbRow3 = ['Z', 'X', 'C', 'V', 'B', 'N', 'M']
+    this.digitRow = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']
+
+    // 目录数据：分组头 + 物质项
+    const groups = []
+    const items = []
+    const seen = {}
+    for (const g of CATALOG) {
+      groups.push({ group: g.group, gid: 'g' + groups.length })
+      for (const f of g.items) {
+        if (seen[f]) continue
+        seen[f] = true
+        const name = formulaName(f) || f
+        const pr = parseFormula(f)
+        items.push({
+          formula: f,
+          dispName: name === f ? f : name,
+          segs: pr.ok ? pr.segs : [{ t: 'el', s: f }],
+          sid: 's' + items.length
+        })
+      }
+    }
+    this.catalogGroups = groups
+    this.catalogItems = items
+  },
+
+  setMode(m) {
+    this.mode = m
+  },
+
+  appendToken(tok) {
+    if (!tok) return
+    const cur = this.inputStr
+    if (cur.length > 140) return
+    this.inputStr = cur && !cur.endsWith('+') ? cur + '+' + tok : cur + tok
+    this.expectUpper = true
+  },
+
+  onLetter(ch) {
+    let out
+    if (this.shiftOn) {
+      out = ch.toUpperCase()
+      this.shiftOn = false
+    } else if (this.expectUpper) {
+      out = ch.toUpperCase()
+    } else {
+      out = ch.toLowerCase()
+    }
+    if (this.inputStr.length > 140) return
+    // 字母不能接在中文名称后面，自动补 +
+    const cur = this.inputStr
+    const lastTok = cur.split('+').pop() || ''
+    const needSep = cur.length > 0 && !/^[A-Za-z0-9()\[\]]+$/.test(lastTok)
+    this.inputStr = cur + (needSep ? '+' : '') + out
+    this.expectUpper = false
+  },
+
+  onShift() {
+    this.shiftOn = !this.shiftOn
+  },
+
+  onDel() {
+    this.inputStr = this.inputStr.slice(0, -1)
+    this.expectUpper = true
+  },
+
+  onChar(c) {
+    if (this.inputStr.length > 140) return
+    this.inputStr += c
+    // 括号后是新元素/新基团，恢复大写
+    this.expectUpper = true
+  },
+
+  onDigit(d) {
+    if (this.inputStr.length > 140) return
+    this.inputStr += d
+    // 数字结束当前元素符号，下一个字母应为新元素（大写）
+    this.expectUpper = true
+  },
+
+  onPlus() {
+    if (!this.inputStr || this.inputStr.endsWith('+')) return
+    this.inputStr += '+'
+    this.expectUpper = true
+  },
+
+  onClearAll() {
+    this.inputStr = ''
+    this.expectUpper = true
+  },
+
+  onPickName(item) {
+    this.appendToken(item.dispName)
+    prompt.showToast({ message: '已加入：' + item.formula, duration: 1200 })
+  },
+
+  onCalc() {
+    const tokens = splitInputTokens(this.inputStr)
+    if (tokens.length === 0) {
+      prompt.showToast({ message: '请先输入至少一种反应物', duration: 1800 })
+      return
+    }
+    const formulas = []
+    for (const t of tokens) {
+      const r = resolveToken(t, NAME_MAP)
+      if (!r.ok) {
+        prompt.showToast({ message: r.error, duration: 2400 })
+        return
+      }
+      formulas.push(r.formula)
+    }
+    const res = solveReaction(formulas)
+    if (!res.ok) {
+      prompt.showToast({ message: res.error, duration: 3000 })
+      return
+    }
+    this.$app.$data.reaction = res.reaction
+    router.push({ uri: 'pages/result' })
+  },
+
+  onSwipe(e) {
+    if (e.direction === 'right') {
+      router.back()
+    }
+  }
+}
+</script>
+
+<style>
+@import '../../common/style.css';
+
+.li-full {
+  width: 316px;
+}
+</style>

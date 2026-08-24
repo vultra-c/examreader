@@ -1,0 +1,55 @@
+<template>
+  <div class="fx-wrap">
+    <!-- 系数 -->
+    <text if="{{coef && coef > 1}}" class="fx-coef">{{coef}}</text>
+    <!-- 分段：元素正常、数字下标、括号原样 -->
+    <block for="{{segs}}">
+      <text if="{{$item.t === 'el'}}" class="fx-el">{{$item.s}}</text>
+      <text elif="{{$item.t === 'num'}}" class="fx-num">{{$item.s}}</text>
+      <text else class="fx-ch">{{$item.s}}</text>
+    </block>
+  </div>
+</template>
+
+<script>
+export default {
+  props: {
+    segs: { default: [] },
+    coef: { default: 0 }
+  }
+}
+</script>
+
+<style>
+.fx-wrap {
+  flex-direction: row;
+  align-items: flex-end;
+}
+
+.fx-coef {
+  font-size: 30px;
+  color: #ffffff;
+  font-weight: bold;
+  line-height: 38px;
+  margin-right: 2px;
+}
+
+.fx-el {
+  font-size: 30px;
+  color: #ffffff;
+  line-height: 38px;
+}
+
+.fx-num {
+  font-size: 21px;
+  color: #ffffff;
+  line-height: 26px;
+  margin-bottom: 0px;
+}
+
+.fx-ch {
+  font-size: 30px;
+  color: #ffffff;
+  line-height: 38px;
+}
+</style>

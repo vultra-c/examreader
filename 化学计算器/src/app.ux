@@ -1,0 +1,8 @@
+<script>
+export default {
+  onInit() {
+    // 全局数据容器：页面间传递反应/配平结果（this.$app.$data）
+    this.$data.reaction = null
+  }
+}
+</script>

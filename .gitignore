@@ -56,6 +56,7 @@ debug.keystore
 # Vela / Node.js 项目排除项
 # =====================
 node_modules/
+node_modules
 dist/
 .rpx
 .snapshots/
@@ -76,6 +77,9 @@ aar-extract/
 # 两端共用同一套公开测试证书，不属于敏感密钥）
 !考点阅读器/sign/debug/private.pem
 !考点阅读器/sign/release/private.pem
+# 化学计算器签名（用户要求随仓库交付）
+!化学计算器/sign/debug/private.pem
+!化学计算器/sign/release/private.pem
 
 # 开发计划文档
 考点阅读器-蓝牙功能开发计划提示词.md

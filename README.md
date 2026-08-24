@@ -1,3 +1,16 @@
+# 仓库总览
+
+本仓库包含两个相互独立的小米 Vela 轻应用：
+
+| 项目 | 目录 | 包名 | 说明 |
+|------|------|------|------|
+| 考点阅读器（闪念小抄） | [`考点阅读器/`](考点阅读器/) | `com.whyy.snapnotes` | TXT/JSON 双格式手环阅读器，蓝牙传输、无缝滚动阅读 |
+| 化学反应计算器 | [`化学计算器/`](化学计算器/) | `com.whyy.chemcalc` | 纯离线化学反应推导 + 智能配平 + 质量计量计算 |
+
+两个项目源码完全分开，各自独立构建与签名；视觉风格与交互习惯保持一致（纯黑底 + 深灰圆角卡片 + 蓝色强调，右滑退出）。
+
+---
+
 # 考点阅读器
 
 基于小米手环（Vela 系统）和 Android 手机端的双端阅读应用，支持通过蓝牙将手机上的 TXT 与 JSON 文件传输到手环阅读。
@@ -61,6 +74,7 @@
 - 手环端 RPK 签名：`考点阅读器/sign/debug` 与 `sign/release` 使用同一套 RSA2048 密钥对（`certificate.pem` + `private.pem`，取自小米官方 interconnect 开发测试证书），两端签名一致
 - Android 端 APK 签名：`android-app/keystore/keystore.jks`（密码见 `android-app/keystore.properties`），证书 DN 与手环端 RPK 证书完全相同（`CN=wearable, OU=xiaomi, O=xiaomi`），同源同身份
 - 成品交付包统一放在 `release/` 目录：手环 RPK 在 `考点阅读器/release/`，APK 在 `考点阅读器/android-app/release/`
+- 化学计算器使用独立生成的签名（`化学计算器/sign/`，RSA2048，有效期 30 年，证书已随源码推送仓库）
 
 ## 技术栈
 
@@ -178,7 +192,8 @@ bash build_apk.sh    # 产出考点传输.apk 并完成签名对齐
 
 | 端 | 版本号 | 版本名 |
 |------|--------|--------|
-| 手环端 | 260840 | V26.8.4.BAND（包名 com.whyy.snapnotes；无缝模式完整移植弦电子书 detail.ux 两段式：page1+page2 段落块 + scroll-top 绑定 + @scrollbottom/@scrolltop 换段 + getBoundingClientRect 测高补偿，DOM 恒定、长文不卡顿不叠字可滚到底；进度改存 起始字符偏移+段内滚动像素） |
+| 手环端 | 2608160 | V26.8.16.BAND（包名 com.whyy.snapnotes；内容与 V26.8.4 一致并删除 10 个未引用图片资源（约 60KB），降低包体积与内存占用；无缝模式完整移植弦电子书 detail.ux 两段式） |
+| 手环端 | 260840 | V26.8.4.BAND（无缝模式完整移植弦电子书 detail.ux 两段式：page1+page2 段落块 + scroll-top 绑定 + @scrollbottom/@scrolltop 换段 + getBoundingClientRect 测高补偿，DOM 恒定、长文不卡顿不叠字可滚到底；进度改存 起始字符偏移+段内滚动像素） |
 | 手环端 | 260800 | V26.8.0.BAND（包名改为 com.whyy.snapnotes 与闪念小抄仓库一致；修复无缝模式滑不动——改为增量追加渲染；移除打开时的阅读进度闪现；脚本 TXT 传输彻底修复 + JSON 内容嗅探兜底） |
 
 两端版本需匹配才能正常建立蓝牙连接。

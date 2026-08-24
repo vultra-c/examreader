@@ -1,0 +1,192 @@
+<template>
+  <div class="page" @swipe="onSwipe">
+    <!-- 标题栏 -->
+    <div class="topbar">
+      <div class="topbar-back" @click="goBack"><text class="topbar-back-text">‹</text></div>
+      <text class="topbar-title">质量计算</text>
+    </div>
+
+    <list class="body-list">
+      <list-item type="warn" if="{{!valid}}" class="li-full">
+        <text class="empty-tip">未找到反应数据，请返回重新输入</text>
+      </list-item>
+
+      <block if="{{valid}}">
+        <!-- 选择已知物质 -->
+        <list-item type="selhdr" class="li-full">
+          <text class="group-header">1. 选择已知质量的物质</text>
+        </list-item>
+        <list-item type="selfrow" for="{{selRows}}" class="li-full">
+          <div class="{{knownIdx === $item.idx ? 'mass-row-known' : ''}} mr-row" @click="onSelect($item)">
+            <formula-text segs="{{$item.segs}}" coef="{{$item.coef}}"></formula-text>
+            <text if="{{knownIdx === $item.idx}}" style="font-size: 22px; color: #4da3ff;">已选 ✓</text>
+          </div>
+        </list-item>
+
+        <!-- 输入质量 -->
+        <list-item type="inphdr" class="li-full">
+          <text class="group-header">2. 输入已知质量（g）</text>
+        </list-item>
+        <list-item type="inpdisp" class="li-full">
+          <div class="input-display" style="min-height: 70px;">
+            <text if="{{massStr}}" class="input-display-text">{{massStr}} g</text>
+            <text else class="input-display-hint">点击下方键盘输入</text>
+          </div>
+        </list-item>
+
+        <!-- 数字键盘 -->
+        <list-item type="numrow" for="(ridx, row) in npRows" class="li-full">
+          <div class="np-row">
+            <block for="(ki, key) in row.keys">
+              <div class="np-key {{key === 'del' ? 'np-fn' : ''}}" @click="onKey(key)">
+                <text class="np-key-text">{{key === 'del' ? '⌫' : key}}</text>
+              </div>
+            </block>
+          </div>
+        </list-item>
+
+        <!-- 计算按钮 -->
+        <list-item type="calcb" class="li-full">
+          <div class="btn-primary" @click="onCompute">
+            <text class="btn-primary-text">计 算</text>
+          </div>
+        </list-item>
+
+        <!-- 结果 -->
+        <block if="{{hasResult}}">
+          <list-item type="reshdr" class="li-full">
+            <text class="group-header">3. 各物质质量（按计量比例）</text>
+          </list-item>
+          <list-item type="resrow" for="{{resultRows}}" class="li-full">
+            <div class="{{'mass-row ' + ($item.known ? 'mass-row-known' : '')}}">
+              <div style="flex-direction: row; justify-content: space-between; align-items: flex-end;">
+                <formula-text segs="{{$item.segs}}" coef="{{$item.coef}}"></formula-text>
+                <text class="mass-value">{{$item.massText}}<text class="mass-unit"> g</text></text>
+              </div>
+              <text if="{{$item.known}}" style="font-size: 20px; color: rgba(255,255,255,0.6); margin-top: 4px;">已知量 · n ≈ {{$item.molText}} mol</text>
+              <text else style="font-size: 20px; color: rgba(255,255,255,0.4); margin-top: 4px;">n ≈ {{$item.molText}} mol</text>
+            </div>
+          </list-item>
+        </block>
+
+        <list-item type="pad3" class="li-full">
+          <div style="height: 30px;"></div>
+        </list-item>
+      </block>
+    </list>
+  </div>
+</template>
+
+<script>
+import router from '@system.router'
+import prompt from '@system.prompt'
+import { computeMasses } from '../../common/logic/stoich.js'
+import { fmtNum } from '../../common/logic/parser.js'
+
+export default {
+  protected: {
+    valid: false,
+    selRows: [],
+    knownIdx: 0,
+    massStr: '',
+    hasResult: false,
+    resultRows: []
+  },
+
+  onInit() {
+    const r = this.$app.$data.reaction
+    if (!r) {
+      this.valid = false
+      return
+    }
+    this.valid = true
+    this._rxn = r
+    const ki = this.$app.$data.massKnownIdx || 0
+    this.knownIdx = ki
+
+    this.selRows = []
+    for (let i = 0; i < r.coefs.length; i++) {
+      this.selRows.push({
+        segs: r.segs[i],
+        coef: r.coefs[i],
+        idx: i,
+        sid: 's' + i
+      })
+    }
+    // 预置键盘行数据（模板中静态渲染）
+    this.npRows = [
+      { keys: ['7', '8', '9'], rid: 'r0' },
+      { keys: ['4', '5', '6'], rid: 'r1' },
+      { keys: ['1', '2', '3'], rid: 'r2' },
+      { keys: ['.', '0', 'del'], rid: 'r3' }
+    ]
+  },
+
+  onSelect(item) {
+    this.knownIdx = item.idx
+    this.hasResult = false
+    this.resultRows = []
+  },
+
+  onKey(k) {
+    if (k === 'del') {
+      this.massStr = this.massStr.slice(0, -1)
+      return
+    }
+    if (k === '.') {
+      if (this.massStr.indexOf('.') !== -1) return
+      if (!this.massStr) this.massStr = '0'
+      this.massStr += '.'
+      return
+    }
+    // 数字
+    if (this.massStr.replace('.', '').length >= 8) return
+    if (this.massStr === '0') this.massStr = ''
+    this.massStr += k
+  },
+
+  onCompute() {
+    const m = parseFloat(this.massStr)
+    if (isNaN(m) || m <= 0) {
+      prompt.showToast({ message: '请输入有效的质量（g）', duration: 1800 })
+      return
+    }
+    const out = computeMasses(this._rxn, this.knownIdx, m)
+    if (!out) {
+      prompt.showToast({ message: '计算失败，请检查输入', duration: 1800 })
+      return
+    }
+    const r = this._rxn
+    this.resultRows = []
+    for (let i = 0; i < out.length; i++) {
+      this.resultRows.push({
+        segs: r.segs[i],
+        coef: r.coefs[i],
+        massText: fmtNum(out[i].mass),
+        molText: fmtNum(out[i].mol),
+        known: i === this.knownIdx,
+        rid2: 'q' + i
+      })
+    }
+    this.hasResult = true
+  },
+
+  goBack() {
+    router.back()
+  },
+
+  onSwipe(e) {
+    if (e.direction === 'right') {
+      router.back()
+    }
+  }
+}
+</script>
+
+<style>
+@import '../../common/style.css';
+
+.li-full {
+  width: 316px;
+}
+</style>

@@ -1,0 +1,45 @@
+{
+  "package": "com.whyy.chemcalc",
+  "name": "化学计算器",
+  "versionName": "V26.8.24.CALC",
+  "versionCode": 2608240,
+  "minPlatformVersion": 1200,
+  "minAPILevel": 1,
+  "icon": "/common/images/icon.png",
+  "deviceTypeList": [
+    "watch"
+  ],
+  "features": [
+    {
+      "name": "system.router"
+    },
+    {
+      "name": "system.prompt"
+    },
+    {
+      "name": "system.vibrator"
+    }
+  ],
+  "config": {
+    "logLevel": "log",
+    "designWidth": 336
+  },
+  "router": {
+    "entry": "pages/index",
+    "pages": {
+      "pages/index": {
+        "component": "index",
+        "launchMode": "singleTask"
+      },
+      "pages/result": {
+        "component": "result"
+      },
+      "pages/mass": {
+        "component": "mass"
+      }
+    }
+  },
+  "display": {
+    "backgroundColor": "#000000"
+  }
+}

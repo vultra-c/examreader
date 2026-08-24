@@ -1,0 +1,26 @@
+{
+  "name": "com.whyy.chemcalc",
+  "version": "1.0.0",
+  "description": "化学反应计算器 - 小米 Vela 轻应用（纯离线）",
+  "engines": {
+    "node": ">=8.10"
+  },
+  "scripts": {
+    "start": "aiot server --watch --open-nuttx",
+    "build": "aiot build",
+    "release": "aiot release --enable-jsc",
+    "watch": "aiot watch --open-nuttx",
+    "postinstall": "node scripts/patch-aiotpack.js"
+  },
+  "devDependencies": {
+    "@aiot-toolkit/velasim": "^0.1.25",
+    "aiot-toolkit": "^2.0.5",
+    "terser-webpack-plugin": "^5.6.1"
+  },
+  "dependencies": {
+    "@aiot-toolkit/jsc": "^1.0.7"
+  },
+  "browserslist": [
+    "chrome 65"
+  ]
+}
