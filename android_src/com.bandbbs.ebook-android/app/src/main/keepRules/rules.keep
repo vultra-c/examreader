@@ -1,0 +1,30 @@
+# Add project specific R8 rules here.
+# AGP will combine all keep rule files in src/main/keepRules to pass to R8
+#
+# For more details, see
+#   https://d.android.com/r/tools/r8/keep-rules
+
+############################################
+# Kotlinx Serialization（FileMessagesToSend / FileMessagesFromDevice 等数据类）
+############################################
+-keepclassmembers class ** {
+    @kotlinx.serialization.Serializable *;
+}
+-keepclasseswithmembers class * {
+    @kotlinx.serialization.Serializable <init>(...);
+}
+-keepclassmembers class * {
+    @kotlinx.serialization.SerialName <fields>;
+}
+-keep,includedescriptorclasses class com.whyy.snapnotes.**$$serializer { *; }
+
+############################################
+# Kotlin / 协程
+############################################
+-keep class kotlinx.coroutines.** { *; }
+
+############################################
+# XMS wearable SDK 内部反射
+############################################
+-keep class com.xiaomi.xms.wearable.** { *; }
+-dontwarn com.xiaomi.xms.wearable.**

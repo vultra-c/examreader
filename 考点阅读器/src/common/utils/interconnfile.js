@@ -286,9 +286,15 @@ export default class interconnfile {
 
     async handleTransferComplete() {
         console.log('[BT-File] Transfer complete');
+        // 章节内容已经在 chapter_complete 阶段落盘。最后的回执只是通知手机，
+        // 回执发送失败不能再进入统一异常处理，否则手机会收到“失败”，但手环实际已有文件。
         this.resetState();
-        await this.send({ type: "transfer_finished" });
         this.callback({ msg: "success" });
+        try {
+            await this.send({ type: "transfer_finished" });
+        } catch (e) {
+            console.warn('[BT-File] transfer_finished ack could not be sent; content is already saved');
+        }
     }
 
     async handleCancel() {

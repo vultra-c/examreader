@@ -1,37 +1,54 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.io.FileInputStream
 import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.compose.compiler)
-    kotlin("plugin.serialization") version "2.1.20"
-    id("com.google.devtools.ksp") version "2.2.0-2.0.2"
+    alias(libs.plugins.kotlin.serialization)
 }
 
-val keystorePropertiesFile = rootProject.file("keystore.properties")
-val keystoreProperties = Properties()
-keystoreProperties.load(FileInputStream(keystorePropertiesFile))
-
 android {
-    namespace = "com.bandbbs.ebook"
-    compileSdk = 36
-
-    defaultConfig {
-        applicationId = "com.silenthong.kdreader"
-        minSdk = 23
-        targetSdk = 35
-        versionCode = 126430
-        versionName = "V26.4.3"
-        resConfigs("zh")
+    namespace = "com.whyy.snapnotes"
+    compileSdk {
+        version = release(37) {
+            minorApiLevel = 1
+        }
     }
 
-    signingConfigs {
-        create("release") {
-            keyAlias = keystoreProperties.getProperty("keyAlias")
-            keyPassword = keystoreProperties.getProperty("keyPassword")
-            storeFile = file(keystoreProperties.getProperty("storeFile"))
-            storePassword = keystoreProperties.getProperty("storePassword")
+    defaultConfig {
+        applicationId = "com.whyy.snapnotes"
+        minSdk = 23
+        targetSdk = 35
+        versionCode = 2
+        versionName = "1.0.1"
+
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // 可选签名：若根目录存在 keystore.properties 且引用的 jks 文件也存在，则启用 release 签名；否则 debug/release 走默认签名。
+    val keystorePropertiesFile = rootProject.file("keystore.properties")
+    var hasKeystore = false
+    var keystoreProperties: Properties? = null
+    if (keystorePropertiesFile.exists()) {
+        keystoreProperties = Properties().apply {
+            FileInputStream(keystorePropertiesFile).use { load(it) }
+        }
+        val storeFilePath = keystoreProperties.getProperty("storeFile")
+        if (storeFilePath != null && rootProject.file(storeFilePath).exists()) {
+            hasKeystore = true
+        }
+    }
+    if (hasKeystore && keystoreProperties != null) {
+        signingConfigs {
+            create("release") {
+                keyAlias = keystoreProperties!!.getProperty("keyAlias")
+                keyPassword = keystoreProperties!!.getProperty("keyPassword")
+                // 使用 rootProject.file() 确保 storeFile 路径相对于项目根目录解析，
+                // 而非 app 模块目录。CI 中 release.jks 在仓库根目录生成。
+                storeFile = rootProject.file(keystoreProperties!!.getProperty("storeFile"))
+                storePassword = keystoreProperties!!.getProperty("storePassword")
+            }
         }
     }
 
@@ -43,75 +60,87 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("release")
+            if (hasKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
         debug {
-            signingConfig = signingConfigs.getByName("release")
+            if (hasKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
-    }
-    kotlinOptions {
-        jvmTarget = "11"
-    }
+
     buildFeatures {
         compose = true
         buildConfig = true
     }
+
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
+
     packaging {
-        dex {
-            useLegacyPackaging = true
-        }
-        jniLibs {
-            useLegacyPackaging = true
-        }
         resources {
             excludes += setOf(
                 "META-INF/LICENSE*",
                 "META-INF/NOTICE*",
                 "META-INF/DEPENDENCIES",
                 "META-INF/*.kotlin_module",
-                "META-INF/androidx.cardview_cardview.version"
+                "META-INF/androidx.cardview_cardview.version",
+                "META-INF/androidx.versionedparcelable.version"
             )
         }
     }
 }
 
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_11)
+    }
+}
+
 dependencies {
-    implementation(files("./libs/xms-wearable-lib_1.4_release.aar"))?.let { implementation(it) }
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    // 小米穿戴第三方 SDK v1.4 (本地 aar, BLE 通信底层)
+    implementation(files("./libs/xms-wearable-lib_1.4_release.aar"))
+    implementation(libs.androidx.compose.ui)
 
-    implementation("androidx.core:core-ktx:1.17.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
-    implementation("androidx.activity:activity-compose:1.12.0")
-    implementation(platform("androidx.compose:compose-bom:2025.11.01"))
-    implementation("androidx.compose.ui:ui")
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.kotlinx.coroutines.android)
 
-    implementation("androidx.loader:loader:1.1.0")
-    implementation("com.github.albfernandez:juniversalchardet:2.5.0")
-    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
-    implementation("org.jsoup:jsoup:1.22.1")
-    implementation("com.google.re2j:re2j:1.8")
-    implementation("androidx.appcompat:appcompat:1.7.1")
-    implementation("io.coil-kt:coil-compose:2.7.0")
-    implementation("com.github.yalantis:ucrop:2.2.11")
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.activity.compose)
+
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.compose.ui.ui)
+    implementation(libs.androidx.compose.ui.graphics)
+    implementation(libs.androidx.compose.ui.tooling.preview)
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.extended)
+    debugImplementation(libs.androidx.compose.ui.tooling)
+
     implementation(libs.androidx.work.runtime.ktx)
 
-    val room_version = "2.8.4"
-    implementation("androidx.room:room-runtime:$room_version")
-    implementation("androidx.room:room-ktx:$room_version")
-    ksp("androidx.room:room-compiler:$room_version")
-
     implementation("androidx.navigation3:navigation3-runtime:1.0.1")
-    implementation("top.yukonga.miuix.kmp:miuix:0.8.8")
-    implementation("top.yukonga.miuix.kmp:miuix-icons:0.8.8")
-    implementation("top.yukonga.miuix.kmp:miuix-navigation3-ui:0.8.8")
-    implementation("top.yukonga.miuix.kmp:miuix-navigation3-adaptive:0.8.5")
 
-    implementation("org.apache.poi:poi:3.17")
-    implementation("org.apache.poi:poi-scratchpad:3.17")
+    implementation("top.yukonga.miuix.kmp:miuix-ui-android:0.9.3")
+
+    implementation("top.yukonga.miuix.kmp:miuix-preference-android:0.9.3")
+
+    implementation("top.yukonga.miuix.kmp:miuix-icons-android:0.9.3")
+
+    implementation("top.yukonga.miuix.kmp:miuix-squircle-android:0.9.3")
+
+    implementation("top.yukonga.miuix.kmp:miuix-navigation3-ui-android:0.9.3")
+
+    implementation("com.squareup.okhttp3:okhttp:5.4.0")
+implementation(libs.markdown.renderer)
+implementation(libs.markdown.renderer.code)
+
+    testImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.espresso.core)
 }

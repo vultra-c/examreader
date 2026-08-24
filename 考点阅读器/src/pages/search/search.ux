@@ -7,7 +7,7 @@
     <div class="search-box">
       <img src="/common/images/search.png" class="search-icon" @click="doSearch" />
       <div style="flex: 1; height: 54px; justify-content: center; align-items: center;" @click="toggleKeyboard">
-        <text class="search-text" show="{{searchText.length > 0}}">{{searchText}}</text>
+        <text class="search-text" show="{{searchText.length > 0}}">{{searchDisplay}}</text>
         <text class="search-ph" show="{{searchText.length == 0}}">输入要搜索的内容</text>
       </div>
     </div>
@@ -58,6 +58,7 @@ export default {
     nowTime: '00:00',
     timer: null,
     searchText: '',
+    searchDisplay: '',
     showKeyboard: false,
     results: [],
     hasSearched: false,
@@ -111,18 +112,28 @@ export default {
       return
     }
     this.searchText = this.searchText + content
+    this.updateSearchDisplay()
   },
 
   // Remove the last character from the input
   onDelete() {
     if (this.searchText.length > 0) {
       this.searchText = this.searchText.slice(0, -1)
+      this.updateSearchDisplay()
     }
+  },
+
+  // 输入内容可以继续超过 5 个字符；显示区只显示前 5 个字符和省略号，
+  // 明确保留第 5 个字符，避免 text-overflow 在清除按钮下方把它遮掉。
+  updateSearchDisplay() {
+    const value = String(this.searchText || '')
+    this.searchDisplay = value.length > 5 ? value.substring(0, 5) + '...' : value
   },
 
   // Clear the search text and reset state
   clearSearch() {
     this.searchText = ''
+    this.searchDisplay = ''
     this.hasSearched = false
     this.results = []
   },
@@ -273,12 +284,13 @@ export default {
     height: 34px;
   }
   .search-text {
+    width: 240px;
     font-size: 24px;
     font-weight: bold;
     color: #FFFFFF;
     text-align: center;
     lines: 1;
-    text-overflow: ellipsis;
+    text-overflow: clip;
   }
   .search-ph {
     font-size: 24px;

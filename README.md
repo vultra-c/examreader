@@ -114,7 +114,7 @@ examreader/
 │   ├── release/                   # 已签名 RPK 交付包
 │   ├── sign/{debug,release}/      # RPK 签名密钥对（两端相同）
 │   ├── scripts/patch-aiotpack.js  # 构建环境兼容补丁（rspack→webpack 回退）
-│   ├── android-app/               # Android 手机端源码（考点传输）
+│   ├── android-app/               # 历史 Android 示例（当前主工程见 android_src/）
 │   │   ├── app/src/main/java/com/silenthong/kdreader/
 │   │   │   ├── ui/MainActivity.java   # 主界面（支持选择 TXT/JSON）
 │   │   │   └── logic/TxtTransferHandler.java
@@ -124,33 +124,17 @@ examreader/
 │
 ├── bandburg-kdreader.js           # BandBurg 传输脚本（TXT/JSON，免装 APK）
 ├── android_src/
-│   └── com.bandbbs.ebook-android/  # Android 端
-│       ├── app/
-│       │   ├── src/main/java/com/bandbbs/ebook/
-│       │   │   ├── App.kt              # 应用入口
-│       │   │   ├── database/           # Room 数据库
-│       │   │   ├── logic/              # 蓝牙通信逻辑
-│       │   │   │   ├── InterHandshake.kt   # 握手协议
-│       │   │   │   ├── Interconn.kt        # 连接管理
-│       │   │   │   └── InterconnetFile.kt  # 文件传输
-│       │   │   ├── notifications/      # 通知服务
-│       │   │   ├── ui/                 # Compose UI
-│       │   │   │   ├── activity/       # Activity
-│       │   │   │   ├── components/    # 组件
-│       │   │   │   ├── screens/        # 页面
-│       │   │   │   ├── model/          # 数据模型
-│       │   │   │   ├── theme/          # 主题
-│       │   │   │   └── viewmodel/      # ViewModel
-│       │   │   └── utils/             # 工具类
-│       │   │       ├── manager/        # 管理器
-│       │   │       └── parser/         # 文件解析器
-│       │   ├── src/main/res/           # 资源文件
-│       │   ├── libs/
-│       │   │   └── xms-wearable-lib_1.4_release.aar  # XMS SDK
-│       │   └── build.gradle.kts        # 构建配置
-│       ├── settings.gradle.kts
-│       ├── gradle/libs.versions.toml    # 依赖版本
-│       └── LICENSE.txt                 # AGPL v3 许可证
+│   └── com.bandbbs.ebook-android/  # Android 端（同步自 vultra-c/Snapnotes-android）
+│       ├── app/src/main/java/com/whyy/snapnotes/
+│       │   ├── logic/               # 连接、JSON/公式分片推送
+│       │   ├── ui/                  # Compose + Miuix 手机界面
+│       │   ├── notifications/       # 前台传输通知
+│       │   └── data/                # 内置数据
+│       ├── app/src/main/res/        # Android 资源与内置数据
+│       ├── app/libs/xms-wearable-lib_1.4_release.aar  # XMS SDK
+│       ├── app/build.gradle.kts     # com.whyy.snapnotes / 1.0.1
+│       ├── gradlew                  # Gradle wrapper
+│       └── LICENSE                  # AGPL v3 许可证
 │
 ├── .gitignore
 └── README.md
@@ -173,8 +157,9 @@ npm run release      # 发布签名 RPK 到 dist/
 使用仓库内脚本构建（需自备 Java 17 与 Android SDK build-tools 30.0.3，按脚本头部路径配置）：
 
 ```bash
-cd 考点阅读器/android-app
-bash build_apk.sh    # 产出考点传输.apk 并完成签名对齐
+cd android_src/com.bandbbs.ebook-android
+ANDROID_HOME=/path/to/android-sdk ANDROID_SDK_ROOT=/path/to/android-sdk bash ./gradlew :app:assembleDebug
+# 产出 app/build/outputs/apk/debug/app-debug.apk
 ```
 
 ### BandBurg 脚本传输（免装 APK）
@@ -192,8 +177,9 @@ bash build_apk.sh    # 产出考点传输.apk 并完成签名对齐
 
 | 端 | 版本号 | 版本名 |
 |------|--------|--------|
-| 手环端（考点阅读器） | 2608190 | V26.8.19.BAND（包名 com.whyy.snapnotes；修复键盘无法弹出——键盘显隐改为直接绑定 hide 属性，不依赖 watch 链，保证可调出；保留 Snapnotes-band 连打词库） |
-| 手环端（化学工具箱） | 2608280 | V26.8.28.CALC（包名 com.whyy.chemcalc，应用名改为化学工具箱；输入法换成与考点阅读器同款（含中文/日文/英文），废弃自写键盘；新增元素查询模式——输入 1-3 个元素本地检索同时含有这些元素的方程式，171 条预配平反应库由 scripts/genBank.mjs 生成） |
+| 手环端（考点阅读器） | 2608200 | V26.8.20.BAND（包名 com.whyy.snapnotes；输入法大小写切换稳定，保留中文/日文/英文连打词库） |
+| 手环端（化学工具箱） | 2608290 | V26.8.29.CALC（包名 com.whyy.chemcalc；输入法大小写切换稳定，保留中文/日文/英文；元素查询与反应/计量功能不变） |
+| Android 端（Snapnotes-android） | 2 | 1.0.1（包名 com.whyy.snapnotes；源码同步自 vultra-c/Snapnotes-android，Debug APK 已本地构建） |
 | 手环端 | 260840 | V26.8.4.BAND（无缝模式完整移植弦电子书 detail.ux 两段式：page1+page2 段落块 + scroll-top 绑定 + @scrollbottom/@scrolltop 换段 + getBoundingClientRect 测高补偿，DOM 恒定、长文不卡顿不叠字可滚到底；进度改存 起始字符偏移+段内滚动像素） |
 | 手环端 | 260800 | V26.8.0.BAND（包名改为 com.whyy.snapnotes 与闪念小抄仓库一致；修复无缝模式滑不动——改为增量追加渲染；移除打开时的阅读进度闪现；脚本 TXT 传输彻底修复 + JSON 内容嗅探兜底） |
 
@@ -201,7 +187,7 @@ bash build_apk.sh    # 产出考点传输.apk 并完成签名对齐
 
 ## 许可证
 
-本项目早期基于 AGPL v3 授权的开源代码开发。详见 [LICENSE.txt](android_src/com.bandbbs.ebook-android/LICENSE.txt)。
+本项目早期基于 AGPL v3 授权的开源代码开发。详见 [LICENSE](android_src/com.bandbbs.ebook-android/LICENSE)。
 
 ## 致谢
 

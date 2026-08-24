@@ -3,7 +3,7 @@
 纯离线运行的化学反应计算工具，适配小米 Vela 穿戴设备。所有计算、元素数据、反应规则库均本地内置，无需联网。
 
 - 包名：`com.whyy.chemcalc`
-- 当前版本：`V26.8.24.CALC`（versionCode 2608240）
+- 当前版本：`V26.8.29.CALC`（versionCode 2608290）
 - 设计尺寸：336 × 480（designWidth 336，与考点阅读器一致）
 
 ## 功能
@@ -19,7 +19,7 @@
 
 | 路由 | 说明 |
 |------|------|
-| `pages/index` | 输入页：化学式自定义键盘（QWERTY + 括号/加号/数字，智能大小写）与物质名称目录双模式 |
+| `pages/index` | 输入页：考点阅读器同款输入法（中文/日文/英文）与物质名称目录双模式 |
 | `pages/result` | 方程式页：带下标渲染的配平方程式、反应类型、条件、各物质相对分子质量 |
 | `pages/mass` | 质量计算页：选择已知物质 → 数字键盘输入质量 → 批量推算结果 |
 
@@ -30,6 +30,7 @@
 ```
 化学计算器/
 ├── package.json            # aiot-toolkit 构建配置
+├── components/InputMethod/      # 考点阅读器同款中文/日文/英文输入法
 ├── scripts/patch-aiotpack.js
 ├── sign/
 │   ├── release/            # 发布签名 private.pem + certificate.pem（已推送仓库）

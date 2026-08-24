@@ -238,8 +238,8 @@
           <img src="./assets/horizontal/123.png" style="margin-left:6px;padding:6px;width:60px;height:60px;" @click="onBtnClick('switchNum_jp')" if="{{downFlag==='' && !numFlag && lang==='jp'}}" />
         
           <img src="./assets/horizontal/en.png" style="padding: 6px;width: 60px;height: 60px;" @click="onBtnClick('lang')" if="{{downFlag==='' && !numFlag && lang==='en'}}" />
-          <img src="./assets/horizontal/bigA.png" style="padding: 6px;margin-left: 6px;width:94px;height:60px;" @click="onBtnClick('switchLow')" if="{{downFlag==='' && upperFlag && lang==='en'&& !numFlag}}" />
-          <img src="./assets/horizontal/a.png" style="padding: 6px;margin-left: 6px;width:94px;height:60px;" @click="onBtnClick('switchUpper')" if="{{downFlag==='' && !upperFlag && lang==='en'&& !numFlag}}" />
+          <img src="./assets/horizontal/bigA.png" style="padding: 6px;margin-left: 6px;width:94px;height:60px;" @click="onBtnClick('switchLow')" show="{{downFlag==='' && upperFlag && lang==='en'&& !numFlag}}" />
+          <img src="./assets/horizontal/a.png" style="padding: 6px;margin-left: 6px;width:94px;height:60px;" @click="onBtnClick('switchUpper')" show="{{downFlag==='' && !upperFlag && lang==='en'&& !numFlag}}" />
           <img src="./assets/horizontal/123.png" style="margin-left: 6px;padding: 6px;margin-left: 6px;width: 94px;height: 60px;" @click="onBtnClick('switchNum')" if="{{downFlag==='' && !numFlag && lang==='en'}}" />
           <img src="./assets/horizontal/back2.png" style="margin-left: 6px;padding: 6px;width: 159px;height: 60px;" @click="onBtnClick('switchCn')" if="{{numFlag}}" />
           <img if="{{!numFlag}}" src="./assets/horizontal/del.png" style="margin-left: 6px;padding: 6px;width: 60px;height: 60px;" @click="onBtnClick('D')" />
@@ -499,6 +499,10 @@ export default {
   addAllTxt(txt) {
     this.$emit("complete", { content: txt });
   },
+  emitLatin(txt) {
+    const value = String(txt || "");
+    this.addAllTxt(this.upperFlag ? value.toUpperCase() : value.toLowerCase());
+  },
   onRsSelect(txt) {
     this.onVibrate();
     // 检查是否为每音节首字 → 按偏移消费 cval 前缀
@@ -579,11 +583,7 @@ export default {
           if (this.lang === "cn" || this.lang === 'jp') {
             this.cval += this.waitingList[this.waitingIndex];
           } else {
-            if (this.upperFlag) {
-              this.addAllTxt(this.waitingList[this.waitingIndex].toUpperCase());
-            } else {
-              this.addAllTxt(this.waitingList[this.waitingIndex].toLowerCase());
-            }
+            this.emitLatin(this.waitingList[this.waitingIndex]);
           }
           this.clearWaiting();
           this.resetResultList();
@@ -608,14 +608,20 @@ export default {
         this.numFlag_jp = false;
         break;
       case "switchUpper":
+        // 大写键是锁定开关：按下后保持大写，直到用户主动按小写键。
+        // 这里不能使用 toggle；部分手环会把一次点击分发两次，toggle 会立即被抵消。
         this.upperFlag = true;
         break;
       case "switchLow":
         this.upperFlag = false;
-        break;
+        break
       default:
         if (sign.length === 1) {
-          this.addAllTxt(sign);
+          if (this.lang === "en" && !this.numFlag) {
+            this.emitLatin(sign);
+          } else {
+            this.addAllTxt(sign);
+          }
         } else {
           if (this.waitingIndex >= 0) {
             if (this.lastWaitingStr === sign) {
@@ -627,15 +633,7 @@ export default {
               if (this.lang === "cn" || this.lang === 'jp') {
                 this.cval += this.waitingList[this.waitingIndex];
               } else {
-                if (this.upperFlag) {
-                  this.addAllTxt(
-                    this.waitingList[this.waitingIndex].toUpperCase(),
-                  );
-                } else {
-                  this.addAllTxt(
-                    this.waitingList[this.waitingIndex].toLowerCase(),
-                  );
-                }
+                this.emitLatin(this.waitingList[this.waitingIndex]);
               }
               this.lastWaitingStr = sign;
               this.waitingIndex = 0;
@@ -752,11 +750,7 @@ export default {
     if ((this.lang === 'cn' || this.lang === 'jp')  && !this.numFlag) {
       this.cval += num.toLowerCase();
     } else if (this.lang === "en" && !this.numFlag) {
-      if (this.upperFlag) {
-        this.addAllTxt(num.toUpperCase());
-      } else {
-        this.addAllTxt(num.toLowerCase());
-      }
+      this.emitLatin(num);
     } else {
       this.addAllTxt(num);
     }
@@ -766,12 +760,10 @@ export default {
     this.onVibrate();
     if (this.lang === "cn") {
       this.cval += this.waitingList[num].toString();
+    } else if (this.lang === "en") {
+      this.emitLatin(this.waitingList[num]);
     } else {
-      if (this.upperFlag) {
-        this.addAllTxt(this.waitingList[num].toUpperCase());
-      } else {
-        this.addAllTxt(this.waitingList[num].toLowerCase());
-      }
+      this.addAllTxt(this.waitingList[num]);
     }
     this.clearWaiting();
     this.resetResultList();

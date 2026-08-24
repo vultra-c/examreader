@@ -1,23 +1,11 @@
-/* 化学计算器 - 公共样式（与考点阅读器同风格：纯黑底 + 深灰圆角卡片 + 蓝色强调） */
+/* 化学工具箱公共样式：黑色背景、深色卡片、蓝紫色强调 */
 
-/* 页面基础 */
 .page {
   width: 336px;
   height: 480px;
   background-color: #000000;
 }
 
-/* 可滚动主体（顶部留出标题栏） */
-.body-list {
-  width: 336px;
-  height: 480px;
-  position: absolute;
-  top: 0px;
-  left: 0px;
-  padding: 92px 10px 16px 10px;
-}
-
-/* 标题栏 */
 .topbar {
   position: absolute;
   top: 0px;
@@ -41,62 +29,65 @@
 
 .topbar-back-text {
   font-size: 40px;
-  color: #ffffff;
-  font-weight: bold;
   line-height: 44px;
   margin-top: -6px;
+  color: #ffffff;
+  font-weight: bold;
 }
 
 .topbar-title {
   font-size: 34px;
-  font-weight: bold;
-  color: #ffffff;
   line-height: 40px;
+  color: #ffffff;
+  font-weight: bold;
 }
 
 .topbar-sub {
   font-size: 20px;
   color: rgba(255,255,255,0.45);
-  margin-top: 2px;
 }
 
-/* 卡片 */
 .card {
-  background-color: #262626;
-  border-radius: 24px;
+  width: 316px;
   padding: 14px 16px;
   margin-bottom: 10px;
-  width: 316px;
+  border-radius: 24px;
+  background-color: #262626;
 }
 
-.card-title {
+.card-title,
+.group-header {
   font-size: 22px;
   color: rgba(255,255,255,0.5);
   margin-bottom: 8px;
 }
 
-/* 主按钮（蓝色强调） */
+.group-header {
+  margin-left: 4px;
+  margin-top: 6px;
+}
+
 .btn-primary {
-  background-color: #0D6EFF;
-  border-radius: 24px;
-  height: 72px;
   width: 316px;
+  height: 72px;
+  margin-bottom: 10px;
+  border-radius: 24px;
+  background-color: #0d6eff;
   justify-content: center;
   align-items: center;
-  margin-bottom: 10px;
 }
 
 .btn-primary-text {
   font-size: 30px;
-  font-weight: bold;
   color: #ffffff;
+  font-weight: bold;
 }
 
 .btn-secondary {
-  background-color: #262626;
-  border-radius: 24px;
-  height: 64px;
   width: 152px;
+  height: 64px;
+  border-radius: 24px;
+  background-color: #262626;
   justify-content: center;
   align-items: center;
 }
@@ -106,92 +97,14 @@
   color: rgba(255,255,255,0.85);
 }
 
-/* 模式切换标签 */
-.tab-row {
-  flex-direction: row;
-  justify-content: space-between;
-  width: 316px;
-  margin-bottom: 10px;
-}
-
-.tab-item {
-  width: 153px;
-  height: 58px;
-  border-radius: 20px;
-  background-color: #262626;
-  justify-content: center;
-  align-items: center;
-}
-
-.tab-active {
-  background-color: #0D6EFF;
-}
-
-.tab-text {
-  font-size: 26px;
-  color: rgba(255,255,255,0.6);
-}
-
-.tab-active-text {
-  font-size: 26px;
-  font-weight: bold;
-  color: #ffffff;
-}
-
-/* 化学式键盘按键 */
-.kb-row {
-  flex-direction: row;
-  justify-content: center;
-  margin-bottom: 7px;
-  width: 316px;
-}
-
-.kb-key {
-  width: 29px;
-  height: 46px;
-  border-radius: 10px;
-  background-color: #2c2c2e;
-  margin-left: 2px;
-  margin-right: 2px;
-  justify-content: center;
-  align-items: center;
-}
-
-.kb-key-text {
-  font-size: 24px;
-  color: #ffffff;
-}
-
-.kb-key-fn {
-  background-color: #3a3a3c;
-  width: 42px;
-}
-
-.kb-key-fn-text {
-  font-size: 22px;
-  color: #0D9EFF;
-  font-weight: bold;
-}
-
-.kb-key-wide {
-  width: 62px;
-  background-color: #0D6EFF;
-}
-
-.kb-key-wide-text {
-  font-size: 24px;
-  color: #ffffff;
-  font-weight: bold;
-}
-
-/* 输入显示区 */
+/* 方程式输入/展示 */
 .input-display {
-  min-height: 84px;
-  background-color: #1a1a1c;
-  border-radius: 20px;
-  padding: 12px 14px;
   width: 316px;
+  min-height: 84px;
+  padding: 12px 14px;
   margin-bottom: 10px;
+  border-radius: 20px;
+  background-color: #1a1a1c;
   justify-content: center;
 }
 
@@ -207,44 +120,12 @@
   color: rgba(255,255,255,0.35);
 }
 
-/* 物质列表项 */
-.sub-item {
-  background-color: #262626;
-  border-radius: 18px;
-  padding: 12px 16px;
-  margin-bottom: 8px;
-  width: 316px;
-  flex-direction: row;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.sub-name {
-  font-size: 26px;
-  color: #ffffff;
-}
-
-.sub-formula {
-  font-size: 24px;
-  color: #0D9EFF;
-}
-
-/* 分组标题 */
-.group-header {
-  font-size: 22px;
-  color: rgba(255,255,255,0.4);
-  margin-top: 6px;
-  margin-bottom: 8px;
-  margin-left: 4px;
-}
-
-/* 方程式展示 */
 .equation-box {
-  background-color: #1a1a1c;
-  border-radius: 20px;
-  padding: 16px 12px;
   width: 316px;
+  padding: 16px 12px;
   margin-bottom: 10px;
+  border-radius: 20px;
+  background-color: #1a1a1c;
 }
 
 .eq-line {
@@ -252,29 +133,20 @@
   flex-wrap: wrap;
   align-items: flex-end;
   justify-content: center;
-  margin-top: 4px;
-  margin-bottom: 4px;
+}
+
+.eq-formula,
+.mr-formula,
+.mass-f {
+  color: #ffffff;
 }
 
 .eq-op {
   font-size: 30px;
+  line-height: 38px;
   color: rgba(255,255,255,0.7);
   margin-left: 4px;
   margin-right: 4px;
-  line-height: 38px;
-}
-
-.type-badge {
-  background-color: rgba(13,110,255,0.18);
-  border-radius: 14px;
-  padding: 6px 14px;
-  margin-top: 10px;
-  align-self: center;
-}
-
-.type-badge-text {
-  font-size: 22px;
-  color: #4da3ff;
 }
 
 .cond-text {
@@ -284,16 +156,32 @@
   text-align: center;
 }
 
-/* Mr 列表行 */
+.type-badge {
+  padding: 6px 14px;
+  margin-top: 10px;
+  border-radius: 14px;
+  background-color: rgba(13,110,255,0.18);
+  align-self: center;
+}
+
+.type-badge-text {
+  font-size: 22px;
+  color: #4da3ff;
+}
+
 .mr-row {
+  width: 316px;
+  padding: 10px 16px;
+  margin-bottom: 8px;
+  border-radius: 16px;
+  background-color: #262626;
   flex-direction: row;
   justify-content: space-between;
   align-items: center;
-  background-color: #262626;
-  border-radius: 16px;
-  padding: 10px 16px;
-  margin-bottom: 8px;
-  width: 316px;
+}
+
+.mr-formula {
+  font-size: 24px;
 }
 
 .mr-value {
@@ -301,54 +189,33 @@
   color: rgba(255,255,255,0.75);
 }
 
-/* 数字键盘 */
-.numpad-grid {
+/* 质量计算结果 */
+.mass-input {
   width: 316px;
-  margin-top: 4px;
-}
-
-.np-row {
-  flex-direction: row;
-  justify-content: center;
-  margin-bottom: 7px;
-}
-
-.np-key {
-  width: 98px;
-  height: 54px;
+  min-height: 54px;
+  padding: 8px 14px;
+  margin-bottom: 6px;
   border-radius: 14px;
-  background-color: #2c2c2e;
-  margin-left: 4px;
-  margin-right: 4px;
+  background-color: #1a1a1c;
   justify-content: center;
-  align-items: center;
 }
 
-.np-key-text {
+.mass-input-t {
   font-size: 28px;
   color: #ffffff;
 }
 
-.np-fn {
-  background-color: #3a3a3c;
+.mass-input-h {
+  font-size: 20px;
+  color: rgba(255,255,255,0.35);
 }
 
-.np-ok {
-  background-color: #0D6EFF;
-}
-
-.np-ok-text {
-  color: #ffffff;
-  font-weight: bold;
-}
-
-/* 质量结果行 */
 .mass-row {
-  background-color: #262626;
-  border-radius: 16px;
-  padding: 10px 14px;
-  margin-bottom: 8px;
   width: 316px;
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  border-radius: 14px;
+  background-color: #262626;
   flex-direction: column;
 }
 
@@ -356,22 +223,51 @@
   background-color: rgba(13,110,255,0.25);
 }
 
+.mass-f {
+  font-size: 24px;
+}
+
 .mass-value {
-  font-size: 30px;
+  font-size: 26px;
   color: #ffffff;
   font-weight: bold;
 }
 
-.mass-unit {
-  font-size: 20px;
-  color: rgba(255,255,255,0.4);
+/* 旧页面保留的标签/空状态 */
+.tab-row {
+  width: 316px;
+  flex-direction: row;
+  justify-content: space-between;
 }
 
-/* 空态提示 */
+.tab-item {
+  width: 153px;
+  height: 58px;
+  border-radius: 20px;
+  background-color: #262626;
+  justify-content: center;
+  align-items: center;
+}
+
+.tab-active {
+  background-color: #0d6eff;
+}
+
+.tab-text {
+  font-size: 26px;
+  color: rgba(255,255,255,0.6);
+}
+
+.tab-active-text {
+  font-size: 26px;
+  color: #ffffff;
+  font-weight: bold;
+}
+
 .empty-tip {
-  text-align: center;
-  color: rgba(255,255,255,0.35);
-  font-size: 24px;
-  margin-top: 20px;
   width: 316px;
+  margin-top: 20px;
+  font-size: 24px;
+  color: rgba(255,255,255,0.35);
+  text-align: center;
 }
