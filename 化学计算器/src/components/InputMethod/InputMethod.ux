@@ -230,7 +230,6 @@
         </div>
         <div style="width: 100%; flex-direction: row; justify-content: center; top:6px; padding:0 6px;">
           <img src="./assets/horizontal/cn.png" style="padding: 6px;width: 60px;height: 60px;" @click="onBtnClick('lang')" if="{{downFlag==='' && !numFlag && lang==='cn'}}" />
-          <img src="./assets/horizontal/jp.png" style="padding:6px;width:60px;height:60px;" @click="onBtnClick('lang')" if="{{downFlag==='' && !numFlag && lang==='jp'}}" />
           <div if="{{(lang === 'cn' || lang === 'jp') && !numFlag}}" style="margin-left: 6px;flex: 1;height: 60px;background-color:#262626;border-color: #333333; border-width: 3px; border-radius: 100px;flex-direction: row;align-items:center">
             <!-- 候选横滚行：整词在前、单字随后（拼音已在键盘上方独立小字行显示，这里不放 cval） -->
             <scroll id="cvalWaiting" scroll-x="{{true}}" style="position:absolute;width: 85%;height: 42px;">
@@ -240,8 +239,6 @@
             </scroll>
             <img if="{{resultRow0.length > 0}}" style="position:absolute;right: 8px; width: 60px;height: 40px;" src="./assets/horizontal/down2.png" @click="onBtnClick('down')" />
           </div>
-          <img src="./assets/horizontal/123.png" style="margin-left:6px;padding:6px;width:60px;height:60px;" @click="onBtnClick('switchNum_jp')" if="{{downFlag==='' && !numFlag && lang==='jp'}}" />
-        
           <img src="./assets/horizontal/en.png" style="padding: 6px;width: 60px;height: 60px;" @click="onBtnClick('lang')" if="{{downFlag==='' && !numFlag && lang==='en'}}" />
           <img src="./assets/horizontal/bigA.png" style="padding: 6px;margin-left: 6px;width:60px;height:60px;" @click="onBtnClick('switchLow')" if="{{downFlag==='' && upperFlag && lang==='en'&& !numFlag}}" />
           <img src="./assets/horizontal/a.png" style="padding: 6px;margin-left: 6px;width:60px;height:60px;" @click="onBtnClick('switchUpper')" if="{{downFlag==='' && !upperFlag && lang==='en'&& !numFlag}}" />
@@ -250,17 +247,14 @@
           <img if="{{!numFlag}}" src="./assets/horizontal/del.png" style="margin-left: 6px;padding: 6px;width: 60px;height: 60px;" @click="onBtnClick('D')" />
           <img else src="./assets/horizontal/del2.png" style="margin-left: 6px;padding: 6px;" @click="onBtnClick('D')" />
         </div>
-        <!-- 这里使用show会导致每次输入都会加载全部候选列表，很卡 -->
+        <!-- 下展候选：改用普通 scroll + text（与阅读器搜索结果同款交互，点击稳定），
+             不用 list/list-item（Vela 上 static list 的点击与刷新有兼容性问题） -->
         <div style="position: absolute;left: 0px;top: 0px;width: 100%;height: 252px;background-color: black; justify-content:center; flex-direction:column; align-items:center" if="{{downFlag==='down'}}">
-          <div static class="list67">
-            <list static style="width:100%;height:100%;">
-              <list-item type="waitingRows67" class="item67" for="{{itemArray in resultList2}}">
-                <div class="item column center" for="{{item in itemArray}}">
-                  <text class="calbtn-down-text" @click="onRsSelect(item)">{{item}}</text>
-                </div>
-              </list-item>
-            </list>
-          </div>
+          <scroll scroll-y="true" class="kbd-down-scroll">
+            <div class="kbd-down-row" for="{{item in resultList2Flat}}">
+              <text class="calbtn-down-text" @click="onRsSelect(item)">{{item}}</text>
+            </div>
+          </scroll>
           <img static style="margin-top:5px" src="./assets/horizontal/up2.png" @click="onBtnClick('down')" />
         </div>
       </div>
@@ -386,6 +380,8 @@ export default {
     cvalDisplay: "",
     resultList: [],
     resultList2: [],
+    // 下展候选的扁平数组（rect 屏普通 scroll 用）
+    resultList2Flat: [],
     // 多拼：整词候选（最前）及其与单字合并后的首页展示序列与对应整词标记
     resultWordList: [],
     resultRow0: [],
@@ -522,17 +518,8 @@ export default {
         this.resetResultList();
         break;
       case "lang":
-        if (this.keyboardtype === "T9") {
-          this.lang = this.lang === "cn" ? "en" : "cn";
-        } else {
-          if (this.lang === "cn") {
-            this.lang = "en";
-          } else if (this.lang === "en") {
-            this.lang = "jp";
-          } else {
-            this.lang = "cn";
-          }
-        }
+        // 仅保留 中文/英文 两种输入法（已按需求移除日文）
+        this.lang = this.lang === "cn" ? "en" : "cn";
         this.cval = "";
         this.clearWaiting();
         this.resetResultList();
@@ -694,6 +681,13 @@ export default {
     }
     if (array.length > 0) {
       this.resultList2.push(array);
+    }
+    // 扁平化一份供 rect 屏下展列表使用（去掉分页层级）
+    this.resultList2Flat = []
+    for (let i = 0; i < this.resultList2.length; i++) {
+      for (let j = 0; j < this.resultList2[i].length; j++) {
+        this.resultList2Flat.push(this.resultList2[i][j])
+      }
     }
   },
   getResultByWord(val) {
@@ -1004,6 +998,22 @@ export default {
 }
 .item67 {
 	height:50px;
+}
+/* rect 屏下展候选：滚动列表，整词/单字逐行显示，点击即选 */
+.kbd-down-scroll {
+	width:96.4%;
+	height:170px;
+	border-radius:30px;
+	background-color:#262626;
+	border:3px solid rgba(255,255,255,0.06);
+	padding:0px 10px;
+}
+.kbd-down-row {
+	width:100%;
+	height:52px;
+	justify-content:center;
+	align-items:center;
+	border-bottom:1px solid rgba(255,255,255,0.08);
 }
 .calbtn66 {
 	color:rgb(255,255,255);

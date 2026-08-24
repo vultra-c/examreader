@@ -3,6 +3,8 @@ export default {
   onInit() {
     // 全局数据容器：页面间传递反应/配平结果（this.$app.$data）
     this.$data.reaction = null
+    // 常用物质表 → 反应计算页 的跨页传递（选中的化学式）
+    this.$data.pendingFormula = ''
   }
 }
 </script>

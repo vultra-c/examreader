@@ -1,8 +1,8 @@
 {
   "package": "com.whyy.chemcalc",
   "name": "化学工具箱",
-  "versionName": "V26.8.33.CALC",
-  "versionCode": 2608330,
+  "versionName": "V26.8.34.CALC",
+  "versionCode": 2608340,
   "minPlatformVersion": 1200,
   "minAPILevel": 1,
   "icon": "/common/images/icon.png",
@@ -12,6 +12,9 @@
   "features": [
     {
       "name": "system.router"
+    },
+    {
+      "name": "system.app"
     },
     {
       "name": "system.prompt"
@@ -37,11 +40,20 @@
         "component": "index",
         "launchMode": "singleTask"
       },
+      "pages/reaction": {
+        "component": "reaction"
+      },
+      "pages/element": {
+        "component": "element"
+      },
       "pages/result": {
         "component": "result"
       },
       "pages/mass": {
         "component": "mass"
+      },
+      "pages/catalog": {
+        "component": "catalog"
       }
     }
   },

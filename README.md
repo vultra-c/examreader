@@ -6,8 +6,8 @@
 
 | 应用 | 安装包 | 包名 | 版本 |
 |------|--------|------|------|
-| 考点阅读器（闪念小抄） | [`release/com.whyy.snapnotes.release.V26.8.24.BAND.rpk`](release/com.whyy.snapnotes.release.V26.8.24.BAND.rpk) | `com.whyy.snapnotes` | `V26.8.24.BAND` |
-| 化学工具箱 | [`release/com.whyy.chemcalc.release.V26.8.33.CALC.rpk`](release/com.whyy.chemcalc.release.V26.8.33.CALC.rpk) | `com.whyy.chemcalc` | `V26.8.33.CALC` |
+| 考点阅读器（闪念小抄） | [`release/com.whyy.snapnotes.release.V26.8.25.BAND.rpk`](release/com.whyy.snapnotes.release.V26.8.25.BAND.rpk) | `com.whyy.snapnotes` | `V26.8.25.BAND` |
+| 化学工具箱 | [`release/com.whyy.chemcalc.release.V26.8.34.CALC.rpk`](release/com.whyy.chemcalc.release.V26.8.34.CALC.rpk) | `com.whyy.chemcalc` | `V26.8.34.CALC` |
 | Android 手机端 | [`release/com.whyy.snapnotes.android.v1.0.1-debug.apk`](release/com.whyy.snapnotes.android.v1.0.1-debug.apk) | `com.whyy.snapnotes` | `1.0.1 / 2` |
 
 `.rpk` 是 Vela 安装包，`.apk` 是 Android Debug 安装包。安装包索引和安装说明见 [`release/README.md`](release/README.md)。
@@ -48,7 +48,7 @@
 - TXT 按原有章节格式解析，JSON 按知识点结构解析。
 - 支持文件夹、多级目录、搜索、分页、百分比跳转和无缝长文阅读。
 - 支持通过 Android 手机端或 BandBurg 脚本传输 TXT/JSON。
-- 内置中文、英文、日文输入法，支持拼音连打和右滑返回。
+- 内置中文、英文输入法（已移除日文），支持拼音连打和右滑返回。
 - Android 端包名与 Vela 端统一为 `com.whyy.snapnotes`。
 
 ### 化学工具箱
@@ -56,8 +56,8 @@
 - 纯离线识别化学式和中文物质名称。
 - 自动推导生成物、配平常规化学方程式。
 - 按任意已知物质质量反推或正向计算全方程式计量结果。
-- 支持按 1～3 个元素检索本地预配平反应库。
-- 使用考点阅读器同款中文/英文/日文输入法，所有页面支持右滑返回。
+- 支持按 1～3 个元素检索本地预配平反应库，可输入中文名（铁 氧）或英文符号（Fe O）。
+- 首页为功能列表，点击进入对应计算界面；使用考点阅读器同款中文/英文输入法（已移除日文），所有页面支持右滑返回。
 
 ## 本地构建
 

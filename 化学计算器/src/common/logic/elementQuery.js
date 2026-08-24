@@ -6,9 +6,22 @@
 import { ELEMENT_BANK } from './elementBank.js'
 import { ATOMIC_MASSES } from './elements.js'
 import { parseFormula, molarMass } from './parser.js'
+import { NAME_MAP } from './substances.js'
 
 /** 已知元素符号集合（用于校验输入） */
 export const ELEMENT_SYMBOLS = Object.keys(ATOMIC_MASSES)
+
+/** 中文元素名 → 元素符号（氧→O、铁→Fe …，供元素查询输入） */
+const ELEMENT_CN = {
+  '氢': 'H', '氦': 'He', '锂': 'Li', '铍': 'Be', '硼': 'B',
+  '碳': 'C', '氮': 'N', '氧': 'O', '氟': 'F', '氖': 'Ne',
+  '钠': 'Na', '镁': 'Mg', '铝': 'Al', '硅': 'Si', '磷': 'P',
+  '硫': 'S', '氯': 'Cl', '氩': 'Ar', '钾': 'K', '钙': 'Ca',
+  '钛': 'Ti', '铬': 'Cr', '锰': 'Mn', '铁': 'Fe', '镍': 'Ni',
+  '铜': 'Cu', '锌': 'Zn', '砷': 'As', '溴': 'Br', '银': 'Ag',
+  '碘': 'I', '钡': 'Ba', '铂': 'Pt', '金': 'Au', '汞': 'Hg',
+  '铅': 'Pb', '锡': 'Sn', '钨': 'W'
+}
 
 /** 元素符号规范化：fe → Fe，h2o 里的输入不管；只处理单个符号 */
 export function normalizeSymbol(s) {
@@ -21,19 +34,41 @@ export function normalizeSymbol(s) {
 
 /**
  * 解析元素查询输入
- * @param {string} raw 如 "Fe O" / "fe+o" / "Na,C,O"
+ * 支持英文元素符号（Fe / fe+o）与中文物质名（铁 / 氧气 / 碳酸钙），可混输。
+ * @param {string} raw 如 "Fe O" / "fe+o" / "铁 氧" / "氧气 铁"
+ * @param {Object} [nameMap] 中文名 → 化学式 映射（substances.NAME_MAP）
  * @returns {{ok:true, elems:string[]}|{ok:false, error:string}}
  */
-export function parseElementQuery(raw) {
+export function parseElementQuery(raw, nameMap) {
   const s = String(raw || '').trim()
-  if (!s) return { ok: false, error: '请输入元素，如 Fe 或 Fe O' }
+  if (!s) return { ok: false, error: '请输入元素或名称，如 Fe O 或 铁 氧' }
   const tokens = s.split(/[\s+,，]+/).filter(Boolean)
-  if (tokens.length === 0) return { ok: false, error: '请输入元素' }
+  if (tokens.length === 0) return { ok: false, error: '请输入元素或名称' }
   const elems = []
+  const pushElem = (sym) => {
+    if (elems.indexOf(sym) === -1) elems.push(sym)
+  }
   for (const t of tokens) {
+    // 中文物质名 → 化学式 → 组成元素（如 氧气 → O；碳酸钙 → Ca,C,O）
+    if (/[\u4e00-\u9fa5]/.test(t)) {
+      const formula = nameMap ? nameMap[t] : null
+      if (formula) {
+        const pr = parseFormula(formula)
+        if (!pr.ok) return { ok: false, error: '无法识别物质：' + t }
+        for (const k in pr.counts) pushElem(k)
+        continue
+      }
+      // 单个元素的中文名（氧 → O、铁 → Fe）
+      const sym = ELEMENT_CN[t]
+      if (sym && ELEMENT_SYMBOLS.indexOf(sym) !== -1) {
+        pushElem(sym)
+        continue
+      }
+      return { ok: false, error: '无法识别物质：' + t }
+    }
     const sym = normalizeSymbol(t)
     if (!sym) return { ok: false, error: '无法识别元素：' + t }
-    if (elems.indexOf(sym) === -1) elems.push(sym)
+    pushElem(sym)
   }
   return { ok: true, elems }
 }

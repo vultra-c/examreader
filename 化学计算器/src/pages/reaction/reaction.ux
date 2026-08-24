@@ -1,0 +1,278 @@
+<import name="input-method" src="../../components/InputMethod/InputMethod.ux"></import>
+
+<!--
+  化学工具箱 · 反应计算页（336×480）
+  布局要点：输入卡与「计算反应」按钮全部放在屏幕上部 197px 以内，
+  键盘弹出（覆盖下部 225~283px）时也不会遮住任何可点元素 ——
+  这是「点计算没反应」的根治方案。
+  输入支持：化学式（Fe+O2）与中文名（铁+氧气），用 + 分隔。
+-->
+<template>
+  <div class="screen" @swipe="onSwipe">
+
+    <!-- 顶栏 -->
+    <div class="hd">
+      <div class="hd-back" @click="goBack"><text class="hd-back-t">‹</text></div>
+      <text class="hd-title">反应计算</text>
+      <div class="hd-hold"></div>
+    </div>
+
+    <!-- 输入卡：点击弹出/收起键盘 -->
+    <div class="input-card" @click="toggleKb">
+      <text if="{{inputStr.length == 0}}" class="input-ph">输入反应物，用 + 连接，如 Fe+O2 或 铁+氧气</text>
+      <div if="{{inputStr.length > 0}}" class="value-row">
+        <text class="input-value">{{inputStr}}</text>
+        <text if="{{showKb}}" class="input-caret">_</text>
+      </div>
+    </div>
+
+    <!-- 操作行：清空 + 计算反应（均在键盘遮挡区之上） -->
+    <div class="act-row">
+      <div class="btn-clear" @click="clearAll">
+        <text class="btn-clear-t">清空</text>
+      </div>
+      <div class="btn-calc" @click="onCalc">
+        <text class="btn-calc-t">计算反应</text>
+      </div>
+    </div>
+
+    <!-- 提示 -->
+    <text class="hint-tip">例：P+O2 → 4P+5O₂=2P₂O₅　｜　碳酸钙 → 分解反应</text>
+
+    <!-- 共享输入法 -->
+    <input-method hide="{{!showKb}}" keyboardtype="QWERTY" screentype="rect" maxlength="8"
+      vibratemode="short" @complete="onInput" @delete="onDel"></input-method>
+  </div>
+</template>
+
+<script>
+import router from '@system.router'
+import prompt from '@system.prompt'
+import { splitInputTokens, resolveToken } from '../../common/logic/parser.js'
+import { solveReaction } from '../../common/logic/reactions.js'
+import { NAME_MAP } from '../../common/logic/substances.js'
+
+export default {
+  private: {
+    inputStr: '',
+    showKb: false
+  },
+
+  onShow() {
+    // 从「常用物质表」带回的物质公式，自动拼到输入末尾
+    const pf = this.$app.$data.pendingFormula
+    if (pf) {
+      this.$app.$data.pendingFormula = ''
+      if (this.inputStr && this.inputStr.slice(-1) !== '+') {
+        this.inputStr += '+'
+      }
+      if (this.inputStr.length + pf.length <= 60) {
+        this.inputStr += pf
+      }
+      prompt.showToast({ message: '已加入 ' + pf, duration: 900 })
+    }
+  },
+
+  toggleKb() {
+    this.showKb = !this.showKb
+  },
+
+  onInput(e) {
+    if (!e || !e.detail) return
+    const ch = String(e.detail.content || '')
+    if (!ch || this.inputStr.length >= 60) return
+
+    // 中文名称：直接追加（如 铁、氧气、碳酸钙）
+    if (/[\u4e00-\u9fa5]/.test(ch)) {
+      this.inputStr += ch
+      return
+    }
+    // 分隔：空格 / 加号 / 全角加号 → +
+    if (ch === ' ' || ch === '+' || ch === '＋') {
+      if (this.inputStr && this.inputStr.slice(-1) !== '+') this.inputStr += '+'
+      return
+    }
+    // 字母：段首（+、(、[ 后或数字后）自动补大写；用户主动切大写锁定时原样输出
+    if (/^[A-Za-z]$/.test(ch)) {
+      const seg = this.inputStr.split(/[+()[\]\u4e00-\u9fa5]/).pop() || ''
+      const needUpper = seg === '' || /[0-9]$/.test(seg)
+      const lower = ch.toLowerCase()
+      const upper = ch.toUpperCase()
+      this.inputStr += (needUpper && ch === lower) ? upper : ch
+      return
+    }
+    // 数字、括号、小数点
+    if (/^[0-9()[\].]$/.test(ch)) {
+      this.inputStr += ch
+    }
+  },
+
+  onDel() {
+    if (this.inputStr.length > 0) {
+      this.inputStr = this.inputStr.slice(0, -1)
+    }
+  },
+
+  clearAll() {
+    this.inputStr = ''
+    this.showKb = false
+    prompt.showToast({ message: '已清空', duration: 700 })
+  },
+
+  onCalc() {
+    this.showKb = false
+    const raw = this.inputStr.trim()
+    if (!raw) { prompt.showToast({ message: '请先输入反应物', duration: 1500 }); return }
+
+    const tokens = splitInputTokens(raw)
+    if (!tokens.length) { prompt.showToast({ message: '无有效反应物', duration: 1500 }); return }
+
+    const formulas = []
+    for (let i = 0; i < tokens.length; i++) {
+      const resolved = resolveToken(tokens[i], NAME_MAP)
+      if (!resolved.ok) { prompt.showToast({ message: resolved.error, duration: 2200 }); return }
+      formulas.push(resolved.formula)
+    }
+    const result = solveReaction(formulas)
+    if (!result.ok) { prompt.showToast({ message: result.error, duration: 2600 }); return }
+
+    this.$app.$data.reaction = result.reaction
+    router.push({ uri: 'pages/result' })
+  },
+
+  goBack() { router.back() },
+
+  onSwipe(e) {
+    if (e && e.direction === 'right') {
+      if (this.showKb) this.showKb = false
+      else router.back()
+    }
+  },
+  onBackPress() {
+    router.back()
+    return true
+  }
+}
+</script>
+
+<style>
+@import '../../common/style.css';
+
+.screen {
+  width: 336px;
+  height: 480px;
+  background-color: #000000;
+  flex-direction: column;
+}
+
+/* ---- 顶栏 ---- */
+.hd {
+  width: 336px;
+  height: 52px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 16px 0 12px;
+}
+.hd-back {
+  width: 46px;
+  height: 46px;
+  border-radius: 23px;
+  background-color: #1c1c1e;
+  justify-content: center;
+  align-items: center;
+}
+.hd-back-t {
+  font-size: 34px;
+  line-height: 38px;
+  margin-top: -4px;
+  color: #ffffff;
+  font-weight: bold;
+}
+.hd-title {
+  font-size: 28px;
+  font-weight: bold;
+  color: #ffffff;
+}
+.hd-hold {
+  width: 46px;
+  height: 46px;
+}
+
+/* ---- 输入卡（键盘弹出区之上） ---- */
+.input-card {
+  width: 304px;
+  height: 82px;
+  margin: 6px 16px 0;
+  border-radius: 20px;
+  background-color: #161618;
+  border-width: 1px;
+  border-color: #2e2e33;
+  padding: 10px 14px;
+  justify-content: center;
+}
+.input-ph {
+  font-size: 20px;
+  line-height: 28px;
+  color: rgba(255, 255, 255, 0.38);
+}
+.value-row {
+  width: 276px;
+  flex-direction: row;
+}
+.input-value {
+  width: 258px;
+  font-size: 25px;
+  line-height: 33px;
+  color: #ffffff;
+  lines: 2;
+  text-overflow: ellipsis;
+}
+.input-caret {
+  font-size: 25px;
+  color: #0d84ff;
+}
+
+/* ---- 操作行 ---- */
+.act-row {
+  width: 304px;
+  height: 50px;
+  margin: 8px 16px 0;
+  flex-direction: row;
+  justify-content: space-between;
+}
+.btn-clear {
+  width: 86px;
+  height: 50px;
+  border-radius: 25px;
+  background-color: #1c1c1e;
+  justify-content: center;
+  align-items: center;
+}
+.btn-clear-t {
+  font-size: 22px;
+  color: rgba(255, 255, 255, 0.75);
+}
+.btn-calc {
+  width: 210px;
+  height: 50px;
+  border-radius: 25px;
+  background-color: #0d6eff;
+  justify-content: center;
+  align-items: center;
+}
+.btn-calc-t {
+  font-size: 23px;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.hint-tip {
+  width: 304px;
+  margin: 10px 16px 0;
+  font-size: 16px;
+  line-height: 22px;
+  color: rgba(255, 255, 255, 0.3);
+  lines: 2;
+}
+</style>

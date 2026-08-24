@@ -1,314 +1,92 @@
-<import name="input-method" src="../../components/InputMethod/InputMethod.ux"></import>
-
 <!--
-  化学工具箱 · 主页（336×480 竖屏）
-
-  设计原则（针对手环端点击失灵/卡顿问题的根治）：
-  1. 全页唯一布局体系：根节点固定 336×480，内部全部纵向流式排列，
-     不存在任何「透明遮罩/绝对定位层」压在按钮上 —— 点击区域即所见区域。
-  2. 所有可点元素都有显式宽高和背景色（部分机型上无背景的 hit-area 不稳定）。
-  3. 键盘由共享 InputMethod 组件承载，hide prop 直接驱动显隐；
-     打开时覆盖下半屏属预期行为，任何主动作执行前都会先收起键盘。
-  4. 节点数控制：常用物质目录懒构建（首次打开面板才生成 120 行数据）。
+  化学工具箱 · 主页（336×480）
+  风格对齐考点阅读器：顶部标题栏 + 功能列表，点击进入对应计算界面。
+  右滑 / 返回键退出应用。
 -->
-
 <template>
   <div class="screen" @swipe="onSwipe">
 
-    <!-- 顶栏：标题 + 常用物质入口 -->
+    <!-- 顶栏 -->
     <div class="hd">
+      <div class="hd-back" @click="exitApp"><text class="hd-back-t">‹</text></div>
       <text class="hd-title">化学工具箱</text>
-      <div class="hd-btn" @click="toggleReference">
-        <text class="{{referenceOpen ? 'hd-btn-t-on' : 'hd-btn-t'}}">{{referenceOpen ? '关闭' : '物质表'}}</text>
-      </div>
+      <div class="hd-hold"></div>
     </div>
 
-    <!-- 模式切换：反应计算 / 元素查询 -->
-    <div class="seg">
-      <div class="{{mode == 'reaction' ? 'seg-cell-on' : 'seg-cell'}}" @click="setMode('reaction')">
-        <text class="{{mode == 'reaction' ? 'seg-t-on' : 'seg-t'}}">反应计算</text>
-      </div>
-      <div class="{{mode == 'element' ? 'seg-cell-on' : 'seg-cell'}}" @click="setMode('element')">
-        <text class="{{mode == 'element' ? 'seg-t-on' : 'seg-t'}}">元素查询</text>
-      </div>
-    </div>
+    <!-- 副标题 -->
+    <text class="sub-tip">离线化学计算 · 反应 · 配平 · 计量</text>
 
-    <!-- 输入卡片：点击弹出/收起键盘 -->
-    <div class="input-card" @click="toggleKb">
-      <div if="{{inputStr.length == 0}}" class="input-empty">
-        <text class="input-ph-main">{{mode == 'reaction' ? '输入反应物，用 + 连接' : '输入元素，如 Fe O'}}</text>
-        <text class="input-ph-sub">{{mode == 'reaction' ? '例：铁+氧气 或 Fe+O₂' : '含全部输入元素的方程式'}}</text>
-      </div>
-      <text if="{{inputStr.length > 0}}" class="input-value">{{inputStr}}</text>
-      <text if="{{showKb}}" class="input-caret">_</text>
-    </div>
-
-    <!-- 主操作 -->
-    <div class="act" @click="onAction">
-      <text class="act-t">{{mode == 'reaction' ? '计算反应' : '查询方程'}}</text>
-    </div>
-
-    <!-- 功能区 A：元素查询结果（替换下方网格） -->
-    <div if="{{elemSearched && !referenceOpen}}" class="panel">
-      <div class="panel-hd">
-        <text class="panel-hd-t">匹配方程式</text>
-        <text class="panel-hd-n">{{elementResults.length}} 条</text>
-      </div>
-      <text if="{{elementResults.length == 0}}" class="panel-none">没有同时含这些元素的方程式</text>
-      <scroll if="{{elementResults.length > 0}}" scroll-y="true" class="panel-list">
-        <div class="eq-item" for="{{elementResults}}" tid="rid" @click="openEquation($item)">
-          <text class="eq-item-text">{{$item.text}}</text>
-          <text class="eq-item-type">{{$item.type}}</text>
+    <!-- 功能列表 -->
+    <div class="menu">
+      <div class="menu-item" @click="goReaction">
+        <div class="mi-badge mi-b-blue"><text class="mi-badge-t">反</text></div>
+        <div class="mi-copy">
+          <text class="mi-title">反应计算</text>
+          <text class="mi-sub">输入反应物，自动推导并配平方程式</text>
         </div>
-      </scroll>
-    </div>
+        <text class="mi-arrow">›</text>
+      </div>
 
-    <!-- 功能区 B：常用物质目录 -->
-    <div if="{{referenceOpen}}" class="panel">
-      <div class="panel-hd">
-        <text class="panel-hd-t">常用物质（点选加入）</text>
-        <text class="panel-close" @click="toggleReference">×</text>
-      </div>
-      <scroll scroll-y="true" class="panel-list">
-        <div class="ref-item" for="{{catalogRows}}" tid="rid" @click="pickName($item)">
-          <text class="ref-item-t">{{$item.label}}</text>
+      <div class="menu-item" @click="goElement">
+        <div class="mi-badge mi-b-green"><text class="mi-badge-t">元</text></div>
+        <div class="mi-copy">
+          <text class="mi-title">元素查询</text>
+          <text class="mi-sub">按元素或物质名称查找方程式</text>
         </div>
-      </scroll>
-    </div>
+        <text class="mi-arrow">›</text>
+      </div>
 
-    <!-- 功能区 C：四宫格快捷入口（默认态） -->
-    <div if="{{!elemSearched && !referenceOpen}}" class="grid">
-      <div class="g-card" @click="openMass(false)">
-        <div class="g-icon"><text class="g-icon-t">质</text></div>
-        <div class="g-copy">
-          <text class="g-title">质量计算</text>
-          <text class="g-sub">已知质量求各物</text>
+      <div class="menu-item" @click="goMass">
+        <div class="mi-badge mi-b-orange"><text class="mi-badge-t">质</text></div>
+        <div class="mi-copy">
+          <text class="mi-title">质量计算</text>
+          <text class="mi-sub">已知一种物质质量，推算全部物质</text>
         </div>
+        <text class="mi-arrow">›</text>
       </div>
-      <div class="g-card" @click="openMass(true)">
-        <div class="g-icon g-icon-alt"><text class="g-icon-t-alt">逆</text></div>
-        <div class="g-copy">
-          <text class="g-title">反向计算</text>
-          <text class="g-sub">由生成物反推</text>
+
+      <div class="menu-item" @click="goCatalog">
+        <div class="mi-badge mi-b-purple"><text class="mi-badge-t">表</text></div>
+        <div class="mi-copy">
+          <text class="mi-title">常用物质表</text>
+          <text class="mi-sub">浏览常见物质，点选填入反应计算</text>
         </div>
-      </div>
-      <div class="g-card" @click="gotoElementMode">
-        <div class="g-icon"><text class="g-icon-t">元</text></div>
-        <div class="g-copy">
-          <text class="g-title">元素查询</text>
-          <text class="g-sub">按元素找方程</text>
-        </div>
-      </div>
-      <div class="g-card" @click="clearAll">
-        <div class="g-icon g-icon-warn"><text class="g-icon-t-warn">清</text></div>
-        <div class="g-copy">
-          <text class="g-title">清空重置</text>
-          <text class="g-sub">重新开始输入</text>
-        </div>
+        <text class="mi-arrow">›</text>
       </div>
     </div>
 
-    <!-- 共享输入法：与考点阅读器同款，hide 直接驱动 -->
-    <input-method hide="{{!showKb}}" keyboardtype="QWERTY" screentype="rect" maxlength="60"
-      vibratemode="short" @complete="onInput" @delete="onDel"></input-method>
+    <!-- 底部说明 -->
+    <text class="foot-tip">支持化学式（Fe+O2）与中文名（铁+氧气）</text>
   </div>
 </template>
 
 <script>
 import router from '@system.router'
-import prompt from '@system.prompt'
-import { splitInputTokens, resolveToken } from '../../common/logic/parser.js'
-import { solveReaction } from '../../common/logic/reactions.js'
-import { NAME_MAP, CATALOG, formulaName } from '../../common/logic/substances.js'
-import { parseElementQuery, searchEquations, buildReactionFromBank, equationText } from '../../common/logic/elementQuery.js'
+import app from '@system.app'
 
 export default {
-  private: {
-    mode: 'reaction',        // reaction=反应推导 element=元素查方程
-    inputStr: '',
-    showKb: false,
-    elemSearched: false,
-    elementResults: [],
-    referenceOpen: false,
-    catalogRows: []
+  goReaction() {
+    router.push({ uri: 'pages/reaction' })
   },
-
-  setMode(next) {
-    if (this.mode === next) return
-    this.mode = next
-    this.inputStr = ''
-    this.showKb = false
-    this.elemSearched = false
-    this.elementResults = []
+  goElement() {
+    router.push({ uri: 'pages/element' })
   },
-
-  toggleKb() {
-    this.referenceOpen = false
-    this.showKb = !this.showKb
-  },
-
-  /** 输入法回传单字符；按模式过滤，非法字符静默丢弃 */
-  onInput(e) {
-    if (!e || !e.detail) return
-    const ch = String(e.detail.content || '')
-    if (!ch || this.inputStr.length >= 120) return
-
-    if (this.mode === 'element') {
-      // 元素查询：仅接受字母/数字，分隔符统一折叠为单个空格
-      if (/^[A-Za-z0-9]+$/.test(ch)) {
-        this.inputStr += ch
-      } else if (this.inputStr && this.inputStr.slice(-1) !== ' ') {
-        this.inputStr += ' '
-      }
-      return
-    }
-
-    // 反应计算：加号去重；字母自动处理大小写（新段首/数字后补大写，
-    // 其余小写 —— 与化学式书写规则一致，用户通过大写键主动输入的大写原样保留）
-    if (ch === ' ' || ch === '+') {
-      if (this.inputStr && this.inputStr.slice(-1) !== '+') this.inputStr += '+'
-      return
-    }
-    if (/^[A-Za-z]$/.test(ch)) {
-      const seg = this.inputStr.split(/[+()[\]]/).pop() || ''
-      const needUpper = seg === '' || /[0-9]$/.test(seg)
-      const lower = ch.toLowerCase()
-      const upper = ch.toUpperCase()
-      this.inputStr += (needUpper && ch === lower) ? upper : ch
-      return
-    }
-    if (/^[0-9()[\]]$/.test(ch)) {
-      this.inputStr += ch
-    }
-  },
-
-  onDel() {
-    if (this.inputStr.length > 0) this.inputStr = this.inputStr.slice(0, -1)
-  },
-
-  onAction() {
-    this.showKb = false
-    if (this.mode === 'element') this.doElementSearch()
-    else this.calcReaction()
-  },
-
-  calcReaction() {
-    const raw = this.inputStr.trim()
-    if (!raw) { prompt.showToast({ message: '请先输入反应物', duration: 1500 }); return }
-    const tokens = splitInputTokens(raw)
-    if (!tokens.length) { prompt.showToast({ message: '无有效反应物', duration: 1500 }); return }
-
-    const formulas = []
-    for (let i = 0; i < tokens.length; i++) {
-      const resolved = resolveToken(tokens[i], NAME_MAP)
-      if (!resolved.ok) { prompt.showToast({ message: resolved.error, duration: 2200 }); return }
-      formulas.push(resolved.formula)
-    }
-    const result = solveReaction(formulas)
-    if (!result.ok) { prompt.showToast({ message: result.error, duration: 2600 }); return }
-
-    this.$app.$data.reaction = result.reaction
-    router.push({ uri: 'pages/result' })
-  },
-
-  doElementSearch() {
-    const query = parseElementQuery(this.inputStr)
-    if (!query.ok) { prompt.showToast({ message: query.error, duration: 2000 }); return }
-
-    let hits = []
-    try {
-      hits = searchEquations(query.elems, 50)
-    } catch (err) {
-      hits = []
-    }
-    const rows = []
-    for (let i = 0; i < hits.length; i++) {
-      rows.push({ text: equationText(hits[i]), type: hits[i].t, entry: hits[i], rid: 'e' + i })
-    }
-    this.elementResults = rows
-    this.elemSearched = true
-    this.showKb = false
-    if (rows.length === 0) prompt.showToast({ message: '未找到匹配方程式', duration: 1800 })
-  },
-
-  gotoElementMode() {
-    this.setMode('element')
-    this.referenceOpen = false
-    this.elemSearched = false
-    this.elementResults = []
-    this.showKb = true
-  },
-
-  openEquation(item) {
-    this.$app.$data.reaction = buildReactionFromBank(item.entry)
-    router.push({ uri: 'pages/result' })
-  },
-
-  openMass(reverse) {
-    const reaction = this.$app.$data.reaction
-    if (!reaction) {
-      prompt.showToast({ message: '请先计算一条方程式', duration: 1600 })
-      return
-    }
-    this.$app.$data.massKnownIdx = reverse ? reaction.reactants.length : 0
+  goMass() {
     router.push({ uri: 'pages/mass' })
   },
-
-  /** 首次打开物质表才构建 120 行目录数据（懒加载，降低首帧负担） */
-  toggleReference() {
-    this.showKb = false
-    this.referenceOpen = !this.referenceOpen
-    if (this.referenceOpen && this.catalogRows.length === 0) {
-      const seen = {}
-      const rows = []
-      let n = 0
-      for (let g = 0; g < CATALOG.length; g++) {
-        const items = CATALOG[g].items
-        for (let i = 0; i < items.length; i++) {
-          const f = items[i]
-          if (seen[f]) continue
-          seen[f] = true
-          const name = formulaName(f)
-          rows.push({ label: name && name !== f ? name + ' ' + f : f, rid: 'c' + (n++) })
-        }
-      }
-      this.catalogRows = rows
-    }
+  goCatalog() {
+    router.push({ uri: 'pages/catalog' })
   },
-
-  pickName(item) {
-    const label = String(item.label || '')
-    const cut = label.indexOf(' ')
-    const name = cut > 0 ? label.substring(0, cut) : label
-    if (!name) return
-    if (!this.inputStr || this.inputStr.slice(-1) === '+') this.inputStr += name
-    else if (this.inputStr.length + name.length < 120) this.inputStr += '+' + name
-    prompt.showToast({ message: '已加入 ' + name, duration: 800 })
+  exitApp() {
+    app.terminate()
   },
-
-  /** 一键清空：输入、结果、面板、键盘全部复位 */
-  clearAll() {
-    this.inputStr = ''
-    this.showKb = false
-    this.elemSearched = false
-    this.elementResults = []
-    this.referenceOpen = false
-    prompt.showToast({ message: '已清空', duration: 800 })
-  },
-
   onSwipe(e) {
     if (e && e.direction === 'right') {
-      if (this.showKb || this.referenceOpen) {
-        this.showKb = false
-        this.referenceOpen = false
-      } else {
-        router.back()
-      }
+      app.terminate()
     }
   },
-
   onBackPress() {
-    router.back()
+    app.terminate()
     return true
   }
 }
@@ -331,278 +109,105 @@ export default {
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 16px 0 18px;
+  padding: 14px 16px 0 12px;
+}
+.hd-back {
+  width: 48px;
+  height: 48px;
+  border-radius: 24px;
+  background-color: #1c1c1e;
+  justify-content: center;
+  align-items: center;
+}
+.hd-back-t {
+  font-size: 36px;
+  line-height: 40px;
+  margin-top: -4px;
+  color: #ffffff;
+  font-weight: bold;
 }
 .hd-title {
-  font-size: 34px;
-  line-height: 42px;
+  font-size: 30px;
   font-weight: bold;
   color: #ffffff;
 }
-.hd-btn {
-  min-width: 96px;
-  height: 44px;
-  border-radius: 22px;
-  background-color: #1c1c1e;
-  justify-content: center;
-  align-items: center;
-  padding: 0 16px;
-}
-.hd-btn-t {
-  font-size: 22px;
-  color: rgba(255, 255, 255, 0.75);
-}
-.hd-btn-t-on {
-  font-size: 22px;
-  font-weight: bold;
-  color: #0d84ff;
+.hd-hold {
+  width: 48px;
+  height: 48px;
 }
 
-/* ---- 模式切换 ---- */
-.seg {
-  width: 304px;
-  height: 52px;
-  margin: 10px 16px 0;
-  border-radius: 26px;
-  background-color: #1a1a1c;
-  flex-direction: row;
-}
-.seg-cell {
-  width: 152px;
-  height: 52px;
-  border-radius: 26px;
-  background-color: #1a1a1c;
-  justify-content: center;
-  align-items: center;
-}
-.seg-cell-on {
-  width: 152px;
-  height: 52px;
-  border-radius: 26px;
-  background-color: #0d6eff;
-  justify-content: center;
-  align-items: center;
-}
-.seg-t {
-  font-size: 25px;
-  color: rgba(255, 255, 255, 0.55);
-}
-.seg-t-on {
-  font-size: 25px;
-  font-weight: bold;
-  color: #ffffff;
+.sub-tip {
+  width: 336px;
+  text-align: center;
+  font-size: 17px;
+  color: rgba(255, 255, 255, 0.35);
+  margin-top: 2px;
 }
 
-/* ---- 输入卡片 ---- */
-.input-card {
+/* ---- 功能列表 ---- */
+.menu {
   width: 304px;
-  height: 90px;
-  margin: 10px 16px 0;
-  border-radius: 22px;
+  margin: 14px 16px 0;
+  flex-direction: column;
+}
+.menu-item {
+  width: 304px;
+  height: 84px;
+  border-radius: 20px;
   background-color: #161618;
   border-width: 1px;
-  border-color: #2e2e33;
-  padding: 10px 16px;
-  justify-content: center;
-}
-.input-empty {
-  flex-direction: column;
-}
-.input-ph-main {
-  font-size: 23px;
-  line-height: 31px;
-  color: rgba(255, 255, 255, 0.6);
-}
-.input-ph-sub {
-  font-size: 18px;
-  line-height: 25px;
-  color: rgba(255, 255, 255, 0.35);
-  margin-top: 3px;
-}
-.input-value {
-  width: 272px;
-  font-size: 26px;
-  line-height: 34px;
-  color: #ffffff;
-  lines: 2;
-  text-overflow: ellipsis;
-}
-.input-caret {
-  font-size: 26px;
-  color: #0d84ff;
-}
-
-/* ---- 主操作 ---- */
-.act {
-  width: 304px;
-  height: 58px;
-  margin: 10px 16px 0;
-  border-radius: 29px;
-  background-color: #0d6eff;
-  justify-content: center;
-  align-items: center;
-}
-.act-t {
-  font-size: 27px;
-  font-weight: bold;
-  color: #ffffff;
-}
-
-/* ---- 四宫格 ---- */
-.grid {
-  width: 304px;
-  height: 126px;
-  margin: 10px 16px 0;
-  flex-direction: row;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  align-content: space-between;
-}
-.g-card {
-  width: 147px;
-  height: 58px;
-  border-radius: 18px;
-  background-color: #1c1c1e;
-  flex-direction: row;
-  align-items: center;
-  padding-left: 9px;
-}
-.g-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 13px;
-  background-color: rgba(13, 110, 255, 0.22);
-  justify-content: center;
-  align-items: center;
-  margin-right: 8px;
-}
-.g-icon-alt {
-  background-color: rgba(48, 176, 122, 0.22);
-}
-.g-icon-warn {
-  background-color: rgba(255, 159, 10, 0.2);
-}
-.g-icon-t {
-  font-size: 22px;
-  font-weight: bold;
-  color: #4da3ff;
-}
-.g-icon-t-alt {
-  font-size: 22px;
-  font-weight: bold;
-  color: #35d08e;
-}
-.g-icon-t-warn {
-  font-size: 22px;
-  font-weight: bold;
-  color: #ffb340;
-}
-.g-copy {
-  width: 88px;
-  flex-direction: column;
-}
-.g-title {
-  font-size: 20px;
-  line-height: 26px;
-  font-weight: bold;
-  color: #ffffff;
-}
-.g-sub {
-  font-size: 14px;
-  line-height: 19px;
-  color: rgba(255, 255, 255, 0.4);
-  lines: 1;
-  text-overflow: ellipsis;
-}
-
-/* ---- 结果/目录面板 ---- */
-.panel {
-  width: 304px;
-  height: 184px;
-  margin: 10px 16px 0;
-  border-radius: 20px;
-  background-color: #141416;
-  border-width: 1px;
   border-color: #2a2a30;
-  flex-direction: column;
-  padding: 10px 12px;
-}
-.panel-hd {
-  width: 280px;
-  height: 30px;
+  margin-bottom: 10px;
   flex-direction: row;
-  justify-content: space-between;
   align-items: center;
+  padding: 0 14px;
 }
-.panel-hd-t {
-  font-size: 21px;
+.mi-badge {
+  width: 46px;
+  height: 46px;
+  border-radius: 15px;
+  justify-content: center;
+  align-items: center;
+  margin-right: 12px;
+}
+.mi-b-blue { background-color: rgba(13, 110, 255, 0.22); }
+.mi-b-green { background-color: rgba(48, 176, 122, 0.22); }
+.mi-b-orange { background-color: rgba(255, 159, 10, 0.2); }
+.mi-b-purple { background-color: rgba(167, 118, 255, 0.22); }
+.mi-badge-t {
+  font-size: 24px;
   font-weight: bold;
   color: #ffffff;
 }
-.panel-hd-n {
-  font-size: 17px;
-  color: #4da3ff;
-}
-.panel-close {
-  width: 40px;
-  height: 30px;
-  text-align: center;
-  font-size: 28px;
-  color: rgba(255, 255, 255, 0.65);
-}
-.panel-none {
-  width: 280px;
-  text-align: center;
-  font-size: 18px;
-  color: rgba(255, 255, 255, 0.4);
-  margin-top: 46px;
-}
-.panel-list {
-  width: 280px;
-  height: 140px;
-  margin-top: 5px;
-}
-
-.eq-item {
-  width: 280px;
-  height: 52px;
-  border-radius: 12px;
-  background-color: #222226;
-  padding: 5px 10px;
-  margin-bottom: 6px;
+.mi-copy {
+  flex: 1;
   flex-direction: column;
-  justify-content: center;
 }
-.eq-item-text {
-  width: 260px;
-  font-size: 18px;
-  line-height: 23px;
+.mi-title {
+  font-size: 23px;
+  line-height: 30px;
+  font-weight: bold;
   color: #ffffff;
+}
+.mi-sub {
+  font-size: 15px;
+  line-height: 20px;
+  color: rgba(255, 255, 255, 0.4);
   lines: 1;
   text-overflow: ellipsis;
+  margin-top: 2px;
 }
-.eq-item-type {
-  font-size: 14px;
-  line-height: 18px;
-  color: #4da3ff;
-  margin-top: 1px;
+.mi-arrow {
+  font-size: 34px;
+  color: rgba(255, 255, 255, 0.35);
+  margin-left: 8px;
 }
 
-.ref-item {
-  width: 280px;
-  height: 38px;
-  border-radius: 10px;
-  background-color: #222226;
-  padding: 0 10px;
-  margin-bottom: 5px;
-  justify-content: center;
-}
-.ref-item-t {
-  width: 260px;
-  font-size: 18px;
-  line-height: 24px;
-  color: rgba(255, 255, 255, 0.85);
-  lines: 1;
-  text-overflow: ellipsis;
+.foot-tip {
+  width: 336px;
+  text-align: center;
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.28);
+  margin-top: 2px;
 }
 </style>

@@ -2,7 +2,8 @@
 
 <!--
   化学工具箱 · 质量计算页（336×480）
-  流程：选已知物质 → 输入质量（共享输入法数字盘）→ 计算 → 全方程式各物质质量/物质的量。
+  流程：选择已知物质 → 输入质量（数字键盘）→ 计算 → 列出全部物质质量/物质的量。
+  支持任选反应物或生成物（含反向推算）。输入区全部位于键盘遮挡区之上。
 -->
 <template>
   <div class="screen" @swipe="onSwipe">
@@ -13,11 +14,17 @@
       <div class="hd-hold"></div>
     </div>
 
-    <text if="{{!valid}}" class="none-tip">未找到反应数据</text>
+    <!-- 无反应数据兜底 -->
+    <div if="{{!valid}}" class="none-wrap">
+      <text class="none-tip">还没有可用的反应方程式</text>
+      <div class="none-btn" @click="goReaction">
+        <text class="none-btn-t">去反应计算</text>
+      </div>
+    </div>
 
     <div if="{{valid}}" class="body">
-      <!-- 第一步：选已知物质 -->
-      <text class="sec-label">1 · 选择已知质量的物质</text>
+      <!-- 1 · 选已知物质 -->
+      <text class="sec-label">选择已知质量的物质</text>
       <scroll scroll-x="true" class="chip-scroll">
         <div class="chip-row">
           <div class="{{knownIdx == $item.idx ? 'chip-on' : 'chip'}}"
@@ -27,20 +34,19 @@
         </div>
       </scroll>
 
-      <!-- 第二步：输入质量 -->
-      <text class="sec-label">2 · 输入已知质量（克）</text>
-      <div class="mass-field" @click="toggleKb">
-        <text if="{{massStr.length > 0}}" class="mass-field-v">{{massStr}} g</text>
-        <text else class="mass-field-h">点击输入，键盘切到 123</text>
+      <!-- 2 · 输入质量 + 计算（同一行，均在键盘区之上） -->
+      <div class="row2">
+        <div class="mass-field" @click="toggleKb">
+          <text if="{{massStr.length > 0}}" class="mass-field-v">{{massStr}} g</text>
+          <text else class="mass-field-h">质量(克)</text>
+        </div>
+        <div class="calc-btn" @click="onCompute">
+          <text class="calc-btn-t">计算</text>
+        </div>
       </div>
 
-      <!-- 计算 -->
-      <div class="calc-btn" @click="onCompute">
-        <text class="calc-btn-t">计 算</text>
-      </div>
-
-      <!-- 第三步：结果 -->
-      <text if="{{hasResult}}" class="sec-label">3 · 各物质质量</text>
+      <!-- 3 · 结果 -->
+      <text if="{{hasResult}}" class="sec-label res-label">各物质质量</text>
       <scroll if="{{hasResult}}" scroll-y="true" class="res-list">
         <div class="{{item.known ? 'res-row-known' : 'res-row'}}" for="{{resultRows}}" tid="rid">
           <div class="res-line">
@@ -52,7 +58,7 @@
       </scroll>
     </div>
 
-    <input-method hide="{{!showKeyboard}}" keyboardtype="QWERTY" screentype="rect" maxlength="12"
+    <input-method hide="{{!showKeyboard}}" keyboardtype="QWERTY" screentype="rect" maxlength="8"
       vibratemode="short" @complete="onInput" @delete="onDel"></input-method>
   </div>
 </template>
@@ -96,7 +102,6 @@ export default {
     this.valid = true
     this._rxn = r
 
-    // 反向计算入口：已知量是第一个生成物（下标 = 反应物数）
     const wantIdx = this.$app.$data.massKnownIdx
     this.knownIdx = (typeof wantIdx === 'number' && wantIdx >= 0 && wantIdx < r.coefs.length) ? wantIdx : 0
 
@@ -163,6 +168,10 @@ export default {
     this.hasResult = true
   },
 
+  goReaction() {
+    router.push({ uri: 'pages/reaction' })
+  },
+
   goBack() { router.back() },
 
   onSwipe(e) {
@@ -190,99 +199,130 @@ export default {
 
 .hd {
   width: 336px;
-  height: 66px;
+  height: 48px;
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 16px 0 12px;
+  padding: 0 16px 0 12px;
 }
 .hd-back {
-  width: 48px;
-  height: 48px;
-  border-radius: 24px;
+  width: 46px;
+  height: 46px;
+  border-radius: 23px;
   background-color: #1c1c1e;
   justify-content: center;
   align-items: center;
 }
 .hd-back-t {
-  font-size: 36px;
-  line-height: 40px;
+  font-size: 34px;
+  line-height: 38px;
   margin-top: -4px;
   color: #ffffff;
   font-weight: bold;
 }
 .hd-title {
-  font-size: 30px;
+  font-size: 28px;
   font-weight: bold;
   color: #ffffff;
 }
 .hd-hold {
-  width: 48px;
-  height: 48px;
+  width: 46px;
+  height: 46px;
 }
 
-.none-tip {
+/* ---- 无数据兜底 ---- */
+.none-wrap {
   width: 336px;
-  text-align: center;
-  font-size: 24px;
-  color: rgba(255, 255, 255, 0.35);
-  margin-top: 180px;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+.none-tip {
+  font-size: 22px;
+  color: rgba(255, 255, 255, 0.45);
+}
+.none-btn {
+  width: 190px;
+  height: 52px;
+  border-radius: 26px;
+  background-color: #0d6eff;
+  justify-content: center;
+  align-items: center;
+  margin-top: 18px;
+}
+.none-btn-t {
+  font-size: 23px;
+  font-weight: bold;
+  color: #ffffff;
 }
 
+/* ---- 主体 ---- */
 .body {
   width: 336px;
   flex-direction: column;
-  padding: 2px 16px 0;
+  padding: 0 16px;
 }
 
 .sec-label {
   width: 304px;
-  font-size: 17px;
+  font-size: 16px;
+  line-height: 20px;
   color: rgba(255, 255, 255, 0.45);
-  margin: 8px 2px 5px;
+  margin: 2px 2px 4px;
+}
+.res-label {
+  margin-top: 10px;
 }
 
 .chip-scroll {
   width: 304px;
-  height: 50px;
+  height: 42px;
 }
 .chip-row {
   flex-direction: row;
 }
 .chip {
-  height: 46px;
-  border-radius: 23px;
+  height: 40px;
+  border-radius: 20px;
   background-color: #1c1c1e;
-  padding: 0 18px;
+  padding: 0 16px;
   margin-right: 8px;
   justify-content: center;
   align-items: center;
   flex-shrink: 0;
 }
 .chip-on {
-  height: 46px;
-  border-radius: 23px;
+  height: 40px;
+  border-radius: 20px;
   background-color: #0d6eff;
-  padding: 0 18px;
+  padding: 0 16px;
   margin-right: 8px;
   justify-content: center;
   align-items: center;
   flex-shrink: 0;
 }
 .chip-t {
-  font-size: 21px;
+  font-size: 20px;
   color: rgba(255, 255, 255, 0.72);
 }
 .chip-t-on {
-  font-size: 21px;
+  font-size: 20px;
   font-weight: bold;
   color: #ffffff;
 }
 
-.mass-field {
+.row2 {
   width: 304px;
-  height: 54px;
-  border-radius: 16px;
+  height: 50px;
+  margin-top: 8px;
+  flex-direction: row;
+  justify-content: space-between;
+}
+.mass-field {
+  width: 190px;
+  height: 50px;
+  border-radius: 25px;
   background-color: #161618;
   border-width: 1px;
   border-color: #2e2e33;
@@ -290,33 +330,32 @@ export default {
   justify-content: center;
 }
 .mass-field-v {
-  font-size: 26px;
+  font-size: 25px;
   color: #ffffff;
   font-weight: bold;
 }
 .mass-field-h {
-  font-size: 19px;
+  font-size: 18px;
   color: rgba(255, 255, 255, 0.35);
 }
-
 .calc-btn {
-  width: 304px;
-  height: 54px;
-  border-radius: 27px;
+  width: 106px;
+  height: 50px;
+  border-radius: 25px;
   background-color: #0d6eff;
   justify-content: center;
   align-items: center;
-  margin-top: 10px;
 }
 .calc-btn-t {
-  font-size: 25px;
+  font-size: 23px;
   font-weight: bold;
   color: #ffffff;
 }
 
 .res-list {
   width: 304px;
-  height: 160px;
+  height: 180px;
+  margin-top: 4px;
 }
 .res-row {
   width: 304px;
