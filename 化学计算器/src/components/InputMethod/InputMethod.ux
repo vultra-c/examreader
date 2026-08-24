@@ -1,17 +1,15 @@
 <template>
-  <!-- 键盘根节点：可见性完全由父组件传入的 hide prop 直接驱动（show="{{!hide}}"），
+  <!-- 键盘根节点：可见性直接由父组件传入的 hide prop 驱动（show="{{!hide}}"），
        不依赖 $watch 链与 setTimeout 定时器 —— 部分手环机型上 watch/定时器链不可靠，
-       曾导致 kbdState 停在隐藏态、键盘永不出现（且以 opacity:0 形式驻留挡住下层点击）。
-       注意：if 必须放在根节点内部的包装 div 上（曾把 if 放到根节点导致部分机型
-       挂载/展开时直接崩溃重启），根节点本身只挂 show。
-       入场动画只是锦上添花：watch 可靠时类名切到 kbd-play 播放滑入动画，
-       watch 失灵时键盘也会立即完整可见可用。 -->
-  <div class="kbd-layer {{kbdState}}" show="{{!hide}}" style="flex-direction: column;">
-    <!-- 键盘内容懒建：外 if 保证键盘从未弹出时整个子树不进 VDOM（chat/search 首进 1s 卡顿根因：
+       曾导致键盘永久不可见（且以 opacity:0 形式驻留挡住下层点击）。
+       if 只挂在内部包装层（挂在根节点上会导致部分机型挂载/展开时崩溃重启）。
+       入场动画仅锦上添花：watch 失灵时键盘也立即完整可见可用。 -->
+  <div class="kbd-layer {{kbdState}}" style="flex-direction: column;" show="{{!hide}}">
+    <!-- 键盘内容懒建：外 if 保证键盘隐藏时整个子树不进 VDOM（chat/search 首进 1s 卡顿根因：
          旧实现 show 只是不可见，200+ 节点/图片在进页瞬间全部创建），首次弹出才创建，
-         之后 keyboardCreated 保活、hide 切换只走 show 显隐，不重复重建。 -->
+         之后 keyboardCreated 保活、hide 切换只走内层 show 显隐，不重复重建。 -->
     <div if="{{!hide || keyboardCreated}}">
-      <div style="background-color:black;flex-direction: column;">
+      <div style="background-color:black;flex-direction: column;" >
       <!-- 拼音小字行：键盘框外上方单独一行，黑底覆盖，仅中/日模式且有 cval 时显示，只展示不可点。
            circle 屏彻底不建此节点（键盘固定 480x321，外置 28px 行会挤压键盘且顶部多一条黑条），
            circle 的拼音改在键盘内部绝对定位显示；if 而非 show：show 隐藏时节点仍在 VDOM，
@@ -172,7 +170,7 @@
       <!-- 方屏67 -->
       <div if="{{screentype==='rect'}}" style="width: 100%;height: 255px;flex-direction: column">
         <!-- 九键中文 -->
-        <div if="{{keyboardtype=='T9' && !numFlag}}" style="position:absolute;top:-11px;width:100%;height:276px;justify-content: center;">
+        <div if="{{keyboardtype=='T9' && !numFlag}}" style="position:absolute;top:0px;width:100%;height:276px;justify-content: center;">
           <div style="top:77px;height:189px;width:100%;align-items: stretch;justify-content: space-between;flex-direction: column;padding:6px 3px">
             <div class="keyboard-rows-rect-t9">
               <text class="calbtnt9 calbtnt9-rect" @click="onSelect('select')">
@@ -191,7 +189,7 @@
             </div>
           </div>
         </div>
-        <div else style="position:absolute;top:-11px;width:100%;height:276px;justify-content: center">
+        <div else style="position:absolute;top:0px;width:100%;height:276px;justify-content: center">
           <progress percent="{{percent67}}" style="position:absolute;bottom: 12px;width:80px;color:#ffffff;stroke-width:6px;layer-color:#262626;"></progress>
           <scroll id="keyboard67" scroll-x="{{true}}" onscroll="handelScroll">
             <div if="{{!numFlag}}" style="left: 6px; flex-direction: column;">
@@ -245,9 +243,9 @@
           <img src="./assets/horizontal/123.png" style="margin-left:6px;padding:6px;width:60px;height:60px;" @click="onBtnClick('switchNum_jp')" if="{{downFlag==='' && !numFlag && lang==='jp'}}" />
         
           <img src="./assets/horizontal/en.png" style="padding: 6px;width: 60px;height: 60px;" @click="onBtnClick('lang')" if="{{downFlag==='' && !numFlag && lang==='en'}}" />
-          <img src="./assets/horizontal/bigA.png" style="padding: 6px;margin-left: 6px;width:94px;height:60px;" @click="onBtnClick('switchLow')" show="{{downFlag==='' && upperFlag && lang==='en'&& !numFlag}}" />
-          <img src="./assets/horizontal/a.png" style="padding: 6px;margin-left: 6px;width:94px;height:60px;" @click="onBtnClick('switchUpper')" show="{{downFlag==='' && !upperFlag && lang==='en'&& !numFlag}}" />
-          <img src="./assets/horizontal/123.png" style="margin-left: 6px;padding: 6px;margin-left: 6px;width: 94px;height: 60px;" @click="onBtnClick('switchNum')" if="{{downFlag==='' && !numFlag && lang==='en'}}" />
+          <img src="./assets/horizontal/bigA.png" style="padding: 6px;margin-left: 6px;width:60px;height:60px;" @click="onBtnClick('switchLow')" if="{{downFlag==='' && upperFlag && lang==='en'&& !numFlag}}" />
+          <img src="./assets/horizontal/a.png" style="padding: 6px;margin-left: 6px;width:60px;height:60px;" @click="onBtnClick('switchUpper')" if="{{downFlag==='' && !upperFlag && lang==='en'&& !numFlag}}" />
+          <img src="./assets/horizontal/123.png" style="margin-left: 6px;padding: 6px;width: 60px;height: 60px;" @click="onBtnClick('switchNum')" if="{{downFlag==='' && !numFlag && lang==='en'}}" />
           <img src="./assets/horizontal/back2.png" style="margin-left: 6px;padding: 6px;width: 159px;height: 60px;" @click="onBtnClick('switchCn')" if="{{numFlag}}" />
           <img if="{{!numFlag}}" src="./assets/horizontal/del.png" style="margin-left: 6px;padding: 6px;width: 60px;height: 60px;" @click="onBtnClick('D')" />
           <img else src="./assets/horizontal/del2.png" style="margin-left: 6px;padding: 6px;" @click="onBtnClick('D')" />
@@ -404,7 +402,7 @@ export default {
     numFlag: false,
     numFlag_jp: false,
     upperFlag: false,
-    // 键盘子树是否已建入 DOM：首次弹出置 true 保活（之后 hide 切换只走 show 显隐，不重建）
+    // 键盘子树是否已建入 DOM：首次弹出置 true 保活（之后 hide 只走 show 显隐，不重建）
     keyboardCreated: false,
     // 入场动画状态：首次弹出时由 hide watch 切到 kbd-play；watch 失灵时键盘仍会
     // 因根节点 show="{{!hide}}" 立即完整可见，动画只是增强不是前提
@@ -472,9 +470,6 @@ export default {
     if (!this.hide) {
       // 挂载即展开的用法：键盘显式直接创建并保活
       this.keyboardCreated = true
-    } else {
-      // 默认收起：键盘子树不创建，点开时由 hide watch 懒建，避免常驻遮挡
-      this.keyboardCreated = false
     }
     this.$watch("hide", "watchHidePropsChange");
     this.$watch("maxlength", "watchMaxLengthPropsChange");
@@ -483,10 +478,6 @@ export default {
   onDestroy() {},
   addAllTxt(txt) {
     this.$emit("complete", { content: txt });
-  },
-  emitLatin(txt) {
-    const value = String(txt || "");
-    this.addAllTxt(this.upperFlag ? value.toUpperCase() : value.toLowerCase());
   },
   onRsSelect(txt) {
     this.onVibrate();
@@ -568,7 +559,11 @@ export default {
           if (this.lang === "cn" || this.lang === 'jp') {
             this.cval += this.waitingList[this.waitingIndex];
           } else {
-            this.emitLatin(this.waitingList[this.waitingIndex]);
+            if (this.upperFlag) {
+              this.addAllTxt(this.waitingList[this.waitingIndex].toUpperCase());
+            } else {
+              this.addAllTxt(this.waitingList[this.waitingIndex].toLowerCase());
+            }
           }
           this.clearWaiting();
           this.resetResultList();
@@ -600,11 +595,7 @@ export default {
         break;
       default:
         if (sign.length === 1) {
-          if (this.lang === "en" && !this.numFlag) {
-            this.emitLatin(sign);
-          } else {
-            this.addAllTxt(sign);
-          }
+          this.addAllTxt(sign);
         } else {
           if (this.waitingIndex >= 0) {
             if (this.lastWaitingStr === sign) {
@@ -616,7 +607,15 @@ export default {
               if (this.lang === "cn" || this.lang === 'jp') {
                 this.cval += this.waitingList[this.waitingIndex];
               } else {
-                this.emitLatin(this.waitingList[this.waitingIndex]);
+                if (this.upperFlag) {
+                  this.addAllTxt(
+                    this.waitingList[this.waitingIndex].toUpperCase(),
+                  );
+                } else {
+                  this.addAllTxt(
+                    this.waitingList[this.waitingIndex].toLowerCase(),
+                  );
+                }
               }
               this.lastWaitingStr = sign;
               this.waitingIndex = 0;
@@ -638,6 +637,9 @@ export default {
     this.lastWaitingStr = "";
   },
   resetResultList() {
+    // 候选查询前确保字典已就绪（幂等）：无论 hide watch / 定时器是否可靠触发，
+    // 首次按键都会同步补齐字典初始化，避免「输入字母却永不弹中文候选」。
+    this._ensureDictInit();
     let watingStr = "";
     if (this.lastWaitingStr && this.lastWaitingStr[this.waitingIndex]) {
       watingStr = this.lastWaitingStr[this.waitingIndex];
@@ -733,7 +735,11 @@ export default {
     if ((this.lang === 'cn' || this.lang === 'jp')  && !this.numFlag) {
       this.cval += num.toLowerCase();
     } else if (this.lang === "en" && !this.numFlag) {
-      this.emitLatin(num);
+      if (this.upperFlag) {
+        this.addAllTxt(num.toUpperCase());
+      } else {
+        this.addAllTxt(num.toLowerCase());
+      }
     } else {
       this.addAllTxt(num);
     }
@@ -743,10 +749,12 @@ export default {
     this.onVibrate();
     if (this.lang === "cn") {
       this.cval += this.waitingList[num].toString();
-    } else if (this.lang === "en") {
-      this.emitLatin(this.waitingList[num]);
     } else {
-      this.addAllTxt(this.waitingList[num]);
+      if (this.upperFlag) {
+        this.addAllTxt(this.waitingList[num].toUpperCase());
+      } else {
+        this.addAllTxt(this.waitingList[num].toLowerCase());
+      }
     }
     this.clearWaiting();
     this.resetResultList();
@@ -768,8 +776,13 @@ export default {
   // 部分语法），下次可重试，否则标志提前置位会导致字典永不重建、候选恒空。
   _ensureDictInit() {
     if (this.__dictInitStarted) return
-    SimpleInputMethod.initDict()
-    this.__dictInitStarted = true
+    try {
+      SimpleInputMethod.initDict()
+      this.__dictInitStarted = true
+    } catch (err) {
+      // 机型 JS 引擎兼容性问题：本轮初始化失败不置标志，下次按键时自动重试
+      console.warn('[InputMethod] dict init failed, will retry', err && err.message)
+    }
   },
   // 首帧后启动字典初始化：不阻塞进入页面，也不依赖 hide watch 链（部分机型 watch 不可靠）。
   // 引擎若在 setTimeout 回调前已初始化，本定时器也幂等跳过。
@@ -832,8 +845,9 @@ export default {
 	left:0;
 	bottom:0
 }
-/* 入场滑入动画：仅在 hide watch 可靠的机型上锦上添花。
-   注意本组件类名统一加 kbd- 前缀，避免与宿主页面全局样式（如 .page）互相覆盖。 */
+/* 入场滑入动画：仅锦上添花。可见性由根节点 show="{{!hide}}" 保证，
+   动画类切换失败时键盘依然完整可见可用。
+   组件类名统一 kbd- 前缀，避免与宿主页面全局样式（如 .page）互相覆盖。 */
 .kbd-play {
 	animation-name: kbd-enter;
 	animation-duration: 300ms;
@@ -927,7 +941,7 @@ export default {
 .cvalrow-wrap {
 	width:100%;
 	height:28px;
-	background-color:transparent;
+	background-color:#000000;
 }
 .cvalrow {
 	color:#0d84ff;
