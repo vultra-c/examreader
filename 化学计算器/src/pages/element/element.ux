@@ -42,12 +42,15 @@
         <text class="panel-hd-n">{{elementResults.length}} 条</text>
       </div>
       <text if="{{elementResults.length == 0}}" class="panel-none">没有同时含这些元素的方程式</text>
-      <scroll if="{{elementResults.length > 0}}" scroll-y="true" class="panel-list">
-        <div class="eq-item" for="{{elementResults}}" tid="rid" @click="openEquation($item)">
-          <text class="eq-item-text">{{$item.text}}</text>
-          <text class="eq-item-type">{{$item.type}}</text>
-        </div>
-      </scroll>
+      <!-- 列表组件与考点阅读器搜索结果同款：list/list-item（scroll 纵向列表在本机不可靠） -->
+      <list show="{{elementResults.length > 0}}" class="panel-list">
+        <list-item type="eq" for="{{elementResults}}" tid="rid" @click="openEquation($item)">
+          <div class="eq-item">
+            <text class="eq-item-text">{{$item.text}}</text>
+            <text class="eq-item-type">{{$item.type}}</text>
+          </div>
+        </list-item>
+      </list>
     </div>
     <text if="{{!searched}}" class="panel-idle">点击输入框输入，如：Fe O 或 铁 氧</text>
 
@@ -114,7 +117,13 @@ export default {
 
   onSearch() {
     this.showKb = false
-    const query = parseElementQuery(this.inputStr, NAME_MAP)
+    let query = null
+    try {
+      query = parseElementQuery(this.inputStr, NAME_MAP)
+    } catch (err) {
+      prompt.showToast({ message: '查询出错', duration: 2000 })
+      return
+    }
     if (!query.ok) { prompt.showToast({ message: query.error, duration: 2000 }); return }
 
     let hits = []
@@ -133,7 +142,12 @@ export default {
   },
 
   openEquation(item) {
-    this.$app.$data.reaction = buildReactionFromBank(item.entry)
+    try {
+      this.$app.$def.reaction = buildReactionFromBank(item.entry)
+    } catch (err) {
+      prompt.showToast({ message: '打开失败', duration: 1500 })
+      return
+    }
     router.push({ uri: 'pages/result' })
   },
 
@@ -264,21 +278,21 @@ export default {
   color: #ffffff;
 }
 
-/* ---- 结果面板 ---- */
+/* ---- 结果面板（固定高度，不使用 flex:1，确保子列表拿到确定高度） ---- */
 .panel {
   width: 304px;
-  flex: 1;
+  height: 266px;
   margin: 10px 16px 0;
   border-radius: 20px;
   background-color: #141416;
   border-width: 1px;
   border-color: #2a2a30;
   flex-direction: column;
-  padding: 10px 12px;
+  padding: 8px 12px 10px;
 }
 .panel-hd {
   width: 280px;
-  height: 30px;
+  height: 26px;
   flex-direction: row;
   justify-content: space-between;
   align-items: center;
@@ -301,8 +315,8 @@ export default {
 }
 .panel-list {
   width: 280px;
-  flex: 1;
-  margin-top: 5px;
+  height: 220px;
+  margin-top: 4px;
 }
 .panel-idle {
   width: 336px;
@@ -314,10 +328,10 @@ export default {
 
 .eq-item {
   width: 280px;
-  height: 52px;
+  height: 48px;
   border-radius: 12px;
   background-color: #222226;
-  padding: 5px 10px;
+  padding: 4px 10px;
   margin-bottom: 6px;
   flex-direction: column;
   justify-content: center;
@@ -325,7 +339,7 @@ export default {
 .eq-item-text {
   width: 260px;
   font-size: 18px;
-  line-height: 23px;
+  line-height: 22px;
   color: #ffffff;
   lines: 1;
   text-overflow: ellipsis;

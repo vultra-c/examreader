@@ -47,15 +47,17 @@
 
       <!-- 3 · 结果 -->
       <text if="{{hasResult}}" class="sec-label res-label">各物质质量</text>
-      <scroll if="{{hasResult}}" scroll-y="true" class="res-list">
-        <div class="{{item.known ? 'res-row-known' : 'res-row'}}" for="{{resultRows}}" tid="rid">
-          <div class="res-line">
-            <text class="res-f">{{$item.text}}</text>
-            <text class="res-m">{{$item.massText}} g</text>
+      <list show="{{hasResult}}" class="res-list">
+        <list-item type="res" for="{{resultRows}}" tid="rid">
+          <div class="{{$item.known ? 'res-row-known' : 'res-row'}}">
+            <div class="res-line">
+              <text class="res-f">{{$item.text}}</text>
+              <text class="res-m">{{$item.massText}} g</text>
+            </div>
+            <text class="res-mol">n ≈ {{$item.molText}} mol</text>
           </div>
-          <text class="res-mol">n ≈ {{$item.molText}} mol</text>
-        </div>
-      </scroll>
+        </list-item>
+      </list>
     </div>
 
     <input-method hide="{{!showKeyboard}}" keyboardtype="QWERTY" screentype="rect" maxlength="8"
@@ -97,12 +99,12 @@ export default {
   },
 
   onInit() {
-    const r = this.$app.$data.reaction
+    const r = this.$app.$def.reaction
     if (!r) { this.valid = false; return }
     this.valid = true
     this._rxn = r
 
-    const wantIdx = this.$app.$data.massKnownIdx
+    const wantIdx = this.$app.$def.massKnownIdx
     this.knownIdx = (typeof wantIdx === 'number' && wantIdx >= 0 && wantIdx < r.coefs.length) ? wantIdx : 0
 
     const rows = []
@@ -110,7 +112,9 @@ export default {
       rows.push({ text: segsToText(r.segs[i], r.coefs[i]), idx: i, rid: 's' + i })
     }
     this.selRows = rows
-    this.$app.$data.massKnownIdx = this.knownIdx
+    try {
+      this.$app.$def.massKnownIdx = this.knownIdx
+    } catch (err) {}
   },
 
   onSelect(item) {
@@ -354,7 +358,7 @@ export default {
 
 .res-list {
   width: 304px;
-  height: 180px;
+  height: 168px;
   margin-top: 4px;
 }
 .res-row {

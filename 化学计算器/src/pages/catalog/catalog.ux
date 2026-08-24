@@ -1,7 +1,8 @@
 <!--
   化学工具箱 · 常用物质表（336×480）
-  按类别浏览常见物质；点选后写入 $app.$data.pendingFormula 并返回，
+  按类别浏览常见物质；点选后写入 $app.$def.pendingFormula 并返回，
   反应计算页会在 onShow 时自动拼入输入框。
+  列表组件与考点阅读器同款 list/list-item（scroll 纵向列表在本机不可靠）。
 -->
 <template>
   <div class="screen" @swipe="onSwipe">
@@ -14,15 +15,15 @@
 
     <text class="sub-tip">点选物质，自动填入「反应计算」输入框</text>
 
-    <scroll scroll-y="true" class="list">
-      <div class="group" for="{{groups}}" tid="gid">
-        <text class="group-title">{{$item.group}}</text>
-        <div class="item" for="{{$item.items}}" tid="iid" @click="pick($item)">
-          <text class="item-name">{{$item.label}}</text>
-          <text class="item-formula">{{$item.formula}}</text>
+    <list class="list">
+      <list-item type="{{$item.kind}}" for="{{rows}}" tid="rid" @click="onRowClick($item)">
+        <div class="{{$item.kind === 'title' ? 'row-title' : 'row-item'}}">
+          <text if="{{$item.kind === 'title'}}" class="row-title-t">{{$item.text}}</text>
+          <text if="{{$item.kind === 'item'}}" class="row-item-name">{{$item.label}}</text>
+          <text if="{{$item.kind === 'item'}}" class="row-item-f">{{$item.formula}}</text>
         </div>
-      </div>
-    </scroll>
+      </list-item>
+    </list>
   </div>
 </template>
 
@@ -33,30 +34,37 @@ import { CATALOG, formulaName } from '../../common/logic/substances.js'
 
 export default {
   private: {
-    groups: []
+    rows: []
   },
 
   onInit() {
-    const groups = []
+    const rows = []
+    let rid = 0
     for (let g = 0; g < CATALOG.length; g++) {
       const cat = CATALOG[g]
-      const items = []
+      rows.push({ kind: 'title', text: cat.group, rid: 't' + g })
       for (let i = 0; i < cat.items.length; i++) {
         const f = cat.items[i]
         const name = formulaName(f)
-        items.push({
+        rows.push({
+          kind: 'item',
           formula: f,
           label: name && name !== f ? name : f,
-          rid: 'c' + g + '_' + i
+          rid: 'c' + (rid++)
         })
       }
-      groups.push({ group: cat.group, items, gid: 'g' + g })
     }
-    this.groups = groups
+    this.rows = rows
   },
 
-  pick(item) {
-    this.$app.$data.pendingFormula = item.formula
+  onRowClick(item) {
+    if (!item || item.kind !== 'item') return
+    try {
+      this.$app.$def.pendingFormula = item.formula
+    } catch (err) {
+      prompt.showToast({ message: '选择失败', duration: 1200 })
+      return
+    }
     prompt.showToast({ message: '已选 ' + item.formula, duration: 800 })
     router.back()
   },
@@ -126,22 +134,23 @@ export default {
 
 .list {
   width: 304px;
-  flex: 1;
+  height: 410px;
   margin: 8px 16px 0;
 }
 
-.group {
+.row-title {
   width: 304px;
-  flex-direction: column;
-  margin-bottom: 8px;
+  height: 34px;
+  flex-direction: row;
+  align-items: center;
 }
-.group-title {
+.row-title-t {
   font-size: 18px;
   font-weight: bold;
   color: #4da3ff;
-  margin: 2px 4px 6px;
+  margin-left: 4px;
 }
-.item {
+.row-item {
   width: 304px;
   height: 48px;
   border-radius: 13px;
@@ -152,13 +161,13 @@ export default {
   justify-content: space-between;
   align-items: center;
 }
-.item-name {
+.row-item-name {
   font-size: 20px;
   color: #ffffff;
   lines: 1;
   text-overflow: ellipsis;
 }
-.item-formula {
+.row-item-f {
   font-size: 20px;
   font-weight: bold;
   color: rgba(255, 255, 255, 0.55);

@@ -4,8 +4,8 @@
 
 | 文件 | 平台 | 包名 | 版本 |
 |------|------|------|------|
-| [`com.whyy.snapnotes.release.V26.8.25.BAND.rpk`](com.whyy.snapnotes.release.V26.8.25.BAND.rpk) | 小米 Vela | `com.whyy.snapnotes` | `V26.8.25.BAND` |
-| [`com.whyy.chemcalc.release.V26.8.34.CALC.rpk`](com.whyy.chemcalc.release.V26.8.34.CALC.rpk) | 小米 Vela | `com.whyy.chemcalc` | `V26.8.34.CALC` |
+| [`com.whyy.snapnotes.release.V26.8.26.BAND.rpk`](com.whyy.snapnotes.release.V26.8.26.BAND.rpk) | 小米 Vela | `com.whyy.snapnotes` | `V26.8.26.BAND` |
+| [`com.whyy.chemcalc.release.V26.8.35.CALC.rpk`](com.whyy.chemcalc.release.V26.8.35.CALC.rpk) | 小米 Vela | `com.whyy.chemcalc` | `V26.8.35.CALC` |
 | [`com.whyy.snapnotes.android.v1.0.1-debug.apk`](com.whyy.snapnotes.android.v1.0.1-debug.apk) | Android | `com.whyy.snapnotes` | `1.0.1 (2)` |
 
 - `.rpk` 为已签名的 Vela 安装包，请使用 Vela 开发工具或设备调试工具安装。

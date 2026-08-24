@@ -60,9 +60,9 @@ export default {
 
   onShow() {
     // 从「常用物质表」带回的物质公式，自动拼到输入末尾
-    const pf = this.$app.$data.pendingFormula
+    const pf = this.$app.$def.pendingFormula
     if (pf) {
-      this.$app.$data.pendingFormula = ''
+      this.$app.$def.pendingFormula = ''
       if (this.inputStr && this.inputStr.slice(-1) !== '+') {
         this.inputStr += '+'
       }
@@ -124,19 +124,33 @@ export default {
     const raw = this.inputStr.trim()
     if (!raw) { prompt.showToast({ message: '请先输入反应物', duration: 1500 }); return }
 
-    const tokens = splitInputTokens(raw)
-    if (!tokens.length) { prompt.showToast({ message: '无有效反应物', duration: 1500 }); return }
+    let result = null
+    try {
+      const tokens = splitInputTokens(raw)
+      if (!tokens.length) { prompt.showToast({ message: '无有效反应物', duration: 1500 }); return }
 
-    const formulas = []
-    for (let i = 0; i < tokens.length; i++) {
-      const resolved = resolveToken(tokens[i], NAME_MAP)
-      if (!resolved.ok) { prompt.showToast({ message: resolved.error, duration: 2200 }); return }
-      formulas.push(resolved.formula)
+      const formulas = []
+      for (let i = 0; i < tokens.length; i++) {
+        const resolved = resolveToken(tokens[i], NAME_MAP)
+        if (!resolved.ok) { prompt.showToast({ message: resolved.error, duration: 2200 }); return }
+        formulas.push(resolved.formula)
+      }
+      result = solveReaction(formulas)
+    } catch (err) {
+      prompt.showToast({ message: '计算出错，请检查输入', duration: 2000 })
+      return
     }
-    const result = solveReaction(formulas)
-    if (!result.ok) { prompt.showToast({ message: result.error, duration: 2600 }); return }
+    if (!result || !result.ok) {
+      prompt.showToast({ message: (result && result.error) || '暂无法推导该反应', duration: 2600 })
+      return
+    }
 
-    this.$app.$data.reaction = result.reaction
+    try {
+      this.$app.$def.reaction = result.reaction
+    } catch (err) {
+      prompt.showToast({ message: '数据写入失败', duration: 2000 })
+      return
+    }
     router.push({ uri: 'pages/result' })
   },
 
