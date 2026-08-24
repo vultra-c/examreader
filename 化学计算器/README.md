@@ -30,7 +30,7 @@
 ```
 化学计算器/
 ├── package.json            # aiot-toolkit 构建配置
-├── components/InputMethod/      # 考点阅读器同款中文/日文/英文输入法
+├── src/components/InputMethod/  # 考点阅读器同款中文/日文/英文输入法
 ├── scripts/patch-aiotpack.js
 ├── sign/
 │   ├── release/            # 发布签名 private.pem + certificate.pem（已推送仓库）
@@ -50,7 +50,7 @@
 │   ├── components/FormulaText/  # 下标渲染组件
 │   └── pages/{index,result,mass}/
 ├── tests/smoke.mjs         # Node 冒烟测试（62 项断言）
-└── release/                # 签名发布包 *.rpk
+└── ../release/             # 根目录统一存放的签名发布包 *.rpk
 ```
 
 ## 构建与签名

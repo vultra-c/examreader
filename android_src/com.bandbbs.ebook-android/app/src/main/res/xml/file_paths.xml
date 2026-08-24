@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<paths>
-    <cache-path name="editor_cache" path="." />
-    <files-path name="editor_files" path="." />
-    <external-cache-path name="editor_ext_cache" path="." />
-</paths>

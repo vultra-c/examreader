@@ -571,7 +571,7 @@ async function diagnoseAppNotFound() {
   } else {
     sandbox.log('[诊断] 无法获取应用列表——多为底层互连状态残留：请在 BandBurg 断开并重新连接设备（或重启手环），再重新运行本脚本');
   }
-  sandbox.log('安装方法：卸载旧包后，通过开发者调试推送/Vela 工具安装 考点阅读器/release/com.whyy.snapnotes.release.V26.8.0.BAND.rpk，安装后在手环上手动打开一次《闪念小抄》再运行本脚本');
+  sandbox.log('安装方法：卸载旧包后，通过开发者调试推送/Vela 工具安装 release/com.whyy.snapnotes.release.V26.8.20.BAND.rpk，安装后在手环上手动打开一次《闪念小抄》再运行本脚本');
 }
 
 // 检查手环已装应用（GUI 按钮）

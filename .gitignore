@@ -2,6 +2,7 @@
 # 通用排除项
 # =====================
 .DS_Store
+.wrangler/
 *.log
 *.tmp
 *.swp
@@ -10,6 +11,7 @@
 # 上传的参考文件和压缩包
 .uploads/
 *.zip
+!docs/vela/*.zip
 *.7z
 *.rar
 
@@ -27,8 +29,6 @@ Android端源码-修改部分.md
 # 本地配置
 **/local.properties
 **/keystore.properties
-# 例外：小米官方 demo 的 keystore 配置（密码为公开测试值 xmswearable）
-!考点阅读器/android-app/keystore.properties
 
 # IntelliJ / Android Studio
 .idea/
@@ -42,15 +42,13 @@ Android端源码-修改部分.md
 *.keystore
 *.jks
 debug.keystore
-# 例外：小米官方 XMS Wearable demo 公开测试 keystore（密码随官方示例公开）
-!考点阅读器/android-app/keystore/keystore.jks
 
-# APK 构建产物
+# APK / AAB 构建产物
 *.apk
-# 例外：已签名的 APK 成品交付包
-!考点阅读器/android-app/release/*.apk
-!考点阅读器/android-app/release/*.idsig
 *.aab
+*.idsig
+# 当前可安装包统一放在根目录 release/
+!release/*.apk
 
 # =====================
 # Vela / Node.js 项目排除项
@@ -63,9 +61,8 @@ dist/
 
 # Vela 构建产物
 *.rpk
-# 例外：已签名的 RPK 成品交付包
-!考点阅读器/release/*.rpk
-!化学计算器/release/*.rpk
+# 当前可安装包统一放在根目录 release/
+!release/*.rpk
 *.abp
 output/
 
@@ -74,8 +71,7 @@ aar-extract/
 
 # 签名证书（私钥不应提交）
 **/sign/*/private.pem
-# 例外：小米官方 interconnect 公开测试签名（interconnect_dev_test_demo 随包发布，
-# 两端共用同一套公开测试证书，不属于敏感密钥）
+# 两个 Vela 应用的发布签名由各自项目目录管理
 !考点阅读器/sign/debug/private.pem
 !考点阅读器/sign/release/private.pem
 # 化学计算器签名（用户要求随仓库交付）

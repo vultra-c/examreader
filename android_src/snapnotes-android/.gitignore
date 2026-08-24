@@ -1,0 +1,30 @@
+*.iml
+.gradle/
+/local.properties
+/.idea
+.DS_Store
+/build
+/app/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# APK / AAB 产物
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# 签名相关（CI 从 Secrets 生成，不提交到仓库）
+keystore.properties
+*.jks
+*.keystore
+
+# 本地开发工具文件
+init-script.gradle
+.kotlin/
+
+# 其他
+/app/release/
+/app/release baselineProfiles/

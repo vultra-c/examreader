@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="24dp" android:height="24dp"
-    android:viewportWidth="24" android:viewportHeight="24"
-    android:tint="@color/tree_folder">
-    <path android:fillColor="#FF000000"
-        android:pathData="M19,20H4C2.89,20 2,19.1 2,18V6C2,4.89 2.89,4 4,4H10L12,6H20C21.1,6 22,6.89 22,8V8H4V18L6.5,10H23L20.3,18.5C20,19.4 19.5,20 18.5,20H19Z"/>
-</vector>
