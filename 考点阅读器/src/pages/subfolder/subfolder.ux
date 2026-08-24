@@ -115,6 +115,8 @@ export default {
     }
     this.isNavigating = true
 
+    setTimeout(() => { if (this.$valid) this.isNavigating = false }, 2000)
+
     // 子文件夹内容：直接用 item.id 作为路径；JSON 知识点走 jsonReader
     if (this.path && this.path.startsWith('bt_')) {
       if (item.type === 'folder') {
@@ -175,6 +177,8 @@ export default {
     // 标记长按已触发，阻止后续click事件
     this.longPressTriggered = true
     this.isNavigating = true
+
+    setTimeout(() => { if (this.$valid) this.isNavigating = false }, 2000)
 
     // 子文件夹内容：用 item.id 作为路径
     if (this.path && this.path.startsWith('bt_')) {

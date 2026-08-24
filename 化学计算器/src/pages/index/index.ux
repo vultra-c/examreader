@@ -1,240 +1,180 @@
 <import name="formula-text" src="../../components/FormulaText/FormulaText.ux"></import>
 
-<import name="input-method" src="../../components/InputMethod/InputMethod.ux"></import>
-
 <template>
   <div class="page" @swipe="onSwipe">
     <!-- 标题栏 -->
     <div class="topbar">
       <text class="topbar-title">化学计算器</text>
-      <text class="topbar-sub" style="margin-left: 10px;">离线反应推导</text>
     </div>
 
-    <!-- 可滚动内容区 -->
-    <div class="scroll-area">
-      <!-- 已输入内容 -->
-      <div class="input-display">
-        <text if="{{inputStr}}" class="input-display-text">{{inputStr}}</text>
-        <text else class="input-display-hint">输入反应物，用 + 分隔（如 HCl+NaOH）</text>
-      </div>
+    <list class="body">
+      <!-- 输入显示 -->
+      <list-item type="input" class="li">
+        <div class="input-box">
+          <text if="{{inputStr}}" class="input-text">{{inputStr}}</text>
+          <text else class="input-hint">输入反应物，用+分隔</text>
+        </div>
+      </list-item>
 
       <!-- 模式切换 -->
-      <div class="tab-row">
-        <div class="tab-item {{mode === 'formula' ? 'tab-active' : ''}}" @click="setMode('formula')">
-          <text class="{{mode === 'formula' ? 'tab-active-text' : 'tab-text'}}">化学式</text>
-        </div>
-        <div class="tab-item {{mode === 'name' ? 'tab-active' : ''}}" @click="setMode('name')">
-          <text class="{{mode === 'name' ? 'tab-active-text' : 'tab-text'}}">名称</text>
-        </div>
-      </div>
-
-      <!-- 化学式键盘 -->
-      <div if="{{mode === 'formula'}}">
-        <div class="kb-row">
-          <div class="kb-key" for="{{kbRow1}}" @click="onLetter($item)"><text class="kb-key-text">{{$item}}</text></div>
-        </div>
-        <div class="kb-row">
-          <div class="kb-key" for="{{kbRow2}}" @click="onLetter($item)"><text class="kb-key-text">{{$item}}</text></div>
-        </div>
-        <div class="kb-row">
-          <div class="kb-key {{shiftOn ? 'kb-key-wide' : ''}} kb-key-fn" @click="onShift">
-            <text class="kb-key-fn-text">{{shiftOn ? '⇪' : '⇧'}}</text>
+      <list-item type="tabs" class="li">
+        <div class="tab-row">
+          <div class="tab {{mode === 'formula' ? 'tab-on' : ''}}" @click="setFormula">
+            <text class="{{mode === 'formula' ? 'ton' : 'toff'}}">化学式</text>
           </div>
-          <div class="kb-key" for="{{kbRow3}}" @click="onLetter($item)"><text class="kb-key-text">{{$item}}</text></div>
-          <div class="kb-key kb-key-fn" @click="onDel"><text class="kb-key-fn-text">⌫</text></div>
+          <div class="tab {{mode === 'name' ? 'tab-on' : ''}}" @click="setName">
+            <text class="{{mode === 'name' ? 'ton' : 'toff'}}">名称</text>
+          </div>
         </div>
-        <div class="kb-row">
-          <div class="kb-key kb-key-fn" style="width: 52px;" @click="onChar('(')"><text class="kb-key-fn-text">(</text></div>
-          <div class="kb-key kb-key-fn" style="width: 52px;" @click="onChar(')')"><text class="kb-key-fn-text">)</text></div>
-          <div class="kb-key kb-key-wide" @click="onPlus"><text class="kb-key-wide-text">+</text></div>
-          <div class="kb-key kb-key-fn" style="width: 72px;" @click="onClearAll"><text class="kb-key-fn-text" style="color: #FF6B6B;">清空</text></div>
+      </list-item>
+
+      <!-- 化学式键盘行 -->
+      <list-item if="{{mode === 'formula'}}" type="r1" class="li">
+        <div class="kr"><text class="kk" for="{{r1}}" @click="letter($item)">{{$item}}</text></div>
+      </list-item>
+      <list-item if="{{mode === 'formula'}}" type="r2" class="li">
+        <div class="kr"><text class="kk" for="{{r2}}" @click="letter($item)">{{$item}}</text></div>
+      </list-item>
+      <list-item if="{{mode === 'formula'}}" type="r3" class="li">
+        <div class="kr">
+          <text class="kk fn {{shift ? 'w60' : ''}}" @click="toggleShift">{{shift ? '⇪' : '⇧'}}</text>
+          <text class="kk" for="{{r3}}" @click="letter($item)">{{$item}}</text>
+          <text class="kk fn" @click="del()">⌫</text>
         </div>
-        <div class="kb-row">
-          <div class="kb-key" for="{{digitRow}}" @click="onDigit($item)"><text class="kb-key-text">{{$item}}</text></div>
+      </list-item>
+      <list-item if="{{mode === 'formula'}}" type="r4" class="li">
+        <div class="kr">
+          <text class="kk fn" @click="char('(')">(</text>
+          <text class="kk fn" @click="char(')')">)</text>
+          <text class="kk blue" @click="plus()">+</text>
+          <text class="kk fn" style="width:64px;" @click="clear()">清空</text>
         </div>
-      </div>
+      </list-item>
+      <list-item if="{{mode === 'formula'}}" type="r5" class="li">
+        <div class="kr"><text class="kk" for="{{r5}}" @click="digit($item)">{{$item}}</text></div>
+      </list-item>
 
       <!-- 名称目录 -->
-      <div if="{{mode === 'name'}}">
-        <text class="group-header" for="{{catalogGroups}}">{{$item.group}}</text>
-        <div class="sub-item" for="{{catalogItems}}" @click="onPickName($item)">
-          <text class="sub-name">{{$item.dispName}}</text>
-          <formula-text segs="{{$item.segs}}"></formula-text>
+      <list-item if="{{mode === 'name'}}" type="hdr" for="{{catalog}}" class="li">
+        <div class="ni" @click="pick($item)">
+          <text class="nt">{{$item}}</text>
         </div>
-      </div>
+      </list-item>
 
       <!-- 计算按钮 -->
-      <div class="btn-primary" @click="onCalc">
-        <text class="btn-primary-text">开始推导配平</text>
-      </div>
-      <div style="height: 20px;"></div>
-    </div>
-
-    <!-- 输入法 -->
-    <input-method id="ime" screentype="rect" keyboardtype="QWERTY" @complete="onImeComplete" @delete="onImeDelete"></input-method>
+      <list-item type="btn" class="li">
+        <div class="cbtn" @click="calc()">
+          <text class="cbtn-t">开始推导配平</text>
+        </div>
+      </list-item>
+      <list-item type="pad" class="li"><div style="height:16px;"></div></list-item>
+    </list>
   </div>
 </template>
 
 <script>
 import router from '@system.router'
 import prompt from '@system.prompt'
-import { splitInputTokens, resolveToken, parseFormula } from '../../common/logic/parser.js'
+import { splitInputTokens, resolveToken } from '../../common/logic/parser.js'
 import { solveReaction } from '../../common/logic/reactions.js'
 import { NAME_MAP, CATALOG, formulaName } from '../../common/logic/substances.js'
 
 export default {
-  protected: {
+  private: {
     mode: 'formula',
     inputStr: '',
-    shiftOn: false,
+    shift: false,
     expectUpper: true,
-    catalogGroups: [],
-    catalogItems: []
+    catalog: []
   },
 
   onInit() {
-    this.kbRow1 = ['Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P']
-    this.kbRow2 = ['A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L']
-    this.kbRow3 = ['Z', 'X', 'C', 'V', 'B', 'N', 'M']
-    this.digitRow = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']
-
-    // 目录数据
-    const groups = []
-    const items = []
-    const seen = {}
+    this.r1 = ['Q','W','E','R','T','Y','U','I','O','P']
+    this.r2 = ['A','S','D','F','G','H','J','K','L']
+    this.r3 = ['Z','X','C','V','B','N','M']
+    this.r5 = ['1','2','3','4','5','6','7','8','9','0']
+    // 名称目录
+    const seen = {}; const list = []
     for (const g of CATALOG) {
-      groups.push({ group: g.group, gid: 'g' + groups.length })
       for (const f of g.items) {
-        if (seen[f]) continue
-        seen[f] = true
-        const name = formulaName(f) || f
-        const pr = parseFormula(f)
-        items.push({
-          formula: f,
-          dispName: name === f ? f : name,
-          segs: pr.ok ? pr.segs : [{ t: 'el', s: f }],
-          sid: 's' + items.length
-        })
+        if (seen[f]) continue; seen[f] = true
+        const n = formulaName(f)
+        list.push(n && n !== f ? n : f)
       }
     }
-    this.catalogGroups = groups
-    this.catalogItems = items
+    this.catalog = list
   },
 
-  setMode(m) {
-    this.mode = m
-  },
+  toggleShift() { this.shift = !this.shift },
+  setFormula() { this.mode = "formula" },
+  setName() { this.mode = "name" },
 
-  onImeComplete(e) {
-    if (e && e.detail) {
-      const ch = e.detail
-      if (ch === ' ') {
-        this.onPlus()
-      } else if (/^[A-Za-z]$/.test(ch)) {
-        this.onLetter(ch)
-      } else if (/^[0-9]$/.test(ch)) {
-        this.onDigit(ch)
-      } else {
-        this.onChar(ch)
-      }
-    }
-  },
-
-  onImeDelete() {
-    this.onDel()
-  },
-
-  onLetter(ch) {
-    let out
-    if (this.shiftOn) {
-      out = ch.toUpperCase()
-      this.shiftOn = false
-    } else if (this.expectUpper) {
-      out = ch.toUpperCase()
-    } else {
-      out = ch.toLowerCase()
-    }
+  letter(ch) {
+    let o = this.shift ? ch.toUpperCase() : (this.expectUpper ? ch.toUpperCase() : ch.toLowerCase())
+    this.shift = false
     if (this.inputStr.length > 140) return
-    const cur = this.inputStr
-    const lastTok = cur.split('+').pop() || ''
-    const needSep = cur.length > 0 && !/^[A-Za-z0-9()\[\]]+$/.test(lastTok)
-    this.inputStr = cur + (needSep ? '+' : '') + out
+    // 中文名称后面自动补+
+    const last = this.inputStr.split('+').pop() || ''
+    if (this.inputStr.length > 0 && !/^[A-Za-z0-9()\[\]]+$/.test(last)) o = '+' + o
+    this.inputStr += o
     this.expectUpper = false
   },
 
-  onShift() {
-    this.shiftOn = !this.shiftOn
-  },
-
-  onDel() {
+  del() {
     this.inputStr = this.inputStr.slice(0, -1)
     this.expectUpper = true
   },
 
-  onChar(c) {
+  char(c) {
     if (this.inputStr.length > 140) return
     this.inputStr += c
     this.expectUpper = true
   },
 
-  onDigit(d) {
+  digit(d) {
     if (this.inputStr.length > 140) return
     this.inputStr += d
     this.expectUpper = true
   },
 
-  onPlus() {
+  plus() {
     if (!this.inputStr || this.inputStr.endsWith('+')) return
     this.inputStr += '+'
     this.expectUpper = true
   },
 
-  onClearAll() {
+  clear() {
     this.inputStr = ''
     this.expectUpper = true
   },
 
-  onPickName(item) {
-    this.appendToken(item.dispName)
-    prompt.showToast({ message: '已加入：' + item.formula, duration: 1200 })
-  },
-
-  appendToken(tok) {
-    if (!tok) return
-    const cur = this.inputStr
-    if (cur.length > 140) return
-    this.inputStr = cur && !cur.endsWith('+') ? cur + '+' + tok : cur + tok
-    this.expectUpper = true
-  },
-
-  onCalc() {
-    const tokens = splitInputTokens(this.inputStr)
-    if (tokens.length === 0) {
-      prompt.showToast({ message: '请先输入至少一种反应物', duration: 1800 })
-      return
+  pick(name) {
+    if (!this.inputStr || this.inputStr.endsWith('+')) {
+      this.inputStr += name
+    } else {
+      this.inputStr += '+' + name
     }
+    prompt.showToast({ message: '已加入', duration: 800 })
+  },
+
+  calc() {
+    if (!this.inputStr) { prompt.showToast({ message: '请先输入反应物', duration: 1500 }); return }
+    const tokens = splitInputTokens(this.inputStr)
+    if (!tokens.length) { prompt.showToast({ message: '无有效反应物', duration: 1500 }); return }
     const formulas = []
     for (const t of tokens) {
       const r = resolveToken(t, NAME_MAP)
-      if (!r.ok) {
-        prompt.showToast({ message: r.error, duration: 2400 })
-        return
-      }
+      if (!r.ok) { prompt.showToast({ message: r.error, duration: 2000 }); return }
       formulas.push(r.formula)
     }
     const res = solveReaction(formulas)
-    if (!res.ok) {
-      prompt.showToast({ message: res.error, duration: 3000 })
-      return
-    }
+    if (!res.ok) { prompt.showToast({ message: res.error, duration: 2500 }); return }
     this.$app.$data.reaction = res.reaction
     router.push({ uri: 'pages/result' })
   },
 
   onSwipe(e) {
-    if (e.direction === 'right') {
-      router.back()
-    }
+    if (e.direction === 'right') router.back()
   }
 }
 </script>
@@ -242,13 +182,57 @@ export default {
 <style>
 @import '../../common/style.css';
 
-.scroll-area {
-  position: absolute;
-  top: 84px;
-  left: 0px;
+.body {
   width: 336px;
-  height: 260px;
-  padding: 10px 10px 0 10px;
-  flex-direction: column;
+  height: 480px;
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 84px 10px 10px 10px;
 }
+
+.li { width: 316px; }
+
+.input-box {
+  width: 316px;
+  min-height: 68px;
+  background-color: #1a1a1c;
+  border-radius: 16px;
+  padding: 12px;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+.input-text { font-size: 30px; color: #fff; lines: 2; text-overflow: ellipsis; }
+.input-hint { font-size: 22px; color: rgba(255,255,255,0.35); }
+
+.tab-row { flex-direction: row; justify-content: space-between; width: 316px; margin-bottom: 8px; }
+.tab { width: 153px; height: 48px; border-radius: 14px; background-color: #262626; justify-content: center; align-items: center; }
+.tab-on { background-color: #0D6EFF; }
+.ton { font-size: 24px; font-weight: bold; color: #fff; }
+.toff { font-size: 24px; color: rgba(255,255,255,0.6); }
+
+.kr { flex-direction: row; justify-content: center; margin-bottom: 6px; width: 316px; }
+.kk {
+  width: 28px; height: 44px; border-radius: 8px;
+  background-color: #2c2c2e; margin-left: 2px; margin-right: 2px;
+  justify-content: center; align-items: center;
+  font-size: 22px; color: #fff;
+}
+.fn { background-color: #3a3a3c; font-size: 20px; color: #0D9EFF; width: 40px; }
+.w60 { width: 56px; }
+.blue { background-color: #0D6EFF; width: 56px; font-size: 24px; font-weight: bold; }
+
+.ni {
+  background-color: #262626; border-radius: 14px;
+  padding: 12px 16px; margin-bottom: 6px; width: 316px;
+}
+.nt { font-size: 24px; color: #fff; }
+
+.cbtn {
+  width: 316px; height: 60px; background-color: #0D6EFF;
+  border-radius: 18px; justify-content: center; align-items: center;
+  margin-top: 8px;
+}
+.cbtn-t { font-size: 28px; font-weight: bold; color: #fff; }
 </style>

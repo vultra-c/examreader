@@ -126,6 +126,8 @@ export default {
       return
     }
     this.isNavigating = true
+    // 防卡死：2秒后自动解锁（onShow 通常会先触发）
+    setTimeout(() => { if (this.$valid) this.isNavigating = false }, 2000)
 
     // 主页直接显示根级文件夹和文件；JSON 知识点文件走 jsonReader（闪念小抄显示逻辑）
     if (item.type === 'folder') {

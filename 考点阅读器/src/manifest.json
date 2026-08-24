@@ -1,8 +1,8 @@
 {
   "package": "com.whyy.snapnotes",
   "name": "闪念小抄",
-  "versionName": "V26.8.17.BAND",
-  "versionCode": 2608170,
+  "versionName": "V26.8.18.BAND",
+  "versionCode": 2608180,
   "minPlatformVersion": 1200,
   "minAPILevel": 1,
   "icon": "/common/images/icon.png",
@@ -55,15 +55,15 @@
       "pages/reader": {
         "component": "reader"
       },
-    "pages/jsonReader": {
-      "component": "jsonReader"
-    },
-    "pages/jsonReaderSettings": {
-      "component": "jsonReaderSettings"
-    },
-    "pages/chapterList": {
-      "component": "chapterList"
-    },
+      "pages/jsonReader": {
+        "component": "jsonReader"
+      },
+      "pages/jsonReaderSettings": {
+        "component": "jsonReaderSettings"
+      },
+      "pages/chapterList": {
+        "component": "chapterList"
+      },
       "pages/globalSettings": {
         "component": "globalSettings"
       },
@@ -79,12 +79,12 @@
       "pages/deleteConfirm": {
         "component": "deleteConfirm"
       },
-    "pages/push": {
-      "component": "push"
-    },
-    "pages/import": {
-      "component": "import"
-    },
+      "pages/push": {
+        "component": "push"
+      },
+      "pages/import": {
+        "component": "import"
+      },
       "pages/search": {
         "component": "search"
       }
