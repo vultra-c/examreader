@@ -65,6 +65,7 @@ dist/
 *.rpk
 # 例外：已签名的 RPK 成品交付包
 !考点阅读器/release/*.rpk
+!化学计算器/release/*.rpk
 *.abp
 output/
 
