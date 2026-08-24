@@ -1,57 +1,70 @@
+<import name="input-method" src="../../components/InputMethod/InputMethod.ux"></import>
+
 <template>
   <div class="page" @swipe="onSwipe">
     <!-- 标题栏 -->
     <div class="topbar">
-      <text class="topbar-title">化学计算器</text>
+      <text class="topbar-title">化学工具箱</text>
+      <text class="topbar-sub" style="margin-left:8px;">离线反应推导</text>
     </div>
 
-    <!-- 输入显示 -->
-    <div class="input-box">
+    <!-- 输入显示（点击弹出键盘） -->
+    <div class="input-box" @click="toggleKb">
       <text if="{{inputStr}}" class="input-text">{{inputStr}}</text>
-      <text else class="input-hint">输入反应物，用+分隔</text>
+      <text else class="input-hint">点击输入（空格=+ 或分隔元素）</text>
     </div>
 
     <!-- 模式切换 -->
     <div class="tab-row">
-      <div class="tab {{mode === 'formula' ? 'tab-on' : ''}}" @click="setFormula">
+      <div class="tab {{mode === 'formula' ? 'tab-on' : ''}}" @click="setMode('formula')">
         <text class="{{mode === 'formula' ? 'ton' : 'toff'}}">化学式</text>
       </div>
-      <div class="tab {{mode === 'name' ? 'tab-on' : ''}}" @click="setName">
+      <div class="tab {{mode === 'name' ? 'tab-on' : ''}}" @click="setMode('name')">
         <text class="{{mode === 'name' ? 'ton' : 'toff'}}">名称</text>
       </div>
+      <div class="tab {{mode === 'element' ? 'tab-on' : ''}}" @click="setMode('element')">
+        <text class="{{mode === 'element' ? 'ton' : 'toff'}}">元素</text>
+      </div>
     </div>
 
-    <!-- 化学式键盘 -->
-    <div if="{{mode === 'formula'}}" class="kb-area">
-      <div class="kr"><text class="kk" for="{{r1}}" @click="letter($item)">{{$item}}</text></div>
-      <div class="kr"><text class="kk" for="{{r2}}" @click="letter($item)">{{$item}}</text></div>
-      <div class="kr">
-        <text class="kk fn {{shift ? 'w60' : ''}}" @click="toggleShift">{{shift ? '⇪' : '⇧'}}</text>
-        <text class="kk" for="{{r3}}" @click="letter($item)">{{$item}}</text>
-        <text class="kk fn" @click="del()">⌫</text>
-      </div>
-      <div class="kr">
-        <text class="kk fn" @click="char('(')">(</text>
-        <text class="kk fn" @click="char(')')">)</text>
-        <text class="kk blue" @click="plus()">+</text>
-        <text class="kk fn w64" @click="clear()">清空</text>
-      </div>
-      <div class="kr"><text class="kk" for="{{r5}}" @click="digit($item)">{{$item}}</text></div>
+    <!-- 操作按钮（键盘打开时也可见） -->
+    <div class="action-btn" @click="onAction">
+      <text class="action-btn-t">{{mode === 'element' ? '查询元素' : '开始推导配平'}}</text>
     </div>
 
-    <!-- 名称目录 -->
-    <div if="{{mode === 'name'}}" class="catalog-area">
-      <scroll scroll-y="true" style="width:316px;height:188px;">
-        <div class="ni" for="{{catalog}}" @click="pick($item)">
+    <!-- 化学式模式提示 -->
+    <div if="{{mode === 'formula' && !showKb}}" class="tip-area">
+      <text class="tip-text">支持：Fe+CuSO4、Ca(OH)2、盐酸+烧碱（空格=+，点击输入框弹键盘）</text>
+    </div>
+
+    <!-- 名称模式：常用物质目录 -->
+    <div if="{{mode === 'name' && !showKb}}" class="content-area">
+      <scroll scroll-y="true" style="width:316px;height:100%;">
+        <div class="ni" for="{{catalog}}" @click="pickName($item)">
           <text class="nt">{{$item}}</text>
         </div>
       </scroll>
     </div>
 
-    <!-- 计算按钮 -->
-    <div class="calc-btn" @click="calc()">
-      <text class="calc-btn-t">开始推导配平</text>
+    <!-- 元素模式：查询结果 -->
+    <div if="{{mode === 'element' && !showKb}}" class="content-area">
+      <div if="{{elemSearched}}" style="flex-direction: column;">
+        <text class="res-hint" if="{{elementResults.length == 0}}">没有找到同时含有这些元素的方程式</text>
+        <scroll scroll-y="true" style="width:316px;height:100%;" if="{{elementResults.length > 0}}">
+          <div class="eq-item" for="{{elementResults}}" @click="openEquation($item)">
+            <text class="eq-text">{{$item.text}}</text>
+            <text class="eq-type">{{$item.type}}</text>
+          </div>
+        </scroll>
+      </div>
+      <div if="{{!elemSearched}}" style="flex-direction: column;">
+        <text class="tip-text">输入 1-3 个元素（空格分隔），如：Fe O / Na C O / Cu</text>
+      </div>
     </div>
+
+    <!-- 输入法（考点阅读器同款，中文+英文+日文） -->
+    <input-method hide="{{!showKb}}" keyboardtype="QWERTY" screentype="rect" maxlength="60"
+      vibratemode="short" @complete="onInput" @delete="onDel"></input-method>
   </div>
 </template>
 
@@ -61,21 +74,19 @@ import prompt from '@system.prompt'
 import { splitInputTokens, resolveToken } from '../../common/logic/parser.js'
 import { solveReaction } from '../../common/logic/reactions.js'
 import { NAME_MAP, CATALOG, formulaName } from '../../common/logic/substances.js'
+import { parseElementQuery, searchEquations, buildReactionFromBank, equationText } from '../../common/logic/elementQuery.js'
 
 export default {
   private: {
     mode: 'formula',
     inputStr: '',
-    shift: false,
-    expectUpper: true,
-    catalog: []
+    showKb: false,
+    catalog: [],
+    elemSearched: false,
+    elementResults: []
   },
 
   onInit() {
-    this.r1 = ['Q','W','E','R','T','Y','U','I','O','P']
-    this.r2 = ['A','S','D','F','G','H','J','K','L']
-    this.r3 = ['Z','X','C','V','B','N','M']
-    this.r5 = ['1','2','3','4','5','6','7','8','9','0']
     const seen = {}; const list = []
     for (const g of CATALOG) {
       for (const f of g.items) {
@@ -87,55 +98,68 @@ export default {
     this.catalog = list
   },
 
-  setFormula() { this.mode = 'formula' },
-  setName() { this.mode = 'name' },
-  toggleShift() { this.shift = !this.shift },
-
-  letter(ch) {
-    let o = this.shift ? ch.toUpperCase() : (this.expectUpper ? ch.toUpperCase() : ch.toLowerCase())
-    this.shift = false
-    if (this.inputStr.length > 140) return
-    const last = this.inputStr.split('+').pop() || ''
-    if (this.inputStr.length > 0 && !/^[A-Za-z0-9()\[\]]+$/.test(last)) o = '+' + o
-    this.inputStr += o
-    this.expectUpper = false
+  setMode(m) {
+    this.mode = m
+    this.showKb = false
+    this.elemSearched = false
+    if (m !== 'element') this.elementResults = []
   },
 
-  del() {
+  toggleKb() {
+    this.showKb = !this.showKb
+  },
+
+  // 输入法 complete 事件（逐字符）
+  onInput(e) {
+    if (!e || !e.detail) return
+    const ch = e.detail.content
+    if (this.mode === 'element') {
+      if (ch === ' ' || ch === '，' || ch === ',' || ch === '+' || ch === '。') {
+        if (!this.inputStr.endsWith(' ')) this.inputStr += ' '
+      } else if (/^[A-Za-z0-9]$/.test(ch)) {
+        this.inputStr += ch
+      }
+    } else if (this.mode === 'name') {
+      // 中文/英文名称直接输入
+      this.inputStr += ch
+    } else {
+      // 化学式模式：空格=+，字母智能大小写，数字与括号直接输入
+      if (ch === ' ') {
+        if (!this.inputStr || this.inputStr.endsWith('+')) return
+        this.inputStr += '+'
+      } else if (/^[A-Za-z]$/.test(ch)) {
+        if (this.inputStr.length > 140) return
+        const last = this.inputStr.split(/[+()\[\]]/).pop() || ''
+        const needUpper = last === '' || /[0-9]$/.test(last)
+        this.inputStr += needUpper ? ch.toUpperCase() : ch.toLowerCase()
+      } else if (/^[0-9()\[\]]$/.test(ch)) {
+        if (this.inputStr.length > 140) return
+        this.inputStr += ch
+      } else {
+        this.inputStr += ch
+      }
+    }
+  },
+
+  onDel() {
     this.inputStr = this.inputStr.slice(0, -1)
-    this.expectUpper = true
   },
 
-  char(c) {
-    if (this.inputStr.length > 140) return
-    this.inputStr += c
-    this.expectUpper = true
-  },
-
-  digit(d) {
-    if (this.inputStr.length > 140) return
-    this.inputStr += d
-    this.expectUpper = true
-  },
-
-  plus() {
-    if (!this.inputStr || this.inputStr.endsWith('+')) return
-    this.inputStr += '+'
-    this.expectUpper = true
-  },
-
-  clear() {
-    this.inputStr = ''
-    this.expectUpper = true
-  },
-
-  pick(name) {
+  pickName(name) {
     if (!this.inputStr || this.inputStr.endsWith('+')) {
       this.inputStr += name
     } else {
       this.inputStr += '+' + name
     }
     prompt.showToast({ message: '已加入', duration: 800 })
+  },
+
+  onAction() {
+    if (this.mode === 'element') {
+      this.doElementSearch()
+    } else {
+      this.calc()
+    }
   },
 
   calc() {
@@ -154,6 +178,29 @@ export default {
     router.push({ uri: 'pages/result' })
   },
 
+  doElementSearch() {
+    const q = parseElementQuery(this.inputStr)
+    if (!q.ok) { prompt.showToast({ message: q.error, duration: 2000 }); return }
+    const hits = searchEquations(q.elems, 50)
+    this.elementResults = hits.map((entry, i) => ({
+      text: equationText(entry),
+      type: entry.t,
+      entry: entry,
+      rid: 'e' + i
+    }))
+    this.elemSearched = true
+    this.showKb = false
+    if (hits.length === 0) {
+      prompt.showToast({ message: '未找到含这些元素的方程式', duration: 2000 })
+    }
+  },
+
+  openEquation(item) {
+    const reaction = buildReactionFromBank(item.entry)
+    this.$app.$data.reaction = reaction
+    router.push({ uri: 'pages/result' })
+  },
+
   onSwipe(e) {
     if (e.direction === 'right') router.back()
   }
@@ -163,80 +210,78 @@ export default {
 <style>
 @import '../../common/style.css';
 
-/* 输入显示（绝对定位：标题栏下方） */
+.topbar { position: absolute; top: 0px; left: 0px; width: 336px; height: 56px; flex-direction: row; align-items: center; padding-left: 12px; }
+.topbar-title { font-size: 30px; font-weight: bold; color: #ffffff; }
+.topbar-sub { font-size: 18px; color: rgba(255,255,255,0.45); margin-top: 2px; }
+
 .input-box {
   position: absolute;
-  top: 88px;
+  top: 62px;
   left: 10px;
   width: 316px;
-  min-height: 60px;
+  min-height: 54px;
   background-color: #1a1a1c;
   border-radius: 16px;
-  padding: 10px 14px;
+  padding: 8px 14px;
   justify-content: center;
 }
+.input-text { font-size: 28px; color: #fff; lines: 2; text-overflow: ellipsis; }
+.input-hint { font-size: 20px; color: rgba(255,255,255,0.35); }
 
-.input-text { font-size: 30px; color: #fff; lines: 2; text-overflow: ellipsis; }
-.input-hint { font-size: 22px; color: rgba(255,255,255,0.35); }
-
-/* 模式切换 */
 .tab-row {
   position: absolute;
-  top: 156px;
+  top: 124px;
   left: 10px;
   width: 316px;
   flex-direction: row;
   justify-content: space-between;
 }
-.tab { width: 153px; height: 44px; border-radius: 14px; background-color: #262626; justify-content: center; align-items: center; }
+.tab { width: 100px; height: 40px; border-radius: 12px; background-color: #262626; justify-content: center; align-items: center; }
 .tab-on { background-color: #0D6EFF; }
-.ton { font-size: 24px; font-weight: bold; color: #fff; }
-.toff { font-size: 24px; color: rgba(255,255,255,0.6); }
+.ton { font-size: 22px; font-weight: bold; color: #fff; }
+.toff { font-size: 22px; color: rgba(255,255,255,0.6); }
 
-/* 化学式键盘 */
-.kb-area {
+.action-btn {
   position: absolute;
-  top: 208px;
+  top: 172px;
+  left: 10px;
+  width: 316px;
+  height: 44px;
+  background-color: #0D6EFF;
+  border-radius: 16px;
+  justify-content: center;
+  align-items: center;
+}
+.action-btn-t { font-size: 24px; font-weight: bold; color: #fff; }
+
+.content-area {
+  position: absolute;
+  top: 224px;
+  left: 10px;
+  width: 316px;
+  height: 240px;
+}
+
+.tip-area {
+  position: absolute;
+  top: 224px;
   left: 10px;
   width: 316px;
 }
-.kr { flex-direction: row; justify-content: center; margin-bottom: 5px; width: 316px; }
-.kk {
-  width: 28px; height: 34px; border-radius: 8px;
-  background-color: #2c2c2e; margin-left: 2px; margin-right: 2px;
-  justify-content: center; align-items: center;
-  font-size: 21px; color: #fff;
-}
-.fn { background-color: #3a3a3c; font-size: 20px; color: #0D9EFF; width: 40px; }
-.w60 { width: 56px; }
-.w64 { width: 64px; }
-.blue { background-color: #0D6EFF; width: 56px; font-size: 24px; font-weight: bold; }
+.tip-text { font-size: 19px; color: rgba(255,255,255,0.35); line-height: 30px; }
 
-/* 名称目录 */
-.catalog-area {
-  position: absolute;
-  top: 208px;
-  left: 10px;
-  width: 316px;
-  height: 188px;
-}
 .ni {
   background-color: #262626; border-radius: 12px;
   padding: 9px 14px; margin-bottom: 6px; width: 316px;
 }
 .nt { font-size: 23px; color: #fff; }
 
-/* 计算按钮 */
-.calc-btn {
-  position: absolute;
-  top: 410px;
-  left: 10px;
-  width: 316px;
-  height: 54px;
-  background-color: #0D6EFF;
-  border-radius: 18px;
-  justify-content: center;
-  align-items: center;
+.res-hint { font-size: 20px; color: rgba(255,255,255,0.4); text-align: center; margin-top: 20px; }
+.eq-item {
+  background-color: #262626; border-radius: 12px;
+  padding: 10px 12px; margin-bottom: 6px; width: 316px;
+  flex-direction: column;
 }
-.calc-btn-t { font-size: 26px; font-weight: bold; color: #fff; }
+.eq-text { font-size: 22px; color: #fff; }
+.eq-type { font-size: 18px; color: #4da3ff; margin-top: 4px; }
 </style>

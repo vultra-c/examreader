@@ -87,15 +87,11 @@ export default {
   renderSub(segs, coef) {
     let s = ''
     for (const seg of segs) {
-      if (seg.t === 'el') {
-        s += coef > 1 ? coef + seg.s : seg.s
-      } else if (seg.t === 'num') {
-        s += this.subDigit(seg.s)
-      } else {
-        s += seg.s
-      }
+      if (seg.t === 'el') s += seg.s
+      else if (seg.t === 'num') s += this.subDigit(seg.s)
+      else s += seg.s
     }
-    return s
+    return (coef > 1 ? coef : '') + s
   },
 
   subDigit(num) {
