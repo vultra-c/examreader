@@ -1,54 +1,58 @@
 <import name="input-method" src="../../components/InputMethod/InputMethod.ux"></import>
 
+<!--
+  化学工具箱 · 质量计算页（336×480）
+  流程：选已知物质 → 输入质量（共享输入法数字盘）→ 计算 → 全方程式各物质质量/物质的量。
+-->
 <template>
-  <div class="page" @swipe="onSwipe">
-    <div class="topbar">
-      <div class="topbar-back" @click="goBack"><text class="topbar-back-text">‹</text></div>
-      <text class="topbar-title">质量计算</text>
+  <div class="screen" @swipe="onSwipe">
+
+    <div class="hd">
+      <div class="hd-back" @click="goBack"><text class="hd-back-t">‹</text></div>
+      <text class="hd-title">质量计算</text>
+      <div class="hd-hold"></div>
     </div>
 
-    <div if="{{!valid}}" style="position:absolute; top:180px; width:336px;">
-      <text style="text-align:center; color:rgba(255,255,255,0.35); font-size:24px;">未找到反应数据</text>
-    </div>
+    <text if="{{!valid}}" class="none-tip">未找到反应数据</text>
 
-    <div if="{{valid}}" style="position:absolute; top:88px; left:10px; width:316px;">
-      <!-- 选择已知物质（横滚） -->
-      <text class="group-header">1. 选择已知质量的物质</text>
-      <scroll scroll-x="true" style="width:316px; height:56px;">
-        <div style="flex-direction: row;">
-          <div class="sel-chip {{knownIdx === $item.idx ? 'sel-on' : ''}}" for="{{selRows}}" @click="onSelect($item)">
-            <text class="{{knownIdx === $item.idx ? 'sel-on-t' : 'sel-t'}}">{{$item.text}}</text>
+    <div if="{{valid}}" class="body">
+      <!-- 第一步：选已知物质 -->
+      <text class="sec-label">1 · 选择已知质量的物质</text>
+      <scroll scroll-x="true" class="chip-scroll">
+        <div class="chip-row">
+          <div class="{{knownIdx === $item.idx ? 'chip-on' : 'chip'}}"
+               for="{{selRows}}" tid="rid" @click="onSelect($item)">
+            <text class="{{knownIdx === $item.idx ? 'chip-t-on' : 'chip-t'}}">{{$item.text}}</text>
           </div>
         </div>
       </scroll>
 
-      <!-- 输入质量 -->
-      <text class="group-header" style="margin-top:6px;">2. 输入已知质量（g）</text>
-      <!-- 质量输入沿用考点阅读器同款输入法，数字页可直接输入小数 -->
-      <div class="mass-input" @click="toggleKeyboard">
-        <text if="{{massStr}}" class="mass-input-t">{{massStr}} g</text>
-        <text else class="mass-input-h">点击输入质量（g）</text>
+      <!-- 第二步：输入质量 -->
+      <text class="sec-label">2 · 输入已知质量（克）</text>
+      <div class="mass-field" @click="toggleKb">
+        <text if="{{massStr.length > 0}}" class="mass-field-v">{{massStr}} g</text>
+        <text else class="mass-field-h">点击输入，键盘切到 123</text>
       </div>
 
-      <!-- 计算按钮 -->
-      <div class="btn-primary" style="margin-top:6px;height:56px;" @click="onCompute">
-        <text class="btn-primary-text">计 算</text>
+      <!-- 计算 -->
+      <div class="calc-btn" @click="onCompute">
+        <text class="calc-btn-t">计 算</text>
       </div>
 
-      <!-- 结果 -->
-      <text if="{{hasResult}}" class="group-header" style="margin-top:8px;">3. 各物质质量</text>
-      <scroll scroll-y="true" style="width:316px;height:150px;" if="{{hasResult}}">
-        <div class="mass-row {{$item.known ? 'mass-row-known' : ''}}" for="{{resultRows}}">
-          <div style="flex-direction: row; justify-content: space-between; align-items: flex-end;">
-            <text class="mass-f">{{$item.text}}</text>
-            <text class="mass-value">{{$item.massText}} g</text>
+      <!-- 第三步：结果 -->
+      <text if="{{hasResult}}" class="sec-label">3 · 各物质质量</text>
+      <scroll if="{{hasResult}}" scroll-y="true" class="res-list">
+        <div class="{{item.known ? 'res-row-known' : 'res-row'}}" for="{{resultRows}}" tid="rid">
+          <div class="res-line">
+            <text class="res-f">{{$item.text}}</text>
+            <text class="res-m">{{$item.massText}} g</text>
           </div>
-          <text style="font-size:18px; color:rgba(255,255,255,0.5); margin-top:2px;">n ≈ {{$item.molText}} mol</text>
+          <text class="res-mol">n ≈ {{$item.molText}} mol</text>
         </div>
       </scroll>
     </div>
 
-    <input-method hide="{{!showKeyboard}}" keyboardtype="QWERTY" screentype="rect" maxlength="10"
+    <input-method hide="{{!showKeyboard}}" keyboardtype="QWERTY" screentype="rect" maxlength="12"
       vibratemode="short" @complete="onInput" @delete="onDel"></input-method>
   </div>
 </template>
@@ -58,6 +62,22 @@ import router from '@system.router'
 import prompt from '@system.prompt'
 import { computeMasses } from '../../common/logic/stoich.js'
 import { fmtNum } from '../../common/logic/parser.js'
+
+const SUB = { '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄', '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉' }
+
+function subDigit(num) {
+  return String(num).split('').map(c => SUB[c] || c).join('')
+}
+
+function segsToText(segs, coef) {
+  let s = ''
+  for (let i = 0; i < segs.length; i++) {
+    const seg = segs[i]
+    if (seg.t === 'num') s += subDigit(seg.s)
+    else s += seg.s
+  }
+  return (coef > 1 ? coef : '') + s
+}
 
 export default {
   protected: {
@@ -75,37 +95,27 @@ export default {
     if (!r) { this.valid = false; return }
     this.valid = true
     this._rxn = r
-    this.knownIdx = this.$app.$data.massKnownIdx || 0
 
-    this.selRows = []
+    // 反向计算入口：已知量是第一个生成物（下标 = 反应物数）
+    const wantIdx = this.$app.$data.massKnownIdx
+    this.knownIdx = (typeof wantIdx === 'number' && wantIdx >= 0 && wantIdx < r.coefs.length) ? wantIdx : 0
+
+    const rows = []
     for (let i = 0; i < r.coefs.length; i++) {
-      this.selRows.push({ text: this.renderSub(r.segs[i], r.coefs[i]), idx: i, sid: 's' + i })
+      rows.push({ text: segsToText(r.segs[i], r.coefs[i]), idx: i, rid: 's' + i })
     }
-
-  },
-
-  renderSub(segs, coef) {
-    let s = ''
-    for (const seg of segs) {
-      if (seg.t === 'el') s += seg.s
-      else if (seg.t === 'num') s += this.subDigit(seg.s)
-      else s += seg.s
-    }
-    return (coef > 1 ? coef : '') + s
-  },
-
-  subDigit(num) {
-    const map = { '0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉' }
-    return String(num).split('').map(c => map[c] || c).join('')
+    this.selRows = rows
+    this.$app.$data.massKnownIdx = this.knownIdx
   },
 
   onSelect(item) {
     this.knownIdx = item.idx
     this.hasResult = false
     this.resultRows = []
+    this.showKeyboard = false
   },
 
-  toggleKeyboard() {
+  toggleKb() {
     this.showKeyboard = !this.showKeyboard
   },
 
@@ -126,59 +136,227 @@ export default {
   },
 
   onCompute() {
+    this.showKeyboard = false
     const m = parseFloat(this.massStr)
     if (isNaN(m) || m <= 0) { prompt.showToast({ message: '请输入有效质量', duration: 1500 }); return }
-    const out = computeMasses(this._rxn, this.knownIdx, m)
-    if (!out) { prompt.showToast({ message: '计算失败', duration: 1500 }); return }
-    const r = this._rxn
-    this.resultRows = []
-    for (let i = 0; i < out.length; i++) {
-      this.resultRows.push({ text: this.renderSub(r.segs[i], r.coefs[i]), massText: fmtNum(out[i].mass), molText: fmtNum(out[i].mol), known: i === this.knownIdx, rid2: 'q' + i })
+
+    let out = null
+    try {
+      out = computeMasses(this._rxn, this.knownIdx, m)
+    } catch (err) {
+      out = null
     }
+    if (!out) { prompt.showToast({ message: '计算失败', duration: 1500 }); return }
+
+    const r = this._rxn
+    const rows = []
+    for (let i = 0; i < out.length; i++) {
+      rows.push({
+        text: segsToText(r.segs[i], r.coefs[i]),
+        massText: fmtNum(out[i].mass),
+        molText: fmtNum(out[i].mol),
+        known: i === this.knownIdx,
+        rid: 'q' + i
+      })
+    }
+    this.resultRows = rows
     this.hasResult = true
   },
 
   goBack() { router.back() },
-  onSwipe(e) { if (e.direction === 'right') router.back() }
+
+  onSwipe(e) {
+    if (e && e.direction === 'right') {
+      if (this.showKeyboard) this.showKeyboard = false
+      else router.back()
+    }
+  },
+  onBackPress() {
+    router.back()
+    return true
+  }
 }
 </script>
 
 <style>
 @import '../../common/style.css';
 
-.sel-chip {
+.screen {
+  width: 336px;
+  height: 480px;
+  background-color: #000000;
+  flex-direction: column;
+}
+
+.hd {
+  width: 336px;
+  height: 66px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 16px 0 12px;
+}
+.hd-back {
+  width: 48px;
+  height: 48px;
+  border-radius: 24px;
+  background-color: #1c1c1e;
+  justify-content: center;
+  align-items: center;
+}
+.hd-back-t {
+  font-size: 36px;
+  line-height: 40px;
+  margin-top: -4px;
+  color: #ffffff;
+  font-weight: bold;
+}
+.hd-title {
+  font-size: 30px;
+  font-weight: bold;
+  color: #ffffff;
+}
+.hd-hold {
+  width: 48px;
+  height: 48px;
+}
+
+.none-tip {
+  width: 336px;
+  text-align: center;
+  font-size: 24px;
+  color: rgba(255, 255, 255, 0.35);
+  margin-top: 180px;
+}
+
+.body {
+  width: 336px;
+  flex-direction: column;
+  padding: 2px 16px 0;
+}
+
+.sec-label {
+  width: 304px;
+  font-size: 17px;
+  color: rgba(255, 255, 255, 0.45);
+  margin: 8px 2px 5px;
+}
+
+.chip-scroll {
+  width: 304px;
+  height: 50px;
+}
+.chip-row {
+  flex-direction: row;
+}
+.chip {
   height: 46px;
-  border-radius: 14px;
-  background-color: #262626;
+  border-radius: 23px;
+  background-color: #1c1c1e;
   padding: 0 18px;
   margin-right: 8px;
   justify-content: center;
   align-items: center;
+  flex-shrink: 0;
 }
-.sel-on { background-color: #0D6EFF; }
-.sel-t { font-size: 22px; color: rgba(255,255,255,0.7); }
-.sel-on-t { font-size: 22px; font-weight: bold; color: #fff; }
-
-.mass-input {
-  width: 316px;
-  min-height: 54px;
-  background-color: #1a1a1c;
-  border-radius: 14px;
-  padding: 8px 14px;
+.chip-on {
+  height: 46px;
+  border-radius: 23px;
+  background-color: #0d6eff;
+  padding: 0 18px;
+  margin-right: 8px;
   justify-content: center;
+  align-items: center;
+  flex-shrink: 0;
+}
+.chip-t {
+  font-size: 21px;
+  color: rgba(255, 255, 255, 0.72);
+}
+.chip-t-on {
+  font-size: 21px;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.mass-field {
+  width: 304px;
+  height: 54px;
+  border-radius: 16px;
+  background-color: #161618;
+  border-width: 1px;
+  border-color: #2e2e33;
+  padding: 0 14px;
+  justify-content: center;
+}
+.mass-field-v {
+  font-size: 26px;
+  color: #ffffff;
+  font-weight: bold;
+}
+.mass-field-h {
+  font-size: 19px;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.calc-btn {
+  width: 304px;
+  height: 54px;
+  border-radius: 27px;
+  background-color: #0d6eff;
+  justify-content: center;
+  align-items: center;
+  margin-top: 10px;
+}
+.calc-btn-t {
+  font-size: 25px;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.res-list {
+  width: 304px;
+  height: 160px;
+}
+.res-row {
+  width: 304px;
+  height: 56px;
+  border-radius: 14px;
+  background-color: #1c1c1e;
+  padding: 6px 14px;
   margin-bottom: 6px;
-}
-.mass-input-t { font-size: 28px; color: #fff; }
-.mass-input-h { font-size: 20px; color: rgba(255,255,255,0.35); }
-
-
-
-.mass-row {
-  background-color: #262626; border-radius: 14px;
-  padding: 8px 12px; margin-bottom: 6px; width: 316px;
   flex-direction: column;
+  justify-content: center;
 }
-.mass-row-known { background-color: rgba(13,110,255,0.25); }
-.mass-f { font-size: 24px; color: #fff; }
-.mass-value { font-size: 26px; color: #fff; font-weight: bold; }
+.res-row-known {
+  width: 304px;
+  height: 56px;
+  border-radius: 14px;
+  background-color: rgba(13, 110, 255, 0.28);
+  padding: 6px 14px;
+  margin-bottom: 6px;
+  flex-direction: column;
+  justify-content: center;
+}
+.res-line {
+  width: 276px;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+}
+.res-f {
+  font-size: 22px;
+  color: #ffffff;
+}
+.res-m {
+  font-size: 22px;
+  font-weight: bold;
+  color: #ffffff;
+}
+.res-mol {
+  font-size: 15px;
+  line-height: 20px;
+  color: rgba(255, 255, 255, 0.45);
+  margin-top: 1px;
+}
 </style>

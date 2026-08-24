@@ -1,46 +1,48 @@
+<!--
+  化学工具箱 · 反应结果页（336×480）
+
+  性能要点：整条方程式（含系数与 Unicode 下标）在 JS 里拼成「一个字符串」，
+  模板里只有一个 text 节点自动折行 —— 相比逐段多节点渲染大幅减少 VDOM 规模。
+-->
 <template>
-  <div class="page" @swipe="onSwipe">
-    <!-- 标题栏 -->
-    <div class="topbar">
-      <div class="topbar-back" @click="goBack"><text class="topbar-back-text">‹</text></div>
-      <text class="topbar-title">反应方程式</text>
+  <div class="screen" @swipe="onSwipe">
+
+    <!-- 顶栏 -->
+    <div class="hd">
+      <div class="hd-back" @click="goBack"><text class="hd-back-t">‹</text></div>
+      <text class="hd-title">反应方程式</text>
+      <div class="hd-hold"></div>
     </div>
 
-    <div if="{{!valid}}" style="position:absolute; top:180px; width:336px;">
-      <text style="text-align:center; color:rgba(255,255,255,0.35); font-size:24px;">未找到反应数据</text>
-    </div>
+    <!-- 无数据兜底 -->
+    <text if="{{!valid}}" class="none-tip">未找到反应数据</text>
 
-    <div if="{{valid}}" style="position:absolute; top:88px; left:10px; width:316px;">
-      <!-- 方程式 -->
-      <div class="equation-box">
-        <div class="eq-line">
-          <block for="{{eqParts}}">
-            <text if="{{$item.op}}" class="eq-op">{{$item.op}}</text>
-            <text class="eq-formula" style="font-size:30px;color:#fff;margin:0 2px;">{{$item.text}}</text>
-          </block>
-        </div>
-        <text class="cond-text">{{condText}}</text>
-        <div class="type-badge">
-          <text class="type-badge-text">{{rxnType}}</text>
+    <div if="{{valid}}" class="body">
+      <!-- 方程式卡片 -->
+      <div class="eq-card">
+        <text class="eq-text">{{eqText}}</text>
+        <text if="{{condText}}" class="eq-cond">{{condText}}</text>
+        <div class="eq-badge">
+          <text class="eq-badge-t">{{rxnType}}</text>
         </div>
       </div>
 
-      <!-- 相对分子质量 -->
-      <text class="group-header">相对分子质量</text>
-      <scroll scroll-y="true" style="width:316px;height:180px;">
-        <div class="mr-row" for="{{mrRows}}" @click="onPickMass($item)">
-          <text class="mr-formula">{{$item.text}}</text>
-          <text class="mr-value">M = {{$item.mrText}}</text>
+      <!-- 相对分子质量列表 -->
+      <text class="sec-label">相对分子质量 · 点按进入质量计算</text>
+      <scroll scroll-y="true" class="mr-list">
+        <div class="mr-row" for="{{mrRows}}" tid="rid" @click="onPickMass($item)">
+          <text class="mr-f">{{$item.text}}</text>
+          <text class="mr-v">M = {{$item.mrText}}</text>
         </div>
       </scroll>
 
-      <!-- 操作按钮 -->
-      <div style="flex-direction: row; justify-content: space-between; width: 316px; margin-top: 8px;">
-        <div class="btn-secondary" @click="goBack">
-          <text class="btn-secondary-text">重新输入</text>
+      <!-- 底部操作 -->
+      <div class="foot">
+        <div class="foot-btn" @click="goBack">
+          <text class="foot-btn-t">返回修改</text>
         </div>
-        <div class="btn-secondary" style="background-color:#0D6EFF;" @click="goMass">
-          <text class="btn-secondary-text" style="color:#ffffff; font-weight:bold;">质量计算 →</text>
+        <div class="foot-btn foot-btn-main" @click="goMass">
+          <text class="foot-btn-t-main">质量计算</text>
         </div>
       </div>
     </div>
@@ -49,15 +51,33 @@
 
 <script>
 import router from '@system.router'
+import prompt from '@system.prompt'
 import { fmtNum } from '../../common/logic/parser.js'
+
+const SUB = { '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄', '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉' }
+
+function subDigit(num) {
+  return String(num).split('').map(c => SUB[c] || c).join('')
+}
+
+/** 系数+分段 → 展示文本，如 2CuO */
+function segsToText(segs, coef) {
+  let s = ''
+  for (let i = 0; i < segs.length; i++) {
+    const seg = segs[i]
+    if (seg.t === 'num') s += subDigit(seg.s)
+    else s += seg.s
+  }
+  return (coef > 1 ? coef : '') + s
+}
 
 export default {
   protected: {
     valid: false,
-    eqParts: [],
-    mrRows: [],
+    eqText: '',
+    condText: '',
     rxnType: '',
-    condText: ''
+    mrRows: []
   },
 
   onInit() {
@@ -65,38 +85,29 @@ export default {
     if (!r) { this.valid = false; return }
     this.valid = true
 
+    // 整条方程式单字符串：aX + bY = cZ
     const nR = r.reactants.length
     const parts = []
     for (let i = 0; i < r.coefs.length; i++) {
-      let op = ''
-      if (i > 0) op = i === nR ? '=' : '+'
-      parts.push({ text: this.renderSub(r.segs[i], r.coefs[i]), op, pid: 'p' + i })
+      if (i === nR) parts.push('=')
+      else if (i > 0) parts.push('+')
+      parts.push(segsToText(r.segs[i], r.coefs[i]))
     }
-    this.eqParts = parts
+    let text = ''
+    for (let i = 0; i < parts.length; i++) {
+      if (i > 0 && parts[i] !== '=' && parts[i] !== '+') text += ' '
+      else if (i > 0) text += ' '
+      text += parts[i]
+    }
+    this.eqText = text
+    this.condText = r.cond ? '条件：' + r.cond : ''
 
-    this.mrRows = []
+    const rows = []
     for (let i = 0; i < r.coefs.length; i++) {
-      this.mrRows.push({ text: this.renderSub(r.segs[i], r.coefs[i]), mrText: fmtNum(r.mr[i]), idx: i, mid: 'm' + i })
+      rows.push({ text: segsToText(r.segs[i], r.coefs[i]), mrText: fmtNum(r.mr[i]), idx: i, rid: 'm' + i })
     }
-
+    this.mrRows = rows
     this.rxnType = r.type
-    this.condText = r.cond ? ('条件：' + r.cond) : '—'
-  },
-
-  // 渲染化学式（数字下标用普通数字展示，Vela text 不支持真实下标，用 Unicode 下标）
-  renderSub(segs, coef) {
-    let s = ''
-    for (const seg of segs) {
-      if (seg.t === 'el') s += seg.s
-      else if (seg.t === 'num') s += this.subDigit(seg.s)
-      else s += seg.s
-    }
-    return (coef > 1 ? coef : '') + s
-  },
-
-  subDigit(num) {
-    const map = { '0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉' }
-    return String(num).split('').map(c => map[c] || c).join('')
   },
 
   onPickMass(item) {
@@ -108,11 +119,164 @@ export default {
   goBack() { router.back() },
 
   onSwipe(e) {
-    if (e.direction === 'right') router.back()
+    if (e && e.direction === 'right') router.back()
+  },
+  onBackPress() {
+    router.back()
+    return true
   }
 }
 </script>
 
 <style>
 @import '../../common/style.css';
+
+.screen {
+  width: 336px;
+  height: 480px;
+  background-color: #000000;
+  flex-direction: column;
+}
+
+.hd {
+  width: 336px;
+  height: 66px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 16px 0 12px;
+}
+.hd-back {
+  width: 48px;
+  height: 48px;
+  border-radius: 24px;
+  background-color: #1c1c1e;
+  justify-content: center;
+  align-items: center;
+}
+.hd-back-t {
+  font-size: 36px;
+  line-height: 40px;
+  margin-top: -4px;
+  color: #ffffff;
+  font-weight: bold;
+}
+.hd-title {
+  font-size: 30px;
+  font-weight: bold;
+  color: #ffffff;
+}
+.hd-hold {
+  width: 48px;
+  height: 48px;
+}
+
+.none-tip {
+  width: 336px;
+  text-align: center;
+  font-size: 24px;
+  color: rgba(255, 255, 255, 0.35);
+  margin-top: 180px;
+}
+
+.body {
+  width: 336px;
+  flex-direction: column;
+  padding: 2px 16px 0;
+}
+
+.eq-card {
+  width: 304px;
+  border-radius: 20px;
+  background-color: #161618;
+  border-width: 1px;
+  border-color: #2e2e33;
+  padding: 14px 14px 16px;
+  flex-direction: column;
+  align-items: center;
+}
+.eq-text {
+  width: 276px;
+  font-size: 26px;
+  line-height: 38px;
+  font-weight: bold;
+  color: #ffffff;
+  text-align: center;
+}
+.eq-cond {
+  font-size: 19px;
+  line-height: 25px;
+  color: rgba(255, 255, 255, 0.45);
+  margin-top: 5px;
+  text-align: center;
+}
+.eq-badge {
+  padding: 4px 16px;
+  border-radius: 13px;
+  background-color: rgba(13, 110, 255, 0.18);
+  margin-top: 9px;
+}
+.eq-badge-t {
+  font-size: 18px;
+  color: #4da3ff;
+}
+
+.sec-label {
+  width: 304px;
+  font-size: 17px;
+  color: rgba(255, 255, 255, 0.45);
+  margin: 10px 2px 5px;
+}
+
+.mr-list {
+  width: 304px;
+  height: 168px;
+}
+.mr-row {
+  width: 304px;
+  height: 52px;
+  border-radius: 14px;
+  background-color: #1c1c1e;
+  padding: 0 14px;
+  margin-bottom: 6px;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+}
+.mr-f {
+  font-size: 22px;
+  color: #ffffff;
+}
+.mr-v {
+  font-size: 21px;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.foot {
+  width: 304px;
+  height: 58px;
+  margin-top: 8px;
+  flex-direction: row;
+  justify-content: space-between;
+}
+.foot-btn {
+  width: 147px;
+  height: 58px;
+  border-radius: 29px;
+  background-color: #1c1c1e;
+  justify-content: center;
+  align-items: center;
+}
+.foot-btn-main {
+  background-color: #0d6eff;
+}
+.foot-btn-t {
+  font-size: 24px;
+  color: rgba(255, 255, 255, 0.8);
+}
+.foot-btn-t-main {
+  font-size: 24px;
+  font-weight: bold;
+  color: #ffffff;
+}
 </style>

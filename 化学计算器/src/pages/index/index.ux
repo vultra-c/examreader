@@ -1,115 +1,114 @@
 <import name="input-method" src="../../components/InputMethod/InputMethod.ux"></import>
 
+<!--
+  化学工具箱 · 主页（336×480 竖屏）
+
+  设计原则（针对手环端点击失灵/卡顿问题的根治）：
+  1. 全页唯一布局体系：根节点固定 336×480，内部全部纵向流式排列，
+     不存在任何「透明遮罩/绝对定位层」压在按钮上 —— 点击区域即所见区域。
+  2. 所有可点元素都有显式宽高和背景色（部分机型上无背景的 hit-area 不稳定）。
+  3. 键盘由共享 InputMethod 组件承载，hide prop 直接驱动显隐；
+     打开时覆盖下半屏属预期行为，任何主动作执行前都会先收起键盘。
+  4. 节点数控制：常用物质目录懒构建（首次打开面板才生成 120 行数据）。
+-->
+
 <template>
-  <div class="page home-page" @swipe="onSwipe">
-    <!-- 顶部标题与计算器图形 -->
-    <div class="home-header">
-      <text class="home-title">计算器</text>
-      <div class="calculator-mark">
-        <div class="calculator-screen"></div>
-        <div class="calculator-dots">
-          <div class="calculator-dot"></div>
-          <div class="calculator-dot"></div>
-          <div class="calculator-dot"></div>
-          <div class="calculator-dot"></div>
-        </div>
+  <div class="screen" @swipe="onSwipe">
+
+    <!-- 顶栏：标题 + 常用物质入口 -->
+    <div class="hd">
+      <text class="hd-title">化学工具箱</text>
+      <div class="hd-btn" @click="toggleReference">
+        <text class="{{referenceOpen ? 'hd-btn-t-on' : 'hd-btn-t'}}">{{referenceOpen ? '关闭' : '物质表'}}</text>
       </div>
     </div>
 
-    <!-- 设计图中的两项主导航：反应推导 / 方程查询 -->
-    <div class="main-tabs">
-      <div class="main-tab" @click="setMainMode('reaction')">
-        <text class="{{mode === 'reaction' ? 'main-tab-on' : 'main-tab-off'}}">反应计算</text>
-        <div if="{{mode === 'reaction'}}" class="main-tab-line"></div>
+    <!-- 模式切换：反应计算 / 元素查询 -->
+    <div class="seg">
+      <div class="{{mode === 'reaction' ? 'seg-cell-on' : 'seg-cell'}}" @click="setMode('reaction')">
+        <text class="{{mode === 'reaction' ? 'seg-t-on' : 'seg-t'}}">反应计算</text>
       </div>
-      <div class="main-tab" @click="setMainMode('element')">
-        <text class="{{mode === 'element' ? 'main-tab-on' : 'main-tab-off'}}">方程计算</text>
-        <div if="{{mode === 'element'}}" class="main-tab-line"></div>
-      </div>
-    </div>
-    <div class="tabs-divider"></div>
-
-    <!-- 输入卡片：同一输入法可输入化学式、中文名称或元素符号 -->
-    <div class="home-input-card" @click="toggleKb">
-      <div if="{{!inputStr && mode === 'reaction'}}" class="input-copy">
-        <text class="input-placeholder-large">输入两种反应物，用+隔开</text>
-        <text class="input-placeholder-small">例如：铁+氧气 或 Fe+O₂</text>
-      </div>
-      <div if="{{!inputStr && mode === 'element'}}" class="input-copy">
-        <text class="input-placeholder-large">输入元素，查询含有它们的方程式</text>
-        <text class="input-placeholder-small">例如：Fe O 或 Na C O</text>
-      </div>
-      <text if="{{inputStr}}" class="home-input-value">{{inputStr}}</text>
-      <text if="{{showKb}}" class="home-input-caret">|</text>
-    </div>
-
-    <!-- 主操作按钮 -->
-    <div class="hero-action" @click="onAction">
-      <text class="hero-flask">⚗</text>
-      <text class="hero-action-text">{{mode === 'element' ? '查询方程' : '计算反应'}}</text>
-    </div>
-
-    <!-- 设计图下方四个快捷卡片 -->
-    <div if="{{!showReference && !(mode === 'element' && elemSearched)}}" class="feature-grid">
-      <div class="feature-card" @click="openMass(false)">
-        <text class="feature-icon">⚖</text>
-        <div class="feature-copy">
-          <text class="feature-title">质量计算</text>
-          <text class="feature-subtitle">已知质量，求未知</text>
-        </div>
-      </div>
-      <div class="feature-card" @click="openMass(true)">
-        <text class="feature-icon">↻</text>
-        <div class="feature-copy">
-          <text class="feature-title">反向计算</text>
-          <text class="feature-subtitle">由生成物求反应物</text>
-        </div>
-      </div>
-      <div class="feature-card" @click="openElementMode">
-        <text class="feature-icon equation-icon">X=?</text>
-        <div class="feature-copy">
-          <text class="feature-title">方程计算</text>
-          <text class="feature-subtitle">输入元素查方程</text>
-        </div>
-      </div>
-      <div class="feature-card" @click="toggleReference">
-        <text class="feature-icon">▱</text>
-        <div class="feature-copy">
-          <text class="feature-title">参考资料</text>
-          <text class="feature-subtitle">化合价 · 元素表</text>
-        </div>
+      <div class="{{mode === 'element' ? 'seg-cell-on' : 'seg-cell'}}" @click="setMode('element')">
+        <text class="{{mode === 'element' ? 'seg-t-on' : 'seg-t'}}">元素查询</text>
       </div>
     </div>
 
-    <!-- 元素方程查询结果，替换快捷卡片区域 -->
-    <div if="{{mode === 'element' && elemSearched && !showReference}}" class="query-panel">
-      <div class="panel-heading">
-        <text class="panel-heading-text">匹配方程式</text>
-        <text class="panel-heading-count">{{elementResults.length}} 条</text>
+    <!-- 输入卡片：点击弹出/收起键盘 -->
+    <div class="input-card" @click="toggleKb">
+      <div if="{{inputStr.length === 0}}" class="input-empty">
+        <text class="input-ph-main">{{mode === 'reaction' ? '输入反应物，用 + 连接' : '输入元素，如 Fe O'}}</text>
+        <text class="input-ph-sub">{{mode === 'reaction' ? '例：铁+氧气 或 Fe+O₂' : '含全部输入元素的方程式'}}</text>
       </div>
-      <text if="{{elementResults.length === 0}}" class="panel-empty">没有找到同时含有这些元素的方程式</text>
-      <scroll if="{{elementResults.length > 0}}" scroll-y="true" class="query-scroll">
-        <div class="query-item" for="{{elementResults}}" @click="openEquation($item)">
-          <text class="query-text">{{$item.text}}</text>
-          <text class="query-type">{{$item.type}}</text>
+      <text if="{{inputStr.length > 0}}" class="input-value">{{inputStr}}</text>
+      <text if="{{showKb}}" class="input-caret">_</text>
+    </div>
+
+    <!-- 主操作 -->
+    <div class="act" @click="onAction">
+      <text class="act-t">{{mode === 'reaction' ? '计算反应' : '查询方程'}}</text>
+    </div>
+
+    <!-- 功能区 A：元素查询结果（替换下方网格） -->
+    <div if="{{elemSearched && !referenceOpen}}" class="panel">
+      <div class="panel-hd">
+        <text class="panel-hd-t">匹配方程式</text>
+        <text class="panel-hd-n">{{elementResults.length}} 条</text>
+      </div>
+      <text if="{{elementResults.length === 0}}" class="panel-none">没有同时含这些元素的方程式</text>
+      <scroll if="{{elementResults.length > 0}}" scroll-y="true" class="panel-list">
+        <div class="eq-item" for="{{elementResults}}" tid="rid" @click="openEquation($item)">
+          <text class="eq-item-text">{{$item.text}}</text>
+          <text class="eq-item-type">{{$item.type}}</text>
         </div>
       </scroll>
     </div>
 
-    <!-- 参考资料：沿用已有本地物质目录，不新增网络资源 -->
-    <div if="{{showReference}}" class="reference-panel">
-      <div class="panel-heading">
-        <text class="panel-heading-text">常用物质</text>
+    <!-- 功能区 B：常用物质目录 -->
+    <div if="{{referenceOpen}}" class="panel">
+      <div class="panel-hd">
+        <text class="panel-hd-t">常用物质（点选加入）</text>
         <text class="panel-close" @click="toggleReference">×</text>
       </div>
-      <scroll scroll-y="true" class="reference-scroll">
-        <div class="reference-item" for="{{catalog}}" @click="pickName($item)">
-          <text class="reference-name">{{$item}}</text>
+      <scroll scroll-y="true" class="panel-list">
+        <div class="ref-item" for="{{catalogRows}}" tid="rid" @click="pickName($item)">
+          <text class="ref-item-t">{{$item.label}}</text>
         </div>
       </scroll>
     </div>
 
-    <!-- 与原应用一致的同款输入法；输入页不再自绘键盘 -->
+    <!-- 功能区 C：四宫格快捷入口（默认态） -->
+    <div if="{{!elemSearched && !referenceOpen}}" class="grid">
+      <div class="g-card" @click="openMass(false)">
+        <div class="g-icon"><text class="g-icon-t">质</text></div>
+        <div class="g-copy">
+          <text class="g-title">质量计算</text>
+          <text class="g-sub">已知质量求各物</text>
+        </div>
+      </div>
+      <div class="g-card" @click="openMass(true)">
+        <div class="g-icon g-icon-alt"><text class="g-icon-t-alt">逆</text></div>
+        <div class="g-copy">
+          <text class="g-title">反向计算</text>
+          <text class="g-sub">由生成物反推</text>
+        </div>
+      </div>
+      <div class="g-card" @click="gotoElementMode">
+        <div class="g-icon"><text class="g-icon-t">元</text></div>
+        <div class="g-copy">
+          <text class="g-title">元素查询</text>
+          <text class="g-sub">按元素找方程</text>
+        </div>
+      </div>
+      <div class="g-card" @click="clearAll">
+        <div class="g-icon g-icon-warn"><text class="g-icon-t-warn">清</text></div>
+        <div class="g-copy">
+          <text class="g-title">清空重置</text>
+          <text class="g-sub">重新开始输入</text>
+        </div>
+      </div>
+    </div>
+
+    <!-- 共享输入法：与考点阅读器同款，hide 直接驱动 -->
     <input-method hide="{{!showKb}}" keyboardtype="QWERTY" screentype="rect" maxlength="60"
       vibratemode="short" @complete="onInput" @delete="onDel"></input-method>
   </div>
@@ -125,76 +124,61 @@ import { parseElementQuery, searchEquations, buildReactionFromBank, equationText
 
 export default {
   private: {
-    mode: 'reaction',
+    mode: 'reaction',        // reaction=反应推导 element=元素查方程
     inputStr: '',
     showKb: false,
-    catalog: [],
     elemSearched: false,
     elementResults: [],
-    showReference: false
+    referenceOpen: false,
+    catalogRows: []
   },
 
-  onInit() {
-    const seen = {}
-    const list = []
-    for (const group of CATALOG) {
-      for (const formula of group.items) {
-        if (seen[formula]) continue
-        seen[formula] = true
-        const name = formulaName(formula)
-        list.push(name && name !== formula ? name + '  ' + formula : formula)
-      }
-    }
-    this.catalog = list
-  },
-
-  setMainMode(nextMode) {
-    this.mode = nextMode
+  setMode(next) {
+    if (this.mode === next) return
+    this.mode = next
     this.inputStr = ''
     this.showKb = false
     this.elemSearched = false
     this.elementResults = []
-    this.showReference = false
   },
 
   toggleKb() {
-    this.showReference = false
+    this.referenceOpen = false
     this.showKb = !this.showKb
   },
 
-  // 输入法返回原始字符；化学式保留用户主动选择的大写字母。
+  /** 输入法回传单字符；按模式过滤，非法字符静默丢弃 */
   onInput(e) {
     if (!e || !e.detail) return
     const ch = String(e.detail.content || '')
-    if (!ch) return
+    if (!ch || this.inputStr.length >= 120) return
 
     if (this.mode === 'element') {
-      if (ch === ' ' || ch === '+' || ch === '，' || ch === ',' || ch === '、') {
-        if (this.inputStr && !this.inputStr.endsWith(' ')) this.inputStr += ' '
-      } else if (/^[A-Za-z0-9]+$/.test(ch)) {
-        // 不调用 toLowerCase：元素查询同样允许用户输入 Fe、O 等大小写形式。
+      // 元素查询：仅接受字母/数字，分隔符统一折叠为单个空格
+      if (/^[A-Za-z0-9]+$/.test(ch)) {
         this.inputStr += ch
+      } else if (this.inputStr && this.inputStr.slice(-1) !== ' ') {
+        this.inputStr += ' '
       }
       return
     }
 
-    if (ch === ' ' || ch === '+' || ch === '＋') {
-      if (this.inputStr && !this.inputStr.endsWith('+')) this.inputStr += '+'
+    // 反应计算：加号去重；字母自动处理大小写（新段首/数字后补大写，
+    // 其余小写 —— 与化学式书写规则一致，用户通过大写键主动输入的大写原样保留）
+    if (ch === ' ' || ch === '+') {
+      if (this.inputStr && this.inputStr.slice(-1) !== '+') this.inputStr += '+'
       return
     }
-
     if (/^[A-Za-z]$/.test(ch)) {
-      if (this.inputStr.length >= 140) return
-      const tail = this.inputStr.split(/[+()\[\]]/).pop() || ''
-      // 仅对输入法给出的“小写首字母”做便捷补大写；用户点出的主动大写原样保留。
-      const needUpper = tail === '' || /[0-9]$/.test(tail)
-      const value = needUpper && ch === ch.toLowerCase() ? ch.toUpperCase() : ch
-      this.inputStr += value
+      const seg = this.inputStr.split(/[+()[\]]/).pop() || ''
+      const needUpper = seg === '' || /[0-9]$/.test(seg)
+      const lower = ch.toLowerCase()
+      const upper = ch.toUpperCase()
+      this.inputStr += (needUpper && ch === lower) ? upper : ch
       return
     }
-
-    if (/^[0-9()\[\]]$/.test(ch) || /[^\x00-\x7F]/.test(ch)) {
-      if (this.inputStr.length < 140) this.inputStr += ch
+    if (/^[0-9()[\]]$/.test(ch)) {
+      this.inputStr += ch
     }
   },
 
@@ -202,111 +186,130 @@ export default {
     if (this.inputStr.length > 0) this.inputStr = this.inputStr.slice(0, -1)
   },
 
-  pickName(displayName) {
-    const raw = String(displayName || '')
-    const splitAt = raw.indexOf('  ')
-    const name = splitAt >= 0 ? raw.substring(0, splitAt) : raw
-    if (!name) return
-    if (!this.inputStr || this.inputStr.endsWith('+')) {
-      this.inputStr += name
-    } else {
-      this.inputStr += '+' + name
-    }
-    this.showReference = false
-    prompt.showToast({ message: '已加入 ' + name, duration: 900 })
-  },
-
   onAction() {
-    this.showReference = false
-    if (this.mode === 'element') {
-      this.doElementSearch()
-    } else {
-      this.calc()
-    }
+    this.showKb = false
+    if (this.mode === 'element') this.doElementSearch()
+    else this.calcReaction()
   },
 
-  calc() {
-    if (!this.inputStr) {
-      prompt.showToast({ message: '请先输入反应物', duration: 1500 })
-      return
-    }
-    const tokens = splitInputTokens(this.inputStr)
-    if (!tokens.length) {
-      prompt.showToast({ message: '无有效反应物', duration: 1500 })
-      return
-    }
+  calcReaction() {
+    const raw = this.inputStr.trim()
+    if (!raw) { prompt.showToast({ message: '请先输入反应物', duration: 1500 }); return }
+    const tokens = splitInputTokens(raw)
+    if (!tokens.length) { prompt.showToast({ message: '无有效反应物', duration: 1500 }); return }
+
     const formulas = []
-    for (const token of tokens) {
-      const resolved = resolveToken(token, NAME_MAP)
-      if (!resolved.ok) {
-        prompt.showToast({ message: resolved.error, duration: 2000 })
-        return
-      }
+    for (let i = 0; i < tokens.length; i++) {
+      const resolved = resolveToken(tokens[i], NAME_MAP)
+      if (!resolved.ok) { prompt.showToast({ message: resolved.error, duration: 2200 }); return }
       formulas.push(resolved.formula)
     }
     const result = solveReaction(formulas)
-    if (!result.ok) {
-      prompt.showToast({ message: result.error, duration: 2500 })
-      return
-    }
+    if (!result.ok) { prompt.showToast({ message: result.error, duration: 2600 }); return }
+
     this.$app.$data.reaction = result.reaction
     router.push({ uri: 'pages/result' })
   },
 
   doElementSearch() {
     const query = parseElementQuery(this.inputStr)
-    if (!query.ok) {
-      prompt.showToast({ message: query.error, duration: 2000 })
-      return
+    if (!query.ok) { prompt.showToast({ message: query.error, duration: 2000 }); return }
+
+    let hits = []
+    try {
+      hits = searchEquations(query.elems, 50)
+    } catch (err) {
+      hits = []
     }
-    const hits = searchEquations(query.elems, 50)
-    this.elementResults = hits.map((entry, index) => ({
-      text: equationText(entry),
-      type: entry.t,
-      entry: entry,
-      rid: 'e' + index
-    }))
+    const rows = []
+    for (let i = 0; i < hits.length; i++) {
+      rows.push({ text: equationText(hits[i]), type: hits[i].t, entry: hits[i], rid: 'e' + i })
+    }
+    this.elementResults = rows
     this.elemSearched = true
     this.showKb = false
-    if (hits.length === 0) {
-      prompt.showToast({ message: '未找到含这些元素的方程式', duration: 2000 })
-    }
+    if (rows.length === 0) prompt.showToast({ message: '未找到匹配方程式', duration: 1800 })
   },
 
-  openElementMode() {
-    this.setMainMode('element')
+  gotoElementMode() {
+    this.setMode('element')
+    this.referenceOpen = false
+    this.elemSearched = false
+    this.elementResults = []
     this.showKb = true
   },
 
   openEquation(item) {
-    const reaction = buildReactionFromBank(item.entry)
-    this.$app.$data.reaction = reaction
+    this.$app.$data.reaction = buildReactionFromBank(item.entry)
     router.push({ uri: 'pages/result' })
   },
 
   openMass(reverse) {
     const reaction = this.$app.$data.reaction
     if (!reaction) {
-      prompt.showToast({ message: '请先计算一条反应方程式', duration: 1800 })
+      prompt.showToast({ message: '请先计算一条方程式', duration: 1600 })
       return
     }
-    if (reverse) this.$app.$data.massKnownIdx = reaction.reactants.length
+    this.$app.$data.massKnownIdx = reverse ? reaction.reactants.length : 0
     router.push({ uri: 'pages/mass' })
   },
 
+  /** 首次打开物质表才构建 120 行目录数据（懒加载，降低首帧负担） */
   toggleReference() {
     this.showKb = false
-    this.showReference = !this.showReference
+    this.referenceOpen = !this.referenceOpen
+    if (this.referenceOpen && this.catalogRows.length === 0) {
+      const seen = {}
+      const rows = []
+      let n = 0
+      for (let g = 0; g < CATALOG.length; g++) {
+        const items = CATALOG[g].items
+        for (let i = 0; i < items.length; i++) {
+          const f = items[i]
+          if (seen[f]) continue
+          seen[f] = true
+          const name = formulaName(f)
+          rows.push({ label: name && name !== f ? name + ' ' + f : f, rid: 'c' + (n++) })
+        }
+      }
+      this.catalogRows = rows
+    }
+  },
+
+  pickName(item) {
+    const label = String(item.label || '')
+    const cut = label.indexOf(' ')
+    const name = cut > 0 ? label.substring(0, cut) : label
+    if (!name) return
+    if (!this.inputStr || this.inputStr.slice(-1) === '+') this.inputStr += name
+    else if (this.inputStr.length + name.length < 120) this.inputStr += '+' + name
+    prompt.showToast({ message: '已加入 ' + name, duration: 800 })
+  },
+
+  /** 一键清空：输入、结果、面板、键盘全部复位 */
+  clearAll() {
+    this.inputStr = ''
+    this.showKb = false
+    this.elemSearched = false
+    this.elementResults = []
+    this.referenceOpen = false
+    prompt.showToast({ message: '已清空', duration: 800 })
   },
 
   onSwipe(e) {
     if (e && e.direction === 'right') {
-      if (this.showKb) {
+      if (this.showKb || this.referenceOpen) {
         this.showKb = false
+        this.referenceOpen = false
       } else {
         router.back()
       }
     }
+  },
+
+  onBackPress() {
+    router.back()
+    return true
   }
 }
 </script>
@@ -314,340 +317,291 @@ export default {
 <style>
 @import '../../common/style.css';
 
-.home-page {
-  background-color: #030305;
-}
-
-.home-header {
-  position: absolute;
-  left: 0px;
-  top: 0px;
+.screen {
   width: 336px;
-  height: 76px;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  padding-left: 22px;
-  padding-right: 24px;
-}
-
-.home-title {
-  font-size: 38px;
-  line-height: 46px;
-  font-weight: bold;
-  color: #f4f3ff;
-}
-
-.calculator-mark {
-  width: 48px;
-  height: 48px;
-  border-width: 3px;
-  border-color: #a59bff;
-  border-radius: 15px;
-  justify-content: center;
-  align-items: center;
-}
-
-.calculator-screen {
-  width: 25px;
-  height: 7px;
-  border-width: 2px;
-  border-color: #c1baff;
-  border-radius: 5px;
-  margin-bottom: 4px;
-}
-
-.calculator-dots {
-  width: 28px;
-  height: 18px;
-  flex-direction: row;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  align-content: space-between;
-}
-
-.calculator-dot {
-  width: 9px;
-  height: 7px;
-  border-radius: 3px;
-  background-color: #a59bff;
-}
-
-.main-tabs {
-  position: absolute;
-  left: 22px;
-  top: 82px;
-  width: 292px;
-  height: 54px;
-  flex-direction: row;
-  justify-content: space-around;
-}
-
-.main-tab {
-  width: 140px;
-  height: 54px;
-  align-items: center;
-  justify-content: flex-end;
-}
-
-.main-tab-on {
-  font-size: 27px;
-  font-weight: bold;
-  color: #8179ff;
-  line-height: 36px;
-}
-
-.main-tab-off {
-  font-size: 27px;
-  font-weight: bold;
-  color: rgba(255,255,255,0.52);
-  line-height: 36px;
-}
-
-.main-tab-line {
-  width: 58px;
-  height: 4px;
-  border-radius: 3px;
-  background-color: #766dff;
-  margin-top: 7px;
-}
-
-.tabs-divider {
-  position: absolute;
-  left: 20px;
-  top: 136px;
-  width: 296px;
-  height: 1px;
-  background-color: rgba(255,255,255,0.12);
-}
-
-.home-input-card {
-  position: absolute;
-  left: 21px;
-  top: 145px;
-  width: 294px;
-  height: 96px;
-  border-width: 1px;
-  border-color: #34343e;
-  border-radius: 22px;
-  background-color: #111216;
-  padding: 14px 16px;
-  justify-content: center;
-}
-
-.input-copy {
+  height: 480px;
+  background-color: #000000;
   flex-direction: column;
 }
 
-.input-placeholder-large {
+/* ---- 顶栏 ---- */
+.hd {
+  width: 336px;
+  height: 66px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 16px 0 18px;
+}
+.hd-title {
+  font-size: 34px;
+  line-height: 42px;
+  font-weight: bold;
+  color: #ffffff;
+}
+.hd-btn {
+  min-width: 96px;
+  height: 44px;
+  border-radius: 22px;
+  background-color: #1c1c1e;
+  justify-content: center;
+  align-items: center;
+  padding: 0 16px;
+}
+.hd-btn-t {
   font-size: 22px;
-  line-height: 30px;
-  color: rgba(255,255,255,0.55);
+  color: rgba(255, 255, 255, 0.75);
+}
+.hd-btn-t-on {
+  font-size: 22px;
+  font-weight: bold;
+  color: #0d84ff;
 }
 
-.input-placeholder-small {
-  font-size: 19px;
-  line-height: 27px;
-  color: rgba(255,255,255,0.38);
+/* ---- 模式切换 ---- */
+.seg {
+  width: 304px;
+  height: 52px;
+  margin: 10px 16px 0;
+  border-radius: 26px;
+  background-color: #1a1a1c;
+  flex-direction: row;
+}
+.seg-cell {
+  width: 152px;
+  height: 52px;
+  border-radius: 26px;
+  background-color: #1a1a1c;
+  justify-content: center;
+  align-items: center;
+}
+.seg-cell-on {
+  width: 152px;
+  height: 52px;
+  border-radius: 26px;
+  background-color: #0d6eff;
+  justify-content: center;
+  align-items: center;
+}
+.seg-t {
+  font-size: 25px;
+  color: rgba(255, 255, 255, 0.55);
+}
+.seg-t-on {
+  font-size: 25px;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+/* ---- 输入卡片 ---- */
+.input-card {
+  width: 304px;
+  height: 90px;
+  margin: 10px 16px 0;
+  border-radius: 22px;
+  background-color: #161618;
+  border-width: 1px;
+  border-color: #2e2e33;
+  padding: 10px 16px;
+  justify-content: center;
+}
+.input-empty {
+  flex-direction: column;
+}
+.input-ph-main {
+  font-size: 23px;
+  line-height: 31px;
+  color: rgba(255, 255, 255, 0.6);
+}
+.input-ph-sub {
+  font-size: 18px;
+  line-height: 25px;
+  color: rgba(255, 255, 255, 0.35);
   margin-top: 3px;
 }
-
-.home-input-value {
-  width: 260px;
-  font-size: 27px;
+.input-value {
+  width: 272px;
+  font-size: 26px;
   line-height: 34px;
   color: #ffffff;
   lines: 2;
   text-overflow: ellipsis;
 }
-
-.home-input-caret {
-  position: absolute;
-  left: 15px;
-  bottom: 7px;
-  font-size: 28px;
-  color: #ffffff;
+.input-caret {
+  font-size: 26px;
+  color: #0d84ff;
 }
 
-.hero-action {
-  position: absolute;
-  left: 21px;
-  top: 251px;
-  width: 294px;
-  height: 54px;
-  border-radius: 21px;
-  background-color: #5856e8;
-  flex-direction: row;
+/* ---- 主操作 ---- */
+.act {
+  width: 304px;
+  height: 58px;
+  margin: 10px 16px 0;
+  border-radius: 29px;
+  background-color: #0d6eff;
   justify-content: center;
   align-items: center;
 }
-
-.hero-flask {
-  font-size: 35px;
-  color: #ffffff;
-  line-height: 40px;
-  margin-right: 13px;
-}
-
-.hero-action-text {
-  font-size: 26px;
+.act-t {
+  font-size: 27px;
   font-weight: bold;
   color: #ffffff;
 }
 
-.feature-grid {
-  position: absolute;
-  left: 21px;
-  top: 318px;
-  width: 294px;
-  height: 124px;
+/* ---- 四宫格 ---- */
+.grid {
+  width: 304px;
+  height: 126px;
+  margin: 10px 16px 0;
   flex-direction: row;
   flex-wrap: wrap;
   justify-content: space-between;
   align-content: space-between;
 }
-
-.feature-card {
-  width: 142px;
-  height: 57px;
-  border-width: 1px;
-  border-color: #2c2d36;
-  border-radius: 20px;
-  background-color: #111216;
+.g-card {
+  width: 147px;
+  height: 58px;
+  border-radius: 18px;
+  background-color: #1c1c1e;
   flex-direction: row;
   align-items: center;
-  padding-left: 10px;
-  padding-right: 6px;
+  padding-left: 9px;
 }
-
-.feature-icon {
-  width: 39px;
-  font-size: 29px;
-  line-height: 35px;
-  color: #9b91ff;
-  text-align: center;
-  margin-right: 6px;
+.g-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 13px;
+  background-color: rgba(13, 110, 255, 0.22);
+  justify-content: center;
+  align-items: center;
+  margin-right: 8px;
 }
-
-.equation-icon {
-  font-size: 23px;
+.g-icon-alt {
+  background-color: rgba(48, 176, 122, 0.22);
+}
+.g-icon-warn {
+  background-color: rgba(255, 159, 10, 0.2);
+}
+.g-icon-t {
+  font-size: 22px;
   font-weight: bold;
+  color: #4da3ff;
 }
-
-.feature-copy {
-  flex: 1;
+.g-icon-t-alt {
+  font-size: 22px;
+  font-weight: bold;
+  color: #35d08e;
+}
+.g-icon-t-warn {
+  font-size: 22px;
+  font-weight: bold;
+  color: #ffb340;
+}
+.g-copy {
+  width: 88px;
   flex-direction: column;
 }
-
-.feature-title {
+.g-title {
   font-size: 20px;
-  line-height: 25px;
-  color: #ffffff;
+  line-height: 26px;
   font-weight: bold;
+  color: #ffffff;
 }
-
-.feature-subtitle {
-  font-size: 15px;
-  line-height: 20px;
-  color: rgba(255,255,255,0.48);
+.g-sub {
+  font-size: 14px;
+  line-height: 19px;
+  color: rgba(255, 255, 255, 0.4);
   lines: 1;
   text-overflow: ellipsis;
 }
 
-.query-panel,
-.reference-panel {
-  position: absolute;
-  left: 21px;
-  top: 318px;
-  width: 294px;
-  height: 143px;
-  border-width: 1px;
-  border-color: #30313b;
+/* ---- 结果/目录面板 ---- */
+.panel {
+  width: 304px;
+  height: 184px;
+  margin: 10px 16px 0;
   border-radius: 20px;
-  background-color: #111216;
-  padding: 9px 10px;
+  background-color: #141416;
+  border-width: 1px;
+  border-color: #2a2a30;
   flex-direction: column;
+  padding: 10px 12px;
 }
-
-.panel-heading {
-  width: 274px;
-  height: 28px;
+.panel-hd {
+  width: 280px;
+  height: 30px;
   flex-direction: row;
   justify-content: space-between;
   align-items: center;
 }
-
-.panel-heading-text {
-  font-size: 20px;
+.panel-hd-t {
+  font-size: 21px;
   font-weight: bold;
   color: #ffffff;
 }
-
-.panel-heading-count {
-  font-size: 16px;
-  color: #8e86ff;
+.panel-hd-n {
+  font-size: 17px;
+  color: #4da3ff;
 }
-
 .panel-close {
+  width: 40px;
+  height: 30px;
+  text-align: center;
   font-size: 28px;
-  line-height: 28px;
-  color: rgba(255,255,255,0.65);
+  color: rgba(255, 255, 255, 0.65);
 }
-
-.panel-empty {
-  width: 274px;
+.panel-none {
+  width: 280px;
   text-align: center;
   font-size: 18px;
-  color: rgba(255,255,255,0.42);
-  margin-top: 37px;
+  color: rgba(255, 255, 255, 0.4);
+  margin-top: 46px;
+}
+.panel-list {
+  width: 280px;
+  height: 140px;
+  margin-top: 5px;
 }
 
-.query-scroll,
-.reference-scroll {
-  width: 274px;
-  height: 102px;
-  margin-top: 3px;
-}
-
-.query-item {
-  width: 274px;
-  height: 43px;
-  border-radius: 11px;
-  background-color: #25262d;
-  padding: 5px 9px;
-  margin-bottom: 5px;
+.eq-item {
+  width: 280px;
+  height: 52px;
+  border-radius: 12px;
+  background-color: #222226;
+  padding: 5px 10px;
+  margin-bottom: 6px;
   flex-direction: column;
+  justify-content: center;
 }
-
-.query-text {
-  width: 256px;
-  font-size: 17px;
-  line-height: 21px;
+.eq-item-text {
+  width: 260px;
+  font-size: 18px;
+  line-height: 23px;
   color: #ffffff;
   lines: 1;
   text-overflow: ellipsis;
 }
-
-.query-type {
+.eq-item-type {
   font-size: 14px;
-  line-height: 17px;
-  color: #8d9dff;
+  line-height: 18px;
+  color: #4da3ff;
+  margin-top: 1px;
 }
 
-.reference-item {
-  width: 274px;
-  height: 30px;
-  border-radius: 9px;
-  background-color: #25262d;
-  padding: 4px 10px;
-  margin-bottom: 4px;
+.ref-item {
+  width: 280px;
+  height: 38px;
+  border-radius: 10px;
+  background-color: #222226;
+  padding: 0 10px;
+  margin-bottom: 5px;
+  justify-content: center;
 }
-
-.reference-name {
-  width: 254px;
-  font-size: 17px;
-  line-height: 22px;
-  color: rgba(255,255,255,0.82);
+.ref-item-t {
+  width: 260px;
+  font-size: 18px;
+  line-height: 24px;
+  color: rgba(255, 255, 255, 0.85);
   lines: 1;
   text-overflow: ellipsis;
 }

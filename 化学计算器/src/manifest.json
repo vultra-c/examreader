@@ -1,8 +1,8 @@
 {
   "package": "com.whyy.chemcalc",
   "name": "化学工具箱",
-  "versionName": "V26.8.30.CALC",
-  "versionCode": 2608300,
+  "versionName": "V26.8.31.CALC",
+  "versionCode": 2608310,
   "minPlatformVersion": 1200,
   "minAPILevel": 1,
   "icon": "/common/images/icon.png",
