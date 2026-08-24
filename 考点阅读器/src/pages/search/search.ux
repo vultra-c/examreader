@@ -6,7 +6,7 @@
     <!-- Search box (pill-shaped) -->
     <div class="search-box">
       <img src="/common/images/search.png" class="search-icon" @click="doSearch" />
-      <div style="flex: 1; height: 54px; justify-content: center; align-items: center;" @click="toggleKeyboard">
+      <div style="flex: 1; height: 54px; justify-content: center; align-items: center; padding: 0 14px;" @click="toggleKeyboard">
         <text class="search-text" show="{{searchText.length > 0}}">{{searchDisplay}}</text>
         <text class="search-ph" show="{{searchText.length == 0}}">输入要搜索的内容</text>
       </div>
@@ -124,10 +124,10 @@ export default {
   },
 
   // 输入内容可以继续超过 5 个字符；显示区只显示前 5 个字符和省略号，
-  // 明确保留第 5 个字符，避免 text-overflow 在清除按钮下方把它遮掉。
+  // 明确保留第 5 个字符，省略号追加在其后，不再被容器宽度裁剪。
   updateSearchDisplay() {
     const value = String(this.searchText || '')
-    this.searchDisplay = value.length > 5 ? value.substring(0, 5) + '...' : value
+    this.searchDisplay = value.length > 5 ? value.substring(0, 5) + '…' : value
   },
 
   // Clear the search text and reset state
@@ -284,15 +284,16 @@ export default {
     height: 34px;
   }
   .search-text {
-    width: 240px;
+    flex: 1;
     font-size: 24px;
     font-weight: bold;
     color: #FFFFFF;
     text-align: center;
     lines: 1;
-    text-overflow: clip;
+    text-overflow: ellipsis;
   }
   .search-ph {
+    flex: 1;
     font-size: 24px;
     color: rgba(255, 255, 255, 0.3);
     text-align: center;

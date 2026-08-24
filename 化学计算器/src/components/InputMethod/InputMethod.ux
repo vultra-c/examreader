@@ -1,5 +1,5 @@
 <template>
-  <div class="page {{kbdState}}" style="flex-direction: column;" show="{{!hide || kbdShown}}">
+  <div class="page {{kbdState}}" style="flex-direction: column;" show="{{kbdShown}}">
     <!-- 键盘内容懒建：外 if 保证键盘隐藏时整个子树不进 VDOM（chat/search 首进 1s 卡顿根因：
          旧实现 show 只是不可见，200+ 节点/图片在进页瞬间全部创建），首次弹出才创建，
          之后 keyboardCreated 保活、hide 切换只走内层 show 显隐，不重复重建。 -->
@@ -400,7 +400,7 @@ export default {
     // 键盘子树是否已建入 DOM：首次弹出置 true 保活（之后 hide 只走 show 显隐，不重建）
     keyboardCreated: false,
     // 键盘显示/隐藏动画状态：kbd-show 启动、kbd-hide 关闭，空串为已隐藏
-    kbdShown: true,
+    kbdShown: false,
     kbdState: "",
     hideTimer: null,
     showTimer: null,
@@ -481,6 +481,9 @@ export default {
     if (!this.hide) {
       // 挂载即展开的用法：键盘显式直接创建并保活
       this.keyboardCreated = true
+    } else {
+      // 默认收起：键盘子树不创建，点开时由 hide watch 懒建，避免常驻遮挡
+      this.keyboardCreated = false
     }
     this.$watch("hide", "watchHidePropsChange");
     this.$watch("maxlength", "watchMaxLengthPropsChange");
@@ -872,10 +875,12 @@ export default {
 	left:0;
 	bottom:0
 }
-/* 首帧起始态：直接可见（不依赖 hide watch / 定时器链，部分机型 watch 不可靠
-   会导致 kbdState 停在 kbd-init 而键盘永久不可见）。动画由 kbd-show 类提供，
-   即使动画类未切换，键盘也保证可见可用。 */
+/* 首帧隐藏起始态：与 kbd-enter 的 from 帧一致。首次打开键盘时子树才创建，
+   若首帧为无动画完全可见态，30ms 后切 kbd-show 会产生「闪现一帧再滑入」的闪屏，
+   故首帧先用本类保持不可见，再切 kbd-show 无缝入场。 */
 .kbd-init {
+	opacity: 0;
+	transform: translateY(100%);
 }
 .kbd-show {
 	animation-name: kbd-enter;
