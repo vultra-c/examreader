@@ -1,8 +1,8 @@
 {
   "package": "com.whyy.snapnotes",
   "name": "闪念小抄",
-  "versionName": "V26.8.16.BAND",
-  "versionCode": 2608160,
+  "versionName": "V26.8.17.BAND",
+  "versionCode": 2608170,
   "minPlatformVersion": 1200,
   "minAPILevel": 1,
   "icon": "/common/images/icon.png",

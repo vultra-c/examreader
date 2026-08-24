@@ -1,8 +1,8 @@
 {
   "package": "com.whyy.chemcalc",
   "name": "化学计算器",
-  "versionName": "V26.8.24.CALC",
-  "versionCode": 2608240,
+  "versionName": "V26.8.25.CALC",
+  "versionCode": 2608250,
   "minPlatformVersion": 1200,
   "minAPILevel": 1,
   "icon": "/common/images/icon.png",
@@ -18,6 +18,9 @@
     },
     {
       "name": "system.vibrator"
+    },
+    {
+      "name": "system.device"
     }
   ],
   "config": {

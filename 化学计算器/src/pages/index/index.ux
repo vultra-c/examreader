@@ -1,3 +1,7 @@
+<import name="formula-text" src="../../components/FormulaText/FormulaText.ux"></import>
+
+<import name="input-method" src="../../components/InputMethod/InputMethod.ux"></import>
+
 <template>
   <div class="page" @swipe="onSwipe">
     <!-- 标题栏 -->
@@ -6,86 +10,68 @@
       <text class="topbar-sub" style="margin-left: 10px;">离线反应推导</text>
     </div>
 
-    <list class="body-list">
+    <!-- 可滚动内容区 -->
+    <div class="scroll-area">
       <!-- 已输入内容 -->
-      <list-item type="disp" class="li-full">
-        <div class="input-display">
-          <text if="{{inputStr}}" class="input-display-text">{{inputStr}}</text>
-          <text else class="input-display-hint">输入反应物，用 + 分隔（如 HCl+NaOH 或 盐酸+烧碱）</text>
-        </div>
-      </list-item>
+      <div class="input-display">
+        <text if="{{inputStr}}" class="input-display-text">{{inputStr}}</text>
+        <text else class="input-display-hint">输入反应物，用 + 分隔（如 HCl+NaOH）</text>
+      </div>
 
       <!-- 模式切换 -->
-      <list-item type="tabs" class="li-full">
-        <div class="tab-row">
-          <div class="tab-item {{mode === 'formula' ? 'tab-active' : ''}}" @click="setMode('formula')">
-            <text class="{{mode === 'formula' ? 'tab-active-text' : 'tab-text'}}">化学式</text>
-          </div>
-          <div class="tab-item {{mode === 'name' ? 'tab-active' : ''}}" @click="setMode('name')">
-            <text class="{{mode === 'name' ? 'tab-active-text' : 'tab-text'}}">名称</text>
-          </div>
+      <div class="tab-row">
+        <div class="tab-item {{mode === 'formula' ? 'tab-active' : ''}}" @click="setMode('formula')">
+          <text class="{{mode === 'formula' ? 'tab-active-text' : 'tab-text'}}">化学式</text>
         </div>
-      </list-item>
+        <div class="tab-item {{mode === 'name' ? 'tab-active' : ''}}" @click="setMode('name')">
+          <text class="{{mode === 'name' ? 'tab-active-text' : 'tab-text'}}">名称</text>
+        </div>
+      </div>
 
       <!-- 化学式键盘 -->
-      <block if="{{mode === 'formula'}}">
-        <list-item type="kb1" class="li-full">
-          <div class="kb-row" for="{{kbRow1}}">
-            <div class="kb-key" @click="onLetter($item)"><text class="kb-key-text">{{$item}}</text></div>
+      <div if="{{mode === 'formula'}}">
+        <div class="kb-row">
+          <div class="kb-key" for="{{kbRow1}}" @click="onLetter($item)"><text class="kb-key-text">{{$item}}</text></div>
+        </div>
+        <div class="kb-row">
+          <div class="kb-key" for="{{kbRow2}}" @click="onLetter($item)"><text class="kb-key-text">{{$item}}</text></div>
+        </div>
+        <div class="kb-row">
+          <div class="kb-key {{shiftOn ? 'kb-key-wide' : ''}} kb-key-fn" @click="onShift">
+            <text class="kb-key-fn-text">{{shiftOn ? '⇪' : '⇧'}}</text>
           </div>
-        </list-item>
-        <list-item type="kb2" class="li-full">
-          <div class="kb-row" for="{{kbRow2}}">
-            <div class="kb-key" @click="onLetter($item)"><text class="kb-key-text">{{$item}}</text></div>
-          </div>
-        </list-item>
-        <list-item type="kb3" class="li-full">
-          <div class="kb-row">
-            <div class="kb-key {{shiftOn ? 'kb-key-wide' : ''}} kb-key-fn" @click="onShift">
-              <text class="kb-key-fn-text">{{shiftOn ? '⇪' : '⇧'}}</text>
-            </div>
-            <div class="kb-key" for="{{kbRow3}}" @click="onLetter($item)"><text class="kb-key-text">{{$item}}</text></div>
-            <div class="kb-key kb-key-fn" @click="onDel"><text class="kb-key-fn-text">⌫</text></div>
-          </div>
-        </list-item>
-        <list-item type="kb4" class="li-full">
-          <div class="kb-row">
-            <div class="kb-key kb-key-fn" style="width: 52px;" @click="onChar('(')"><text class="kb-key-fn-text">(</text></div>
-            <div class="kb-key kb-key-fn" style="width: 52px;" @click="onChar(')')"><text class="kb-key-fn-text">)</text></div>
-            <div class="kb-key kb-key-wide" @click="onPlus"><text class="kb-key-wide-text">+</text></div>
-            <div class="kb-key kb-key-fn" style="width: 72px;" @click="onClearAll"><text class="kb-key-fn-text" style="color: #FF6B6B;">清空</text></div>
-          </div>
-        </list-item>
-        <list-item type="kb5" class="li-full">
-          <div class="kb-row" for="{{digitRow}}">
-            <div class="kb-key" @click="onDigit($item)"><text class="kb-key-text">{{$item}}</text></div>
-          </div>
-        </list-item>
-      </block>
+          <div class="kb-key" for="{{kbRow3}}" @click="onLetter($item)"><text class="kb-key-text">{{$item}}</text></div>
+          <div class="kb-key kb-key-fn" @click="onDel"><text class="kb-key-fn-text">⌫</text></div>
+        </div>
+        <div class="kb-row">
+          <div class="kb-key kb-key-fn" style="width: 52px;" @click="onChar('(')"><text class="kb-key-fn-text">(</text></div>
+          <div class="kb-key kb-key-fn" style="width: 52px;" @click="onChar(')')"><text class="kb-key-fn-text">)</text></div>
+          <div class="kb-key kb-key-wide" @click="onPlus"><text class="kb-key-wide-text">+</text></div>
+          <div class="kb-key kb-key-fn" style="width: 72px;" @click="onClearAll"><text class="kb-key-fn-text" style="color: #FF6B6B;">清空</text></div>
+        </div>
+        <div class="kb-row">
+          <div class="kb-key" for="{{digitRow}}" @click="onDigit($item)"><text class="kb-key-text">{{$item}}</text></div>
+        </div>
+      </div>
 
       <!-- 名称目录 -->
-      <block if="{{mode === 'name'}}">
-        <list-item type="hdr" for="{{catalogGroups}}">
-          <text class="group-header">{{$item.group}}</text>
-        </list-item>
-        <list-item type="sub" for="{{catalogItems}}">
-          <div class="sub-item" @click="onPickName($item)">
-            <text class="sub-name">{{$item.dispName}}</text>
-            <formula-text segs="{{$item.segs}}"></formula-text>
-          </div>
-        </list-item>
-      </block>
+      <div if="{{mode === 'name'}}">
+        <text class="group-header" for="{{catalogGroups}}">{{$item.group}}</text>
+        <div class="sub-item" for="{{catalogItems}}" @click="onPickName($item)">
+          <text class="sub-name">{{$item.dispName}}</text>
+          <formula-text segs="{{$item.segs}}"></formula-text>
+        </div>
+      </div>
 
       <!-- 计算按钮 -->
-      <list-item type="btn" class="li-full">
-        <div class="btn-primary" @click="onCalc">
-          <text class="btn-primary-text">开始推导配平</text>
-        </div>
-      </list-item>
-      <list-item type="pad" class="li-full">
-        <div style="height: 30px;"></div>
-      </list-item>
-    </list>
+      <div class="btn-primary" @click="onCalc">
+        <text class="btn-primary-text">开始推导配平</text>
+      </div>
+      <div style="height: 20px;"></div>
+    </div>
+
+    <!-- 输入法 -->
+    <input-method id="ime" screentype="rect" keyboardtype="QWERTY" @complete="onImeComplete" @delete="onImeDelete"></input-method>
   </div>
 </template>
 
@@ -112,7 +98,7 @@ export default {
     this.kbRow3 = ['Z', 'X', 'C', 'V', 'B', 'N', 'M']
     this.digitRow = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']
 
-    // 目录数据：分组头 + 物质项
+    // 目录数据
     const groups = []
     const items = []
     const seen = {}
@@ -139,12 +125,23 @@ export default {
     this.mode = m
   },
 
-  appendToken(tok) {
-    if (!tok) return
-    const cur = this.inputStr
-    if (cur.length > 140) return
-    this.inputStr = cur && !cur.endsWith('+') ? cur + '+' + tok : cur + tok
-    this.expectUpper = true
+  onImeComplete(e) {
+    if (e && e.detail) {
+      const ch = e.detail
+      if (ch === ' ') {
+        this.onPlus()
+      } else if (/^[A-Za-z]$/.test(ch)) {
+        this.onLetter(ch)
+      } else if (/^[0-9]$/.test(ch)) {
+        this.onDigit(ch)
+      } else {
+        this.onChar(ch)
+      }
+    }
+  },
+
+  onImeDelete() {
+    this.onDel()
   },
 
   onLetter(ch) {
@@ -158,7 +155,6 @@ export default {
       out = ch.toLowerCase()
     }
     if (this.inputStr.length > 140) return
-    // 字母不能接在中文名称后面，自动补 +
     const cur = this.inputStr
     const lastTok = cur.split('+').pop() || ''
     const needSep = cur.length > 0 && !/^[A-Za-z0-9()\[\]]+$/.test(lastTok)
@@ -178,14 +174,12 @@ export default {
   onChar(c) {
     if (this.inputStr.length > 140) return
     this.inputStr += c
-    // 括号后是新元素/新基团，恢复大写
     this.expectUpper = true
   },
 
   onDigit(d) {
     if (this.inputStr.length > 140) return
     this.inputStr += d
-    // 数字结束当前元素符号，下一个字母应为新元素（大写）
     this.expectUpper = true
   },
 
@@ -203,6 +197,14 @@ export default {
   onPickName(item) {
     this.appendToken(item.dispName)
     prompt.showToast({ message: '已加入：' + item.formula, duration: 1200 })
+  },
+
+  appendToken(tok) {
+    if (!tok) return
+    const cur = this.inputStr
+    if (cur.length > 140) return
+    this.inputStr = cur && !cur.endsWith('+') ? cur + '+' + tok : cur + tok
+    this.expectUpper = true
   },
 
   onCalc() {
@@ -240,7 +242,13 @@ export default {
 <style>
 @import '../../common/style.css';
 
-.li-full {
-  width: 316px;
+.scroll-area {
+  position: absolute;
+  top: 84px;
+  left: 0px;
+  width: 336px;
+  height: 260px;
+  padding: 10px 10px 0 10px;
+  flex-direction: column;
 }
 </style>

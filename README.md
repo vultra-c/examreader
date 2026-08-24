@@ -192,7 +192,8 @@ bash build_apk.sh    # 产出考点传输.apk 并完成签名对齐
 
 | 端 | 版本号 | 版本名 |
 |------|--------|--------|
-| 手环端 | 2608160 | V26.8.16.BAND（包名 com.whyy.snapnotes；内容与 V26.8.4 一致并删除 10 个未引用图片资源（约 60KB），降低包体积与内存占用；无缝模式完整移植弦电子书 detail.ux 两段式） |
+| 手环端（考点阅读器） | 2608170 | V26.8.17.BAND（包名 com.whyy.snapnotes；输入法替换为 WenHuaYiYang/Vela_input_method 版本，移除日文输入，保留中文连打） |
+| 手环端（化学计算器） | 2608250 | V26.8.25.CALC（包名 com.whyy.chemcalc；接入同一输入法组件，修复空白屏问题） |
 | 手环端 | 260840 | V26.8.4.BAND（无缝模式完整移植弦电子书 detail.ux 两段式：page1+page2 段落块 + scroll-top 绑定 + @scrollbottom/@scrolltop 换段 + getBoundingClientRect 测高补偿，DOM 恒定、长文不卡顿不叠字可滚到底；进度改存 起始字符偏移+段内滚动像素） |
 | 手环端 | 260800 | V26.8.0.BAND（包名改为 com.whyy.snapnotes 与闪念小抄仓库一致；修复无缝模式滑不动——改为增量追加渲染；移除打开时的阅读进度闪现；脚本 TXT 传输彻底修复 + JSON 内容嗅探兜底） |
 
