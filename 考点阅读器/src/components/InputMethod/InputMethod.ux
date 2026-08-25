@@ -266,9 +266,14 @@
         <!-- 下展候选：改用普通 scroll + text（与阅读器搜索结果同款交互，点击稳定），
              与全键盘/九键同款 list/list-item 方案（scroll+for 在本机候选展开时不稳定） -->
         <list style="width:324px;height:210px;border-radius:18px;background-color:#262626;border:3px solid rgba(255,255,255,0.06);" if="{{downFlag==='down'}}">
-          <list-item type="waitingRows67" style="width:324px;height:52px;" for="{{resultList2Flat}}" tid="flat">
-            <div style="width:324px;height:52px;flex-direction:row;justify-content:center;align-items:center;border-bottom:1px solid rgba(255,255,255,0.08);">
-              <text class="calbtn-down-text" @click="onRsSelect($item)">{{$item}}</text>
+          <list-item type="waitingRows67" style="width:324px;height:58px;" for="{{resultList2Grid}}" tid="flat">
+            <div class="kbd-cand-row">
+              <text class="kbd-cand-chip" show="{{$item.s1}}" @click="onRsSelect($item.s1)">{{$item.s1}}</text>
+              <text class="kbd-cand-chip" show="{{$item.s2}}" @click="onRsSelect($item.s2)">{{$item.s2}}</text>
+              <text class="kbd-cand-chip" show="{{$item.s3}}" @click="onRsSelect($item.s3)">{{$item.s3}}</text>
+              <text class="kbd-cand-chip" show="{{$item.s4}}" @click="onRsSelect($item.s4)">{{$item.s4}}</text>
+              <text class="kbd-cand-chip" show="{{$item.s5}}" @click="onRsSelect($item.s5)">{{$item.s5}}</text>
+              <text class="kbd-cand-chip" show="{{$item.s6}}" @click="onRsSelect($item.s6)">{{$item.s6}}</text>
             </div>
           </list-item>
         </list>
@@ -398,7 +403,7 @@ export default {
     resultList: [],
     resultList2: [],
     // 下展候选的扁平数组（rect 屏普通 scroll 用）
-    resultList2Flat: [],
+    resultList2Grid: [],
     // 多拼：整词候选（最前）及其与单字合并后的首页展示序列与对应整词标记
     resultWordList: [],
     resultRow0: [],
@@ -699,12 +704,40 @@ export default {
     if (array.length > 0) {
       this.resultList2.push(array);
     }
-    // 扁平化一份供 rect 屏下展列表使用（去掉分页层级）
-    this.resultList2Flat = []
+    // rect 屏下展候选：贪心装箱成芯片行（估宽≤300px 或满 6 槽即换行）。
+    // 行对象固定 s1..s6 六个槽位，模板零运算符渲染；空槽 show=false 自动塌缩，
+    // 配合左对齐实现多字/行且排版整齐。总量封顶 120，约束节点数保流畅。
+    this.resultList2Grid = []
+    const candItems = []
     for (let i = 0; i < this.resultList2.length; i++) {
       for (let j = 0; j < this.resultList2[i].length; j++) {
-        this.resultList2Flat.push(this.resultList2[i][j])
+        if (candItems.length >= 120) break
+        candItems.push(this.resultList2[i][j])
       }
+      if (candItems.length >= 120) break
+    }
+    let gRow = []
+    let gW = 0
+    for (let k = 0; k < candItems.length; k++) {
+      const est = candItems[k].length * 24 + 24 + 8
+      if (gRow.length >= 6 || ((gW + est) > 300 && gRow.length > 0)) {
+        this.resultList2Grid.push(packCandRow(gRow, this.resultList2Grid.length))
+        gRow = []
+        gW = 0
+      }
+      gRow.push(candItems[k])
+      gW += est
+    }
+    if (gRow.length > 0) {
+      this.resultList2Grid.push(packCandRow(gRow, this.resultList2Grid.length))
+    }
+
+    function packCandRow(arr, idx) {
+      const o = { flat: 'r' + idx, s1: '', s2: '', s3: '', s4: '', s5: '', s6: '' }
+      for (let t = 0; t < arr.length && t < 6; t++) {
+        o['s' + (t + 1)] = arr[t]
+      }
+      return o
     }
   },
   getResultByWord(val) {
@@ -1031,6 +1064,29 @@ export default {
 	justify-content:center;
 	align-items:center;
 	border-bottom:1px solid rgba(255,255,255,0.08);
+}
+/* rect 下展候选芯片行：左对齐流式排布，空槽塌缩不占位 */
+.kbd-cand-row {
+	width: 324px;
+	height: 58px;
+	flex-direction: row;
+	justify-content: flex-start;
+	align-items: center;
+	padding-left: 10px;
+	border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.kbd-cand-chip {
+	height: 44px;
+	padding-left: 14px;
+	padding-right: 14px;
+	margin-right: 8px;
+	border-radius: 22px;
+	background-color: #1c1c1e;
+	color: #ffffff;
+	font-size: 24px;
+	font-weight: bold;
+	text-align: center;
+	lines: 1;
 }
 .calbtn66 {
 	color:rgb(255,255,255);

@@ -1,11 +1,12 @@
 <!--
   化学工具箱 · 常用物质表（336×480）
-  性能与可靠性要点：
-  · 行结构完全统一：list-item 静态 type="catrow"、仅一个 div 子节点，
-    模板内零运算符表达式（只有 $item.xxx 取值）——与考点阅读器已验证可用的列表同构。
-  · 分块渲染：首屏只建 CHUNK 行，「加载更多」行 / onscrollbottom 追加下一块，
-    杜绝一次性构建 100+ 圆角卡片造成的秒级卡顿。
-  · 全部数据行模块级缓存，会话内二次进入瞬时呈现。
+  可靠性三原则（与设备上已验证可用的元素查询列表完全同构）：
+  1. 结构同构：screen 为纵向 flex 流；list 固定宽高（非绝对定位嵌套）；
+     list-item 静态 type、单一 div 子节点、模板内零运算符表达式。
+  2. 时序正确：本机 list 组件挂载晚于 onInit，onInit 同步赋值的数据不会渲染
+     （此前空白的根因）。改为 onShow + setTimeout 延迟赋值，确保发生在挂载之后。
+  3. 分块渲染：首屏 CHUNK 行，「加载更多」行 / onscrollbottom 追加，杜绝整表一次性
+     构建造成的秒级卡顿；整表数据模块级缓存，会话内二次进入瞬时呈现。
 -->
 <template>
   <div class="screen" @swipe="onSwipe">
@@ -69,11 +70,18 @@ export default {
     pos: 0
   },
 
-  onInit() {
-    buildAllRows()
-    this.pos = 0
-    this.rows = []
-    this.appendChunk()
+  // 关键：不在 onInit 里同步赋值（本机 list 挂载晚于 onInit 会丢数据），
+  // 延迟到 onShow 后的下一个时钟再灌入首屏数据。
+  onShow() {
+    if (this.rows.length > 0) return
+    const self = this
+    setTimeout(function () {
+      if (!self.$valid) return
+      buildAllRows()
+      self.pos = 0
+      self.rows = []
+      self.appendChunk()
+    }, 30)
   },
 
   // 追加下一块数据；未到底时在尾部挂一个「加载更多」行（点击或滚动到底均可触发）
@@ -125,19 +133,15 @@ export default {
 <style>
 @import '../../common/style.css';
 
+/* 纵向 flex 流：与元素查询页同构 */
 .screen {
-  position: absolute;
-  left: 0px;
-  top: 0px;
   width: 336px;
   height: 480px;
   background-color: #000000;
+  flex-direction: column;
 }
 
 .hd {
-  position: absolute;
-  left: 0px;
-  top: 0px;
   width: 336px;
   height: 52px;
   flex-direction: row;
@@ -172,22 +176,20 @@ export default {
 }
 
 .sub-tip {
-  position: absolute;
-  left: 0px;
-  top: 56px;
   width: 336px;
   text-align: center;
   font-size: 16px;
   color: rgba(255, 255, 255, 0.32);
+  margin-top: 2px;
 }
 
-/* 列表区 [76,480)，绝对定位不参与 flex 流 */
+/* 列表固定尺寸（非绝对定位），与元素页 .panel-list 同思路 */
 .list {
-  position: absolute;
-  left: 16px;
-  top: 76px;
   width: 304px;
-  height: 404px;
+  height: 400px;
+  margin-left: 16px;
+  margin-right: 16px;
+  margin-top: 8px;
 }
 
 /* 所有行共用同一张卡片：标题行显示【分组名】，物质行左名称右化学式 */
