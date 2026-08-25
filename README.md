@@ -6,8 +6,8 @@
 
 | 应用 | 安装包 | 包名 | 版本 |
 |------|--------|------|------|
-| 考点阅读器（闪念小抄） | [`release/com.whyy.snapnotes.release.V26.8.26.BAND.rpk`](release/com.whyy.snapnotes.release.V26.8.26.BAND.rpk) | `com.whyy.snapnotes` | `V26.8.26.BAND` |
-| 化学工具箱 | [`release/com.whyy.chemcalc.release.V26.8.35.CALC.rpk`](release/com.whyy.chemcalc.release.V26.8.35.CALC.rpk) | `com.whyy.chemcalc` | `V26.8.35.CALC` |
+| 考点阅读器（闪念小抄） | [`release/com.whyy.snapnotes.release.V26.8.27.BAND.rpk`](release/com.whyy.snapnotes.release.V26.8.27.BAND.rpk) | `com.whyy.snapnotes` | `V26.8.27.BAND` |
+| 化学工具箱 | [`release/com.whyy.chemcalc.release.V26.8.36.CALC.rpk`](release/com.whyy.chemcalc.release.V26.8.36.CALC.rpk) | `com.whyy.chemcalc` | `V26.8.36.CALC` |
 | Android 手机端 | [`release/com.whyy.snapnotes.android.v1.0.1-debug.apk`](release/com.whyy.snapnotes.android.v1.0.1-debug.apk) | `com.whyy.snapnotes` | `1.0.1 / 2` |
 
 `.rpk` 是 Vela 安装包，`.apk` 是 Android Debug 安装包。安装包索引和安装说明见 [`release/README.md`](release/README.md)。

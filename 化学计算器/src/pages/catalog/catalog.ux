@@ -16,11 +16,13 @@
     <text class="sub-tip">点选物质，自动填入「反应计算」输入框</text>
 
     <list class="list">
-      <list-item type="{{$item.kind}}" for="{{rows}}" tid="rid" @click="onRowClick($item)">
-        <div class="{{$item.kind === 'title' ? 'row-title' : 'row-item'}}">
-          <text if="{{$item.kind === 'title'}}" class="row-title-t">{{$item.text}}</text>
-          <text if="{{$item.kind === 'item'}}" class="row-item-name">{{$item.label}}</text>
-          <text if="{{$item.kind === 'item'}}" class="row-item-f">{{$item.formula}}</text>
+      <list-item type="catrow" for="{{rows}}" tid="rid" @click="onRowClick($item)">
+        <div show="{{$item.kind === 'title'}}" class="row-title">
+          <text class="row-title-t">{{$item.text}}</text>
+        </div>
+        <div show="{{$item.kind === 'item'}}" class="row-item">
+          <text class="row-item-name">{{$item.label}}</text>
+          <text class="row-item-f">{{$item.formula}}</text>
         </div>
       </list-item>
     </list>

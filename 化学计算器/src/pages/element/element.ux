@@ -44,7 +44,7 @@
       <text if="{{elementResults.length == 0}}" class="panel-none">没有同时含这些元素的方程式</text>
       <!-- 列表组件与考点阅读器搜索结果同款：list/list-item（scroll 纵向列表在本机不可靠） -->
       <list show="{{elementResults.length > 0}}" class="panel-list">
-        <list-item type="eq" for="{{elementResults}}" tid="rid" @click="openEquation($item)">
+        <list-item type="eqrow" for="{{elementResults}}" tid="rid" @click="openEquation($item)">
           <div class="eq-item">
             <text class="eq-item-text">{{$item.text}}</text>
             <text class="eq-item-type">{{$item.type}}</text>

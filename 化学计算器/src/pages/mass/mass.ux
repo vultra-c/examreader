@@ -100,7 +100,10 @@ export default {
 
   onInit() {
     const r = this.$app.$def.reaction
-    if (!r) { this.valid = false; return }
+    if (!r || !r.coefs || !r.segs || !Array.isArray(r.coefs) || !Array.isArray(r.segs) || r.coefs.length === 0 || r.coefs.length !== r.segs.length) {
+      this.valid = false
+      return
+    }
     this.valid = true
     this._rxn = r
 
