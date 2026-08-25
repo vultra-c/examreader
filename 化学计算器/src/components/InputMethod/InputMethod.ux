@@ -704,9 +704,11 @@ export default {
     if (array.length > 0) {
       this.resultList2.push(array);
     }
-    // rect 屏下展候选：贪心装箱成芯片行（估宽≤300px 或满 6 槽即换行）。
-    // 行对象固定 s1..s6 六个槽位，模板零运算符渲染；空槽 show=false 自动塌缩，
-    // 配合左对齐实现多字/行且排版整齐。总量封顶 120，约束节点数保流畅。
+    // rect 屏下展候选：贪心装箱成芯片行。估宽按设备实测上限取值
+    // （单字实际约 66px：24 字宽 + 28 内边距 + 8 间距，粗体 CJK 步进可能大于字号），
+    // 宁可每行少放也不允许行溢出——行溢出会触发 flex 默认压缩（flex-shrink=1），
+    // 整行每个候选右边被裁掉一点；最后一行不满、不压缩，正是此前“只有末行正常”的原因。
+    // 行对象固定 s1..s6 六个槽位，模板零运算符渲染；空槽 show=false 自动塌缩。
     this.resultList2Grid = []
     const candItems = []
     for (let i = 0; i < this.resultList2.length; i++) {
@@ -719,7 +721,7 @@ export default {
     let gRow = []
     let gW = 0
     for (let k = 0; k < candItems.length; k++) {
-      const est = candItems[k].length * 24 + 24 + 8
+      const est = candItems[k].length * 30 + 38
       if (gRow.length >= 6 || ((gW + est) > 300 && gRow.length > 0)) {
         this.resultList2Grid.push(packCandRow(gRow, this.resultList2Grid.length))
         gRow = []
@@ -1076,6 +1078,7 @@ export default {
 	border-bottom: 1px solid rgba(255,255,255,0.08);
 }
 .kbd-cand-chip {
+	flex-shrink: 0;
 	height: 44px;
 	padding-left: 14px;
 	padding-right: 14px;

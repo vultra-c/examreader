@@ -1,12 +1,14 @@
 <!--
   化学工具箱 · 常用物质表（336×480）
-  可靠性三原则（与设备上已验证可用的元素查询列表完全同构）：
-  1. 结构同构：screen 为纵向 flex 流；list 固定宽高（非绝对定位嵌套）；
-     list-item 静态 type、单一 div 子节点、模板内零运算符表达式。
-  2. 时序正确：本机 list 组件挂载晚于 onInit，onInit 同步赋值的数据不会渲染
-     （此前空白的根因）。改为 onShow + setTimeout 延迟赋值，确保发生在挂载之后。
-  3. 分块渲染：首屏 CHUNK 行，「加载更多」行 / onscrollbottom 追加，杜绝整表一次性
-     构建造成的秒级卡顿；整表数据模块级缓存，会话内二次进入瞬时呈现。
+  可靠性原则（本机实测教训）：
+  1. 本机 setTimeout 定时器链不可靠（键盘显隐曾因此失效），数据装载绝不依赖定时器。
+     改用 onReady（页面模板就绪后的官方钩子）同步装载；onShow 再兜底一次；
+     若两者都未生效，空态文案「点此重试」可手动触发——三重保险。
+  2. 结构同构：与设备上已验证可用的元素查询列表完全同构——
+     screen 纵向 flex 流、list 固定宽高、list-item 静态 type、单一 div 子节点、
+     模板表达式零运算符（== 而非 ===）。
+  3. 分块渲染：首屏 CHUNK 行，「加载更多」行 / onscrollbottom 追加；
+     整表数据模块级缓存，会话内二次进入瞬时呈现。
 -->
 <template>
   <div class="screen" @swipe="onSwipe">
@@ -19,7 +21,8 @@
 
     <text class="sub-tip">点选物质，自动填入「反应计算」输入框</text>
 
-    <list class="list" onscrollbottom="onReachBottom">
+    <!-- 列表：与元素查询页同款 list/list-item -->
+    <list show="{{rows.length > 0}}" class="list" onscrollbottom="onReachBottom">
       <list-item type="catrow" for="{{rows}}" tid="rid" @click="onRowClick($item)">
         <div class="row">
           <text class="row-main">{{$item.main}}</text>
@@ -27,6 +30,9 @@
         </div>
       </list-item>
     </list>
+
+    <!-- 空态兜底：装载未生效时可手动重试（不依赖任何定时器/事件时序） -->
+    <text if="{{rows.length == 0}}" class="retry-tap" @click="loadData">物质表加载中…点此重试</text>
   </div>
 </template>
 
@@ -70,22 +76,31 @@ export default {
     pos: 0
   },
 
-  // 关键：不在 onInit 里同步赋值（本机 list 挂载晚于 onInit 会丢数据），
-  // 延迟到 onShow 后的下一个时钟再灌入首屏数据。
-  onShow() {
+  // 首选装载点：onReady 在页面模板渲染完成后触发，此时 list 必已挂载。
+  loadData() {
     if (this.rows.length > 0) return
-    const self = this
-    setTimeout(function () {
-      if (!self.$valid) return
+    try {
       buildAllRows()
-      self.pos = 0
-      self.rows = []
-      self.appendChunk()
-    }, 30)
+      this.pos = 0
+      this.appendChunk()
+    } catch (err) {
+      prompt.showToast({ message: '加载失败', duration: 1500 })
+    }
+  },
+
+  // 双保险：onShow 同步装载（幂等，rows 已有数据时不打断分页状态）
+  onShow() {
+    this.loadData()
+  },
+
+  // 模板就绪钩子：本机最可靠的挂载后时机
+  onReady() {
+    this.loadData()
   },
 
   // 追加下一块数据；未到底时在尾部挂一个「加载更多」行（点击或滚动到底均可触发）
   appendChunk() {
+    if (!allRows.length) buildAllRows()
     if (this.pos >= allRows.length) return
     const base = this.rows.filter(function (r) { return r.kind !== 'more' })
     const next = allRows.slice(this.pos, this.pos + CHUNK)
@@ -190,6 +205,15 @@ export default {
   margin-left: 16px;
   margin-right: 16px;
   margin-top: 8px;
+}
+
+/* 空态重试行 */
+.retry-tap {
+  width: 336px;
+  text-align: center;
+  font-size: 20px;
+  color: #4da3ff;
+  margin-top: 180px;
 }
 
 /* 所有行共用同一张卡片：标题行显示【分组名】，物质行左名称右化学式 */
