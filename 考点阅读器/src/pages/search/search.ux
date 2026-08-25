@@ -3,13 +3,12 @@
 <template>
   <div class="page" style="flex-direction: column;" @swipe="onSwipe">
 
-    <!-- Search box (pill-shaped) -->
+    <!-- Search box (pill)：全部绝对定位，不依赖 flex；文字区相对药丸左右对称，占位/输入内容绝对居中 -->
     <div class="search-box">
       <img src="/common/images/search.png" class="search-icon" @click="doSearch" />
-      <div style="flex: 1; height: 54px; justify-content: center; align-items: center; padding: 0 14px;" @click="toggleKeyboard">
-        <text class="search-text" show="{{searchText.length > 0}}">{{searchDisplay}}</text>
-        <text class="search-ph" show="{{searchText.length == 0}}">输入要搜索的内容</text>
-      </div>
+      <text class="search-text" show="{{searchText.length > 0}}">{{searchDisplay}}</text>
+      <text class="search-ph" show="{{searchText.length == 0}}">输入要搜索的内容</text>
+      <div class="search-hit" @click="toggleKeyboard"></div>
     </div>
 
     <!-- 搜索范围提示：主页=全部考点；子文件夹内=仅该文件夹；考点内=单文件 -->
@@ -275,16 +274,22 @@ export default {
     height: 54px;
     background-color: #1C1C1E;
     border-radius: 27px;
-    flex-direction: row;
-    align-items: center;
-    padding: 0px 10px;
   }
   .search-icon {
+    position: absolute;
+    left: 10px;
+    top: 10px;
     width: 34px;
     height: 34px;
   }
+  /* 文字区 [44,280]，中心 x=162 = 药丸中心(324/2)，左右各留 44px 对称 */
   .search-text {
-    width: 100%;
+    position: absolute;
+    left: 44px;
+    top: 0px;
+    width: 236px;
+    height: 54px;
+    line-height: 54px;
     font-size: 24px;
     font-weight: bold;
     color: #FFFFFF;
@@ -293,11 +298,25 @@ export default {
     text-overflow: ellipsis;
   }
   .search-ph {
-    width: 100%;
+    position: absolute;
+    left: 44px;
+    top: 0px;
+    width: 236px;
+    height: 54px;
+    line-height: 54px;
     font-size: 24px;
     color: rgba(255, 255, 255, 0.3);
     text-align: center;
     lines: 1;
+  }
+  /* 透明点击层：盖住文字区且置于最上层，点击弹出/收起键盘；放大镜独立触发搜索 */
+  .search-hit {
+    position: absolute;
+    left: 44px;
+    top: 0px;
+    width: 236px;
+    height: 54px;
+    background-color: transparent;
   }
 
   .clear-btn {

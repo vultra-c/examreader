@@ -1,8 +1,11 @@
 <!--
   化学工具箱 · 常用物质表（336×480）
-  按类别浏览常见物质；点选后写入 $app.$def.pendingFormula 并返回，
-  反应计算页会在 onShow 时自动拼入输入框。
-  列表组件与考点阅读器同款 list/list-item（scroll 纵向列表在本机不可靠）。
+  性能与可靠性要点：
+  · 行结构完全统一：list-item 静态 type="catrow"、仅一个 div 子节点，
+    模板内零运算符表达式（只有 $item.xxx 取值）——与考点阅读器已验证可用的列表同构。
+  · 分块渲染：首屏只建 CHUNK 行，「加载更多」行 / onscrollbottom 追加下一块，
+    杜绝一次性构建 100+ 圆角卡片造成的秒级卡顿。
+  · 全部数据行模块级缓存，会话内二次进入瞬时呈现。
 -->
 <template>
   <div class="screen" @swipe="onSwipe">
@@ -15,14 +18,11 @@
 
     <text class="sub-tip">点选物质，自动填入「反应计算」输入框</text>
 
-    <list class="list">
+    <list class="list" onscrollbottom="onReachBottom">
       <list-item type="catrow" for="{{rows}}" tid="rid" @click="onRowClick($item)">
-        <div show="{{$item.kind === 'title'}}" class="row-title">
-          <text class="row-title-t">{{$item.text}}</text>
-        </div>
-        <div show="{{$item.kind === 'item'}}" class="row-item">
-          <text class="row-item-name">{{$item.label}}</text>
-          <text class="row-item-f">{{$item.formula}}</text>
+        <div class="row">
+          <text class="row-main">{{$item.main}}</text>
+          <text class="row-sub">{{$item.sub}}</text>
         </div>
       </list-item>
     </list>
@@ -34,33 +34,72 @@ import router from '@system.router'
 import prompt from '@system.prompt'
 import { CATALOG, formulaName } from '../../common/logic/substances.js'
 
+const CHUNK = 26
+
+// 模块级缓存：整表只在首次进入时构建一次
+let allRows = []
+let built = false
+
+function buildAllRows() {
+  if (built) return
+  const arr = []
+  let n = 0
+  for (let g = 0; g < CATALOG.length; g++) {
+    const cat = CATALOG[g]
+    arr.push({ kind: 'title', rid: 't' + g, main: '【' + cat.group + '】', sub: '' })
+    for (let i = 0; i < cat.items.length; i++) {
+      const f = cat.items[i]
+      const nm = formulaName(f)
+      arr.push({
+        kind: 'item',
+        rid: 'c' + (n++),
+        formula: f,
+        main: (nm && nm !== f) ? nm : f,
+        sub: f
+      })
+    }
+  }
+  allRows = arr
+  built = true
+}
+
 export default {
   private: {
-    rows: []
+    rows: [],
+    pos: 0
   },
 
   onInit() {
-    const rows = []
-    let rid = 0
-    for (let g = 0; g < CATALOG.length; g++) {
-      const cat = CATALOG[g]
-      rows.push({ kind: 'title', text: cat.group, rid: 't' + g })
-      for (let i = 0; i < cat.items.length; i++) {
-        const f = cat.items[i]
-        const name = formulaName(f)
-        rows.push({
-          kind: 'item',
-          formula: f,
-          label: name && name !== f ? name : f,
-          rid: 'c' + (rid++)
-        })
-      }
+    buildAllRows()
+    this.pos = 0
+    this.rows = []
+    this.appendChunk()
+  },
+
+  // 追加下一块数据；未到底时在尾部挂一个「加载更多」行（点击或滚动到底均可触发）
+  appendChunk() {
+    if (this.pos >= allRows.length) return
+    const base = this.rows.filter(function (r) { return r.kind !== 'more' })
+    const next = allRows.slice(this.pos, this.pos + CHUNK)
+    this.pos += next.length
+    const rows = base.concat(next)
+    if (this.pos < allRows.length) {
+      rows.push({ kind: 'more', rid: 'more', main: '▼ 点此加载更多', sub: '' })
     }
     this.rows = rows
   },
 
+  onReachBottom() {
+    this.appendChunk()
+  },
+
   onRowClick(item) {
-    if (!item || item.kind !== 'item') return
+    if (!item) return
+    if (item.kind === 'more') {
+      this.appendChunk()
+      return
+    }
+    if (item.kind !== 'item') return
     try {
       this.$app.$def.pendingFormula = item.formula
     } catch (err) {
@@ -87,19 +126,25 @@ export default {
 @import '../../common/style.css';
 
 .screen {
+  position: absolute;
+  left: 0px;
+  top: 0px;
   width: 336px;
   height: 480px;
   background-color: #000000;
-  flex-direction: column;
 }
 
 .hd {
+  position: absolute;
+  left: 0px;
+  top: 0px;
   width: 336px;
   height: 52px;
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 16px 0 12px;
+  padding-left: 12px;
+  padding-right: 16px;
 }
 .hd-back {
   width: 46px;
@@ -127,49 +172,44 @@ export default {
 }
 
 .sub-tip {
+  position: absolute;
+  left: 0px;
+  top: 56px;
   width: 336px;
   text-align: center;
   font-size: 16px;
   color: rgba(255, 255, 255, 0.32);
-  margin-top: 2px;
 }
 
+/* 列表区 [76,480)，绝对定位不参与 flex 流 */
 .list {
+  position: absolute;
+  left: 16px;
+  top: 76px;
   width: 304px;
-  height: 410px;
-  margin: 8px 16px 0;
+  height: 404px;
 }
 
-.row-title {
-  width: 304px;
-  height: 34px;
-  flex-direction: row;
-  align-items: center;
-}
-.row-title-t {
-  font-size: 18px;
-  font-weight: bold;
-  color: #4da3ff;
-  margin-left: 4px;
-}
-.row-item {
+/* 所有行共用同一张卡片：标题行显示【分组名】，物质行左名称右化学式 */
+.row {
   width: 304px;
   height: 48px;
   border-radius: 13px;
   background-color: #1c1c1e;
   margin-bottom: 6px;
-  padding: 0 14px;
+  padding-left: 14px;
+  padding-right: 14px;
   flex-direction: row;
   justify-content: space-between;
   align-items: center;
 }
-.row-item-name {
+.row-main {
   font-size: 20px;
   color: #ffffff;
   lines: 1;
   text-overflow: ellipsis;
 }
-.row-item-f {
+.row-sub {
   font-size: 20px;
   font-weight: bold;
   color: rgba(255, 255, 255, 0.55);
