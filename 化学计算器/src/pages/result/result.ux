@@ -27,16 +27,14 @@
         </div>
       </div>
 
-      <!-- 相对分子质量列表（scroll + div for，内容容器显式列方向） -->
+      <!-- 相对分子质量列表（list + list-item，样式在 list-item 上） -->
       <text class="sec-label">相对分子质量 · 点按进入质量计算</text>
-      <scroll class="mr-scroll" scroll-y="true">
-        <div class="mr-list">
-          <div for="{{mrRows}}" class="mr-row" @click="onPickMass($item)">
-            <text class="mr-f">{{$item.text}}</text>
-            <text class="mr-v">M = {{$item.mrText}}</text>
-          </div>
-        </div>
-      </scroll>
+      <list class="mr-list">
+        <list-item for="{{mrRows}}" tid="rid" type="mr" class="mr-row" @click="onPickMass($item)">
+          <text class="mr-f">{{$item.text}}</text>
+          <text class="mr-v">M = {{$item.mrText}}</text>
+        </list-item>
+      </list>
 
       <!-- 底部操作 -->
       <div class="foot">
@@ -232,16 +230,14 @@ export default {
   margin: 10px 2px 5px;
 }
 
-.mr-scroll {
+.mr-list {
   width: 304px;
   height: 160px;
 }
-.mr-list {
-  flex-direction: column;
-}
+/* list-item 本身带高度/内边距/间距 */
 .mr-row {
-  width: 304px;
-  height: 52px;
+  width: 100%;
+  height: 56px;
   border-radius: 14px;
   background-color: #1c1c1e;
   padding: 0 14px;

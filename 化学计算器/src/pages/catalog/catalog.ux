@@ -1,10 +1,11 @@
 <!--
   化学工具箱 · 常用物质表（336×480）
-  渲染方案：scroll + div for，内容容器显式声明 flex-direction: column。
-  依据小米 Vela 开发文档：flex-direction 默认值为 row，此前版本未显式声明列方向，
-  导致全部行横向排布、屏幕上只露出第一行；而 list-item 组件要求同 type 的
-  DOM 结构完全一致，标题行/物质行混用 if 会触发渲染错误。
-  本页改用普通 div 渲染，无上述限制，且已在设备上验证可渲染。
+  渲染方案：list + list-item，样式（高度/内边距/间距）直接声明在 list-item 元素上，
+  与考点阅读器（已验证可用）完全一致：
+  - list-item 必须有显式高度，否则行会塌陷成细线
+  - 同 type 的 list-item DOM 结构必须完全一致，禁止内部 if 混用
+  - for 循环变量为 $item
+  标题行与物质行共用同一结构（两个 text），仅内容不同，通过 kind 字段区分点击行为。
 -->
 <template>
   <div class="screen" @swipe="onSwipe">
@@ -16,23 +17,16 @@
     </div>
     <text class="sub-tip">点选物质，自动填入「反应计算」输入框</text>
 
-    <!-- 列表：scroll + div for，显式列方向；分块加载（依据开发文档：超过10项应分页/懒加载） -->
-    <scroll class="scroll-area" scroll-y="true" onscrollbottom="onReachBottom">
-      <div class="list-content">
-        <div for="{{visibleRows}}" tid="rid" class="row-wrap" @click="onRowClick($item)">
-          <div if="{{$item.kind === 'title'}}" class="title-row">
-            <text class="title-text">{{$item.main}}</text>
-          </div>
-          <div if="{{$item.kind === 'item'}}" class="item-row">
-            <text class="item-main">{{$item.main}}</text>
-            <text class="item-sub">{{$item.sub}}</text>
-          </div>
-        </div>
-        <div if="{{hasMore}}" class="more-hint">
-          <text class="more-hint-t">▼ 还有 {{total - visibleRows.length}} 条，上滑加载更多</text>
-        </div>
-      </div>
-    </scroll>
+    <!-- 列表：list + list-item，样式在 list-item 上；分块加载 -->
+    <list class="catalog-list" if="{{visibleRows.length > 0}}" onscrollbottom="onReachBottom">
+      <list-item for="{{visibleRows}}" tid="rid" type="row" class="row-row" @click="onRowClick($item)">
+        <text class="row-main">{{$item.main}}</text>
+        <text class="row-sub">{{$item.sub}}</text>
+      </list-item>
+      <list-item if="{{hasMore}}" type="more" class="more-row" @click="onReachBottom">
+        <text class="more-text">▼ 还有 {{total - visibleRows.length}} 条，上滑加载更多</text>
+      </list-item>
+    </list>
   </div>
 </template>
 
@@ -64,12 +58,6 @@ const ALL_ROWS = []
 // 分块渲染：首屏 24 行，滚动到底追加 24 行（Vela 文档：长列表应分页避免首屏卡顿）
 const CHUNK = 24
 
-function appendChunk(visible, pos) {
-  const end = Math.min(pos + CHUNK, ALL_ROWS.length)
-  const added = ALL_ROWS.slice(pos, end)
-  return { rows: visible.concat(added), pos: end }
-}
-
 export default {
   private: {
     total: ALL_ROWS.length,
@@ -80,9 +68,9 @@ export default {
 
   onReachBottom() {
     if (!this.hasMore) return
-    const r = appendChunk(this.visibleRows, this.renderPos)
-    this.visibleRows = r.rows
-    this.renderPos = r.pos
+    const end = Math.min(this.renderPos + CHUNK, this.total)
+    this.visibleRows = this.visibleRows.concat(ALL_ROWS.slice(this.renderPos, end))
+    this.renderPos = end
     this.hasMore = this.renderPos < this.total
   },
 
@@ -158,66 +146,46 @@ export default {
   margin-top: 2px;
 }
 
-.scroll-area {
+/* 列表：显式高度 */
+.catalog-list {
   width: 336px;
-  height: 408px;
+  height: 392px;
   margin-top: 6px;
 }
 
-/* 关键：内容容器显式列方向（Vela 默认 row） */
-.list-content {
-  flex-direction: column;
-}
-
-.more-hint {
-  width: 336px;
-  height: 40px;
-  justify-content: center;
-  align-items: center;
-}
-.more-hint-t {
-  font-size: 16px;
-  color: rgba(255, 255, 255, 0.35);
-}
-
-.row-wrap {
-  width: 336px;
-  flex-direction: column;
-}
-
-.title-row {
-  width: 304px;
-  height: 36px;
-  margin: 6px 16px 0 16px;
-  justify-content: center;
-}
-.title-text {
-  font-size: 18px;
-  font-weight: bold;
-  color: #4da3ff;
-}
-
-.item-row {
-  width: 304px;
-  height: 48px;
-  margin: 0 16px 6px 16px;
+/* list-item 本身带高度/内边距/间距（关键：样式在 list-item 上，行才不会塌陷） */
+.row-row {
+  width: 100%;
+  height: 52px;
+  padding: 0 14px;
+  margin-bottom: 7px;
   border-radius: 13px;
   background-color: #1c1c1e;
-  padding-left: 14px;
-  padding-right: 14px;
   flex-direction: row;
   justify-content: space-between;
   align-items: center;
 }
-.item-main {
+.row-main {
   font-size: 20px;
   color: #ffffff;
   lines: 1;
   text-overflow: ellipsis;
 }
-.item-sub {
+.row-sub {
   font-size: 20px;
   font-weight: bold;
   color: rgba(255, 255, 255, 0.55);
+  lines: 1;
+}
+
+.more-row {
+  width: 100%;
+  height: 44px;
+  justify-content: center;
+  align-items: center;
+}
+.more-text {
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.35);
 }
 </style>

@@ -42,17 +42,16 @@
         <text class="panel-hd-n">{{elementResults.length}} 条</text>
       </div>
       <text show="{{searched && elementResults.length == 0}}" class="panel-none">没有同时含这些元素的方程式</text>
-      <scroll show="{{searched && elementResults.length > 0}}" class="panel-scroll" scroll-y="true" onscrollbottom="onReachBottom">
-        <div class="eq-list">
-          <div for="{{visibleResults}}" class="eq-item" @click="openEquation($item)">
-            <text class="eq-item-text">{{$item.text}}</text>
-            <text class="eq-item-type">{{$item.type}}</text>
-          </div>
-          <div if="{{hasMoreRes}}" class="more-hint">
-            <text class="more-hint-t">▼ 还有 {{elementResults.length - visibleResults.length}} 条，上滑加载</text>
-          </div>
-        </div>
-      </scroll>
+      <!-- 结果列表：list + list-item，样式在 list-item 上（与考点阅读器一致，行不会塌陷） -->
+      <list show="{{searched && elementResults.length > 0}}" class="panel-list" onscrollbottom="onReachBottom">
+        <list-item for="{{visibleResults}}" tid="rid" type="eq" class="eq-item" @click="openEquation($item)">
+          <text class="eq-item-text">{{$item.text}}</text>
+          <text class="eq-item-type">{{$item.type}}</text>
+        </list-item>
+        <list-item if="{{hasMoreRes}}" type="more" class="more-row" @click="onReachBottom">
+          <text class="more-text">▼ 还有 {{elementResults.length - visibleResults.length}} 条，上滑加载</text>
+        </list-item>
+      </list>
     </div>
     <text if="{{!searched}}" class="panel-idle">点击输入框输入，如：Fe O 或 铁 氧</text>
 
@@ -335,44 +334,24 @@ export default {
   color: rgba(255, 255, 255, 0.4);
   margin-top: 60px;
 }
-.panel-scroll {
+.panel-list {
   width: 280px;
   height: 220px;
   margin-top: 4px;
 }
-.eq-list {
-  flex-direction: column;
-}
-.more-hint {
-  width: 280px;
-  height: 36px;
-  justify-content: center;
-  align-items: center;
-}
-.more-hint-t {
-  font-size: 15px;
-  color: rgba(255, 255, 255, 0.35);
-}
-.panel-idle {
-  width: 336px;
-  text-align: center;
-  font-size: 18px;
-  color: rgba(255, 255, 255, 0.3);
-  margin-top: 60px;
-}
-
+/* list-item 本身带高度/内边距/间距 */
 .eq-item {
-  width: 280px;
-  height: 48px;
-  border-radius: 12px;
-  background-color: #222226;
+  width: 100%;
+  height: 52px;
   padding: 4px 10px;
   margin-bottom: 6px;
+  border-radius: 12px;
+  background-color: #222226;
   flex-direction: column;
   justify-content: center;
 }
 .eq-item-text {
-  width: 260px;
+  width: 100%;
   font-size: 18px;
   line-height: 22px;
   color: #ffffff;
@@ -384,5 +363,22 @@ export default {
   line-height: 18px;
   color: #4da3ff;
   margin-top: 1px;
+}
+.more-row {
+  width: 100%;
+  height: 40px;
+  justify-content: center;
+  align-items: center;
+}
+.more-text {
+  font-size: 15px;
+  color: rgba(255, 255, 255, 0.35);
+}
+.panel-idle {
+  width: 336px;
+  text-align: center;
+  font-size: 18px;
+  color: rgba(255, 255, 255, 0.3);
+  margin-top: 60px;
 }
 </style>
