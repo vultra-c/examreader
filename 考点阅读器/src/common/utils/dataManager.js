@@ -10,6 +10,7 @@
 import { knowledgeTree } from './knowledgeData.js'
 import { builtinExamples } from './builtinData.js'
 import { parseContent, isSubjectSpecific, formatForDisplay } from './subjectParser.js'
+import { parseKnowledgeJson } from './jsonParser.js'
 import storage from '@system.storage'
 
 const STORAGE_KEY_DELETED = 'KD_DATA_DELETED'
@@ -103,6 +104,42 @@ function saveDeletedSet(deletedSet) {
       fail: () => resolve(false)
     })
   })
+}
+
+// ==================== JSON 搜索辅助 ====================
+
+// 从 JSON 知识点内容中提取可搜索的文本（标题、描述、要点、原文、公式）
+// 对于 fmt='json' 的文件，搜索展示文本而非原始 JSON 结构
+function _extractSearchableText(content) {
+  if (!content || typeof content !== 'string') return content || ''
+  try {
+    const result = parseKnowledgeJson(content)
+    if (!result.ok || !result.data) return content
+    const parts = []
+    const data = result.data
+    const names = Object.keys(data)
+    for (let i = 0; i < names.length; i++) {
+      // 科目名本身也可搜索
+      parts.push(names[i])
+      const items = data[names[i]]
+      if (!Array.isArray(items)) continue
+      for (let j = 0; j < items.length; j++) {
+        const it = items[j]
+        if (it.title) parts.push(it.title)
+        if (it.desc) parts.push(it.desc)
+        if (it.raw) parts.push(it.raw)
+        if (Array.isArray(it.points)) {
+          for (let k = 0; k < it.points.length; k++) parts.push(it.points[k])
+        }
+        if (Array.isArray(it.formulas)) {
+          for (let k = 0; k < it.formulas.length; k++) parts.push(it.formulas[k])
+        }
+      }
+    }
+    return parts.join('\n')
+  } catch (e) {
+    return content
+  }
 }
 
 // ==================== 蓝牙传输内容存储（分 key） ====================
@@ -1582,15 +1619,17 @@ export default {
           const item = contentItems[idx++]
           getBluetoothFileContent(item.id).then((content) => {
             if (results.length < MAX_RESULTS) {
-              const lowerContent = (content || '').toLowerCase()
+              // JSON 文件：搜索解析后的展示文本而非原始 JSON
+              const searchable = (item.fmt === 'json') ? _extractSearchableText(content) : (content || '')
+              const lowerContent = searchable.toLowerCase()
               const lowerName = (item.name || '').toLowerCase()
               if (lowerContent.includes(kw) || lowerName.includes(kw)) {
                 const pos = lowerContent.indexOf(kw)
                 let snippet = ''
                 if (pos >= 0) {
                   const start = Math.max(0, pos - 10)
-                  const end = Math.min(lowerContent.length, pos + kw.length + 20)
-                  snippet = (start > 0 ? '...' : '') + content.substring(start, end) + (end < content.length ? '...' : '')
+                  const end = Math.min(searchable.length, pos + kw.length + 20)
+                  snippet = (start > 0 ? '...' : '') + searchable.substring(start, end) + (end < searchable.length ? '...' : '')
                 }
                 results.push({
                   name: item.name,
@@ -1653,18 +1692,19 @@ export default {
           if (idx >= inFolder.length || results.length >= MAX_RESULTS) {
             resolve(results)
             return
-          }
-          const item = inFolder[idx++]
+          }          const item = inFolder[idx++]
           getBluetoothFileContent(item.id).then((content) => {
-            const lowerContent = (content || '').toLowerCase()
+            // JSON 文件：搜索解析后的展示文本而非原始 JSON
+            const searchable = (item.fmt === 'json') ? _extractSearchableText(content) : (content || '')
+            const lowerContent = searchable.toLowerCase()
             const lowerName = (item.name || '').toLowerCase()
             if (lowerContent.includes(kw) || lowerName.includes(kw)) {
               const pos = lowerContent.indexOf(kw)
               let snippet = ''
               if (pos >= 0) {
                 const start = Math.max(0, pos - 10)
-                const end = Math.min(lowerContent.length, pos + kw.length + 20)
-                snippet = (start > 0 ? '...' : '') + content.substring(start, end) + (end < content.length ? '...' : '')
+                const end = Math.min(searchable.length, pos + kw.length + 20)
+                snippet = (start > 0 ? '...' : '') + searchable.substring(start, end) + (end < searchable.length ? '...' : '')
               }
               results.push({
                 name: item.name,
@@ -1678,6 +1718,7 @@ export default {
             searchNext()
           })
         }
+
         searchNext()
       })
     })
@@ -1696,20 +1737,28 @@ export default {
         return
       }
       const kw = keyword.trim().toLowerCase()
+      // 查找文件的 fmt（判断是否 JSON 知识点）
+      let fileFmt = ''
+      if (_btMetaCache && pathStr && pathStr.indexOf('bt_') === 0) {
+        const meta = _btMetaCache.find(m => m.id === pathStr)
+        if (meta) fileFmt = meta.fmt || ''
+      }
       this.getReaderFullContent(pathStr).then((content) => {
         if (!content) {
           resolve([])
           return
         }
-        const lowerContent = content.toLowerCase()
+        // JSON 文件：搜索解析后的展示文本而非原始 JSON
+        const searchable = (fileFmt === 'json') ? _extractSearchableText(content) : content
+        const lowerContent = searchable.toLowerCase()
         const matches = []
         let pos = 0
         while (true) {
           pos = lowerContent.indexOf(kw, pos)
           if (pos < 0) break
           const start = Math.max(0, pos - 10)
-          const end = Math.min(content.length, pos + kw.length + 20)
-          const snippet = (start > 0 ? '...' : '') + content.substring(start, end) + (end < content.length ? '...' : '')
+          const end = Math.min(searchable.length, pos + kw.length + 20)
+          const snippet = (start > 0 ? '...' : '') + searchable.substring(start, end) + (end < searchable.length ? '...' : '')
           matches.push({ position: pos, snippet: snippet })
           pos += kw.length
           if (matches.length >= 20) break

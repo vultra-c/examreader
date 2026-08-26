@@ -1,3 +1,9 @@
+<!--
+  考点阅读器 - JSON 知识点阅读器（闪念小抄结构）
+  基于 Snapnotes-band 的 content.ux 显示逻辑。
+  
+  v26.8.30: 新增公式图显示 + 缩放控件
+-->
 <template>
   <div class="page" style="flex-direction: column;" @swipe="onSwipe">
 
@@ -6,7 +12,7 @@
       <text static style="font-size: 26px; color: rgba(255,255,255,0.5);">{{ loadError || '加载中...' }}</text>
     </div>
 
-    <!-- ============ 视图1：科目列表（与主页完全同款的列表模板） ============ -->
+    <!-- ============ 视图1：科目列表 ============ -->
     <list class="list" if="{{loaded && viewMode === 'subjects'}}">
       <list-item for="{{subjectRows}}" tid="id" class="item" type="folder" @click="onSubjectClick($item)">
         <div class="item-content">
@@ -17,9 +23,8 @@
       </list-item>
     </list>
 
-    <!-- ============ 视图2：知识点条目列表（与主页完全同款） ============ -->
+    <!-- ============ 视图2：知识点条目列表 ============ -->
     <list class="list" if="{{loaded && viewMode === 'list'}}">
-      <!-- 空状态兜底（正常情况不会出现；若出现请把日志反馈给开发者） -->
       <div if="{{entryRows.length === 0}}" style="position: absolute; left: 0px; top: 102px; width: 336px; height: 240px; flex-direction: column; justify-content: center; align-items: center;">
         <text static style="line-height: 36px; font-weight: bold; font-size: 24px; color: rgba(255,255,255,0.4); text-align: center;">该科目暂无条目</text>
       </div>
@@ -32,11 +37,11 @@
       </list-item>
     </list>
 
-    <!-- ============ 视图3：详情（闪念小抄 content 页逻辑：标题/描述/原文/要点） ============ -->
+    <!-- ============ 视图3：详情 ============ -->
     <scroll class="jr-detail-scroll" if="{{loaded && viewMode === 'detail'}}" scroll-y="{{true}}" @click="onDetailClick">
       <div style="position: absolute; width: 336px; flex-direction: column; padding: 0 20px 60px 20px;">
 
-        <!-- 知识点头部：科目徽标 + 标题 + 描述 + 分隔线 -->
+        <!-- 知识点头部 -->
         <div class="jr-header">
           <div class="jr-subject-badge">
             <text class="jr-subject-badge-text">{{curSubject}}</text>
@@ -46,7 +51,7 @@
           <div class="jr-divider"></div>
         </div>
 
-        <!-- 原文（特殊标注，按字数分页） -->
+        <!-- 原文 -->
         <div class="jr-raw" if="{{rawVisible}}">
           <text class="jr-raw-label" static>原文</text>
           <div class="jr-raw-paragraphs">
@@ -63,7 +68,7 @@
           </div>
         </div>
 
-        <!-- 要点列表（编号） -->
+        <!-- 要点列表 -->
         <div class="jr-point" for="{{curPoints}}" if="{{curPoints.length > 0}}">
           <div class="jr-point-index">
             <text class="jr-point-index-text">{{$idx + 1}}</text>
@@ -71,21 +76,41 @@
           <text class="jr-point-text" style="font-size: {{fontSize}}px;">{{$item}}</text>
         </div>
 
-        <!-- 公式（文本形式展示） -->
+        <!-- 公式文本 -->
         <div class="jr-formula" if="{{curFormulas.length > 0}}">
           <text class="jr-raw-label" static>公式</text>
           <text class="jr-formula-text" for="{{curFormulas}}">{{$item}}</text>
         </div>
 
+        <!-- 公式图片（如有）+ 缩放控件 -->
+        <div class="jr-formula-img-wrap" if="{{formulaImgSrc}}">
+          <text class="jr-raw-label" static>公式图</text>
+          <div class="jr-formula-img-box">
+            <img class="jr-formula-img" src="{{formulaImgSrc}}" style="width: {{formulaImgW}}px; height: {{formulaImgH}}px;" />
+          </div>
+          <!-- 缩放控件：放大 / 缩小 / 还原 -->
+          <div class="jr-zoom-controls">
+            <div class="jr-zoom-btn" @click="formulaZoomIn">
+              <text class="jr-zoom-btn-text">＋</text>
+            </div>
+            <div class="jr-zoom-btn" @click="formulaZoomReset">
+              <text class="jr-zoom-btn-text">1:1</text>
+            </div>
+            <div class="jr-zoom-btn" @click="formulaZoomOut">
+              <text class="jr-zoom-btn-text">－</text>
+            </div>
+          </div>
+        </div>
+
         <!-- 空状态 -->
-        <div class="jr-empty" if="{{curPoints.length === 0 && !rawVisible}}">
+        <div class="jr-empty" if="{{curPoints.length === 0 && !rawVisible && !formulaImgSrc}}">
           <text class="jr-empty-text" static>暂无内容</text>
         </div>
 
       </div>
     </scroll>
 
-    <!-- 顶部栏（与其他页面一致） -->
+    <!-- 顶部栏 -->
     <img static src="/common/images/hd.png" style="position: absolute; left: 0px; top: 0px; width: 336px; height: 102px;" />
     <img static src="/common/images/back.png" @click="goBack" style="position: absolute; left: 6px; top: 6px; width: 72px; height: 72px;" />
     <img static src="/common/images/more.png" @click="goSettings" style="position: absolute; left: 258px; top: 6px; width: 72px; height: 72px;" />
@@ -99,36 +124,36 @@
 import router from '@system.router'
 import storage from '@system.storage'
 import brightness from '@system.brightness'
+import file from '@system.file'
 import dataManager from '../../common/utils/dataManager.js'
 import { parseKnowledgeJson, getItems } from '../../common/utils/jsonParser.js'
 import { getFormattedTimeNow } from '../../common/utils/timeUtil.js'
 import appState from '../../common/utils/appState.js'
 
-// 原文分页参数（与闪念小抄 content.ux 一致：每页 320 字，按段累加不拆段）
 const RAW_PAGE_CHAR_LIMIT = 320
+// 公式图默认尺寸
+const FORMULA_BASE_W = 260
+const FORMULA_BASE_H = 200
+const ZOOM_STEP = 0.25
+const ZOOM_MIN = 0.5
+const ZOOM_MAX = 3.0
 
 export default {
   private: {
     nowTime: '00:00',
     timer: null,
     timeFormat: '24h',
-    // 详情页排版（设置页可调，与 TXT 阅读器共用同一组存储键）
     fontSize: 26,
     lineHeight: 30,
     paraLineHeight: 40,
     loaded: false,
     loadError: '',
-    // 视图状态：subjects → list → detail
     viewMode: 'subjects',
     pageTitle: '知识点',
-    // 解析结果
     parsedData: null,
-    // 科目行（主页同款结构：{id, name, subtitle}）
     subjectRows: [],
-    // 当前科目的条目行（{id, title, subtitle, item}）
     entryRows: [],
     curSubject: '',
-    // 详情状态
     curTitle: '',
     curDesc: '',
     curPoints: [],
@@ -137,14 +162,19 @@ export default {
     visibleRawParagraphs: [],
     rawPage: 1,
     rawTotalPages: 1,
-    rawVisible: false
+    rawVisible: false,
+    // 公式图
+    formulaImgSrc: '',
+    formulaImgW: FORMULA_BASE_W,
+    formulaImgH: FORMULA_BASE_H,
+    formulaZoom: 1.0,
+    formulaFilePath: ''
   },
   protected: {
     path: ''
   },
 
   onInit() {
-    // 同步先给正确时间（此前 bug：初始值要等 60 秒定时器才刷新，一直显示 00:00）
     this.nowTime = getFormattedTimeNow(this.timeFormat)
     this.timer = setInterval(() => {
       if (this.$valid) {
@@ -158,13 +188,11 @@ export default {
 
   onShow() {
     if (!this.$valid) return
-    // 从删除确认返回：文件已被删除，自动退回列表页（与 reader 页行为一致）
     if (appState.refreshReader) {
       appState.refreshReader = false
       router.back()
       return
     }
-    // 从设置页返回：字号/行距可能已变化
     this.loadDisplaySettings()
   },
 
@@ -234,7 +262,6 @@ export default {
         if (data) this.timeFormat = data
         this.nowTime = getFormattedTimeNow(this.timeFormat)
       },
-      // 键不存在时走 fail：同样要刷新时间（此前 bug：fail 为空导致一直 00:00）
       fail: () => {
         if (!this.$valid) return
         this.nowTime = getFormattedTimeNow(this.timeFormat)
@@ -243,7 +270,6 @@ export default {
   },
 
   async loadJson() {
-    // 读取存储的 JSON 正文（分块存储自动拼接）
     const content = await dataManager.getBluetoothFileContent(this.path)
     if (!this.$valid) return
 
@@ -269,7 +295,6 @@ export default {
 
     this.parsedData = result.data
 
-    // 科目行：与主页列表项同构 {id, name, subtitle}，id 唯一作 tid
     const rows = []
     const subs = result.subjects
     for (let i = 0; i < subs.length; i++) {
@@ -280,14 +305,10 @@ export default {
       })
     }
     this.subjectRows = rows
-    console.log('[jsonReader] 科目数=' + rows.length +
-      ' 条目数=' + subs.map(s => s.name + ':' + s.count).join(','))
 
-    // 文件名（去掉 .json 后缀）作为页面标题
     const name = dataManager.getNodeName(this.path) || '知识点'
     this.pageTitle = name.replace(/\.json$/i, '')
 
-    // 仅一个科目时直接进入条目列表（小屏少一层点击）
     if (rows.length === 1) {
       this.enterSubject(rows[0].name)
     } else {
@@ -298,13 +319,8 @@ export default {
   },
 
   enterSubject(subjectName) {
-    console.log('[jsonReader] 进入科目: ' + subjectName)
     this.curSubject = subjectName
-
-    // 条目行：与主页列表项同构，id 唯一作 tid；副标题预计算，
-    // 列表项内不放条件渲染（嵌套 if 在部分 Vela 版本会导致整行不渲染）
     const items = getItems(this.parsedData, subjectName)
-    console.log('[jsonReader] 科目「' + subjectName + '」条目数=' + items.length)
     const rows = []
     for (let i = 0; i < items.length; i++) {
       rows.push({
@@ -315,38 +331,110 @@ export default {
       })
     }
     this.entryRows = rows
-
     this.viewMode = 'list'
     this.pageTitle = subjectName
   },
 
-  // ==================== 视图1：科目列表 ====================
   onSubjectClick(row) {
     this.enterSubject(row.name)
   },
 
-  // ==================== 视图2：知识点列表 ====================
   onItemClick(row) {
     this.openDetail(row.item)
   },
 
-  // ==================== 视图3：详情 ====================
   openDetail(item) {
     this.curTitle = item.title
     this.curDesc = item.desc || ''
     this.curPoints = item.points || []
     this.curFormulas = item.formulas || []
 
-    // 原文按 \n 切段，再按字数分页（与闪念小抄 content 页一致）
     const raw = item.raw || ''
     this.rawVisible = raw.length > 0
     this.rawParagraphs = raw.length > 0 ? raw.split('\n') : []
     this.rawPage = 1
     this._paginateRaw()
 
+    // 重置公式图缩放
+    this.formulaZoom = 1.0
+    this.formulaImgW = FORMULA_BASE_W
+    this.formulaImgH = FORMULA_BASE_H
+    this.formulaImgSrc = ''
+
+    // 尝试加载公式图
+    this._loadFormulaImage(item)
+
     this.viewMode = 'detail'
     this.pageTitle = this.curSubject
   },
+
+  /**
+   * 尝试加载公式图：根据科目名和条目ID构造文件名，
+   * 检查 internal://files/formulas/ 下是否有对应图片。
+   * 命名规则：{subject}_{id}.png
+   */
+  _loadFormulaImage(item) {
+    if (!item || !item.id) return
+    const subject = this.curSubject || ''
+    const id = item.id
+    // 常见文件名模式
+    const candidates = [
+      subject + '_' + id + '.png',
+      subject + '_' + id + '.jpg',
+      id + '.png',
+      id + '.jpg'
+    ]
+    this._tryFormulaFile(candidates, 0)
+  },
+
+  _tryFormulaFile(candidates, index) {
+    if (index >= candidates.length) return
+    const fileName = candidates[index]
+    const fileUri = 'internal://files/formulas/' + fileName
+    file.get({
+      uri: fileUri,
+      success: () => {
+        // 文件存在
+        if (!this.$valid) return
+        this.formulaFilePath = fileUri
+        this.formulaImgSrc = fileUri
+        // 按屏幕宽度适配
+        this.formulaImgW = FORMULA_BASE_W
+        this.formulaImgH = FORMULA_BASE_H
+        this.formulaZoom = 1.0
+      },
+      fail: () => {
+        // 文件不存在，尝试下一个候选名
+        this._tryFormulaFile(candidates, index + 1)
+      }
+    })
+  },
+
+  // ==================== 公式图缩放 ====================
+
+  formulaZoomIn() {
+    if (this.formulaZoom < ZOOM_MAX) {
+      this.formulaZoom = Math.min(ZOOM_MAX, this.formulaZoom + ZOOM_STEP)
+      this.formulaImgW = Math.round(FORMULA_BASE_W * this.formulaZoom)
+      this.formulaImgH = Math.round(FORMULA_BASE_H * this.formulaZoom)
+    }
+  },
+
+  formulaZoomOut() {
+    if (this.formulaZoom > ZOOM_MIN) {
+      this.formulaZoom = Math.max(ZOOM_MIN, this.formulaZoom - ZOOM_STEP)
+      this.formulaImgW = Math.round(FORMULA_BASE_W * this.formulaZoom)
+      this.formulaImgH = Math.round(FORMULA_BASE_H * this.formulaZoom)
+    }
+  },
+
+  formulaZoomReset() {
+    this.formulaZoom = 1.0
+    this.formulaImgW = FORMULA_BASE_W
+    this.formulaImgH = FORMULA_BASE_H
+  },
+
+  // ==================== 原文分页 ====================
 
   _paginateRaw() {
     const limit = RAW_PAGE_CHAR_LIMIT
@@ -355,7 +443,6 @@ export default {
     let count = 0
     for (let i = 0; i < this.rawParagraphs.length; i++) {
       const para = this.rawParagraphs[i]
-      // 不满一段不拆段：整段放入当前页（超长单段独占一页）
       if (count >= limit && current.length > 0) {
         pages.push(current)
         current = []
@@ -383,13 +470,11 @@ export default {
     }
   },
 
-  // 详情页单击：收起/显示顶栏（与 reader 页一致的交互习惯）
   onDetailClick() {
-    // 预留：详情页保持顶栏常显，点击不动作
+    // 预留
   },
 
   goBack() {
-    // 层级返回：detail → list → subjects → 上一页
     if (this.viewMode === 'detail') {
       this.viewMode = 'list'
       this.pageTitle = this.curSubject
@@ -397,7 +482,6 @@ export default {
     }
     if (this.viewMode === 'list') {
       if (this.subjectRows.length === 1) {
-        // 单科目文件：直接返回上一页
         router.back()
         return
       }
@@ -425,9 +509,6 @@ export default {
 <style>
   @import '../../common/style.css';
 
-  /* 列表视图复用主页的 .list/.item/.item-content/.itemtext/.itemtext2/.arrow 公共样式 */
-
-  /* ===== 视图3：详情（闪念小抄 content 页风格） ===== */
   .jr-detail-scroll {
     position: absolute;
     left: 0px;
@@ -437,7 +518,6 @@ export default {
   }
   .jr-header {
     flex-direction: column;
-    /* 与主页一致：内容从 86px 起，滚动时钻入顶部渐变遮罩形成过渡 */
     margin-top: 86px;
   }
   .jr-subject-badge {
@@ -473,7 +553,6 @@ export default {
     margin: 14px 0 8px 0;
   }
 
-  /* 原文区块：卡片底色，与列表卡片风格呼应 */
   .jr-raw {
     flex-direction: column;
     margin-top: 8px;
@@ -507,7 +586,6 @@ export default {
     justify-content: space-between;
     margin: 10px 0 4px 0;
   }
-  /* 翻页按钮：加高加宽，手环上易点中 */
   .jr-pager-btn {
     background-color: rgba(120, 153, 187, 0.2);
     border-radius: 12px;
@@ -530,7 +608,6 @@ export default {
     font-size: 20px;
   }
 
-  /* 要点列表 */
   .jr-point {
     flex-direction: row;
     align-items: flex-start;
@@ -560,7 +637,6 @@ export default {
     line-height: 38px;
   }
 
-  /* 公式区块：金色标签风，与原文标签呼应 */
   .jr-formula {
     flex-direction: column;
     margin-top: 12px;
@@ -579,7 +655,53 @@ export default {
     padding: 6px 12px;
   }
 
-  /* 空状态 */
+  /* 公式图区块 */
+  .jr-formula-img-wrap {
+    flex-direction: column;
+    margin-top: 12px;
+    width: 296px;
+    background-color: rgba(201, 168, 106, 0.08);
+    border-radius: 12px;
+    padding: 14px 16px;
+    align-items: center;
+  }
+  .jr-formula-img-box {
+    width: 270px;
+    align-items: center;
+    justify-content: center;
+    margin-top: 8px;
+    background-color: rgba(0, 0, 0, 0.3);
+    border-radius: 8px;
+    padding: 8px;
+  }
+  .jr-formula-img {
+    border-radius: 4px;
+  }
+  /* 缩放控件 */
+  .jr-zoom-controls {
+    flex-direction: row;
+    justify-content: center;
+    align-items: center;
+    margin-top: 10px;
+    width: 270px;
+  }
+  .jr-zoom-btn {
+    width: 72px;
+    height: 40px;
+    border-radius: 20px;
+    background-color: rgba(120, 153, 187, 0.2);
+    justify-content: center;
+    align-items: center;
+    margin-left: 8px;
+    margin-right: 8px;
+  }
+  .jr-zoom-btn-text {
+    color: #7899BB;
+    font-size: 22px;
+    font-weight: bold;
+    text-align: center;
+  }
+
   .jr-empty {
     align-items: center;
     justify-content: center;

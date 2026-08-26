@@ -1,14 +1,8 @@
 <!--
   化学工具箱 · 常用物质表（336×480）
-  可靠性原则（本机实测教训）：
-  1. 本机 setTimeout 定时器链不可靠（键盘显隐曾因此失效），数据装载绝不依赖定时器。
-     改用 onReady（页面模板就绪后的官方钩子）同步装载；onShow 再兜底一次；
-     若两者都未生效，空态文案「点此重试」可手动触发——三重保险。
-  2. 结构同构：与设备上已验证可用的元素查询列表完全同构——
-     screen 纵向 flex 流、list 固定宽高、list-item 静态 type、单一 div 子节点、
-     模板表达式零运算符（== 而非 ===）。
-  3. 分块渲染：首屏 CHUNK 行，「加载更多」行 / onscrollbottom 追加；
-     整表数据模块级缓存，会话内二次进入瞬时呈现。
+  三重保险装载：onInit / onReady / onShow + 手动重试。
+  onInit 在首次渲染前同步执行；onReady 在 DOM 就绪后触发；
+  onShow 在每次页面可见时兜底——确保无论时序如何，列表都会填充。
 -->
 <template>
   <div class="screen" @swipe="onSwipe">
@@ -21,7 +15,7 @@
 
     <text class="sub-tip">点选物质，自动填入「反应计算」输入框</text>
 
-    <!-- 列表：与元素查询页同款 list/list-item -->
+    <!-- 列表 -->
     <list show="{{rows.length > 0}}" class="list" onscrollbottom="onReachBottom">
       <list-item type="catrow" for="{{rows}}" tid="rid" @click="onRowClick($item)">
         <div class="row">
@@ -31,7 +25,7 @@
       </list-item>
     </list>
 
-    <!-- 空态兜底：装载未生效时可手动重试（不依赖任何定时器/事件时序） -->
+    <!-- 空态兜底 -->
     <text if="{{rows.length == 0}}" class="retry-tap" @click="loadData">物质表加载中…点此重试</text>
   </div>
 </template>
@@ -41,14 +35,14 @@ import router from '@system.router'
 import prompt from '@system.prompt'
 import { CATALOG, formulaName } from '../../common/logic/substances.js'
 
-const CHUNK = 26
+const CHUNK = 30
 
 // 模块级缓存：整表只在首次进入时构建一次
 let allRows = []
 let built = false
 
 function buildAllRows() {
-  if (built) return
+  if (built && allRows.length > 0) return
   const arr = []
   let n = 0
   for (let g = 0; g < CATALOG.length; g++) {
@@ -76,19 +70,20 @@ export default {
     pos: 0
   },
 
-  // 首选装载点：onInit 在首次渲染前同步执行，首帧即有数据，彻底消除时序问题。
   onInit() {
     this.loadData()
   },
 
-  // 兑底一：页面模板渲染完成后触发
   onReady() {
     this.loadData()
   },
 
-  // 数据装载：幂等，可被 onInit/onReady/onShow/重试行安全地多次调用
+  onShow() {
+    this.loadData()
+  },
+
   loadData() {
-    if (this.rows.length > 0) return
+    if (this.rows.length > 1) return
     try {
       buildAllRows()
       this.pos = 0
@@ -97,6 +92,7 @@ export default {
       prompt.showToast({ message: '加载失败', duration: 1500 })
     }
   },
+
   appendChunk() {
     if (!allRows.length) buildAllRows()
     if (this.pos >= allRows.length) return
@@ -146,7 +142,6 @@ export default {
 <style>
 @import '../../common/style.css';
 
-/* 纵向 flex 流：与元素查询页同构 */
 .screen {
   width: 336px;
   height: 480px;
@@ -196,7 +191,6 @@ export default {
   margin-top: 2px;
 }
 
-/* 列表固定尺寸（非绝对定位），与元素页 .panel-list 同思路 */
 .list {
   width: 304px;
   height: 400px;
@@ -205,7 +199,6 @@ export default {
   margin-top: 8px;
 }
 
-/* 空态重试行 */
 .retry-tap {
   width: 336px;
   text-align: center;
@@ -214,7 +207,6 @@ export default {
   margin-top: 180px;
 }
 
-/* 所有行共用同一张卡片：标题行显示【分组名】，物质行左名称右化学式 */
 .row {
   width: 304px;
   height: 48px;
