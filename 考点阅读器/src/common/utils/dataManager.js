@@ -108,13 +108,24 @@ function saveDeletedSet(deletedSet) {
 
 // ==================== JSON 搜索辅助 ====================
 
+// 缓存 JSON 内容 → 可搜索文本的映射，避免重复解析
+const _searchableTextCache = new Map()
+
 // 从 JSON 知识点内容中提取可搜索的文本（标题、描述、要点、原文、公式）
 // 对于 fmt='json' 的文件，搜索展示文本而非原始 JSON 结构
+// 结果缓存到 Map 中，同一内容不重复解析
 function _extractSearchableText(content) {
   if (!content || typeof content !== 'string') return content || ''
+  // 先查缓存
+  if (_searchableTextCache.has(content)) {
+    return _searchableTextCache.get(content)
+  }
   try {
     const result = parseKnowledgeJson(content)
-    if (!result.ok || !result.data) return content
+    if (!result.ok || !result.data) {
+      _searchableTextCache.set(content, content)
+      return content
+    }
     const parts = []
     const data = result.data
     const names = Object.keys(data)
@@ -136,8 +147,11 @@ function _extractSearchableText(content) {
         }
       }
     }
-    return parts.join('\n')
+    const text = parts.join('\n')
+    _searchableTextCache.set(content, text)
+    return text
   } catch (e) {
+    _searchableTextCache.set(content, content)
     return content
   }
 }
