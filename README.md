@@ -14,24 +14,23 @@
 
 ## 源码布局
 
-```text
+```
 .
-├── 考点阅读器/                  # Vela：TXT/JSON 考点阅读、搜索、无缝阅读、传输
-│   ├── src/
-│   ├── samples/                 # JSON 示例
-│   ├── scripts/                 # 构建兼容脚本
+├── 考点阅读器/                  # Vela：TXT/JSON 考点阅读、搜索、分页、传输
+│   ├── src/                     # 源码（页面、组件、工具函数）
+│   ├── samples/                 # JSON 示例文件
+│   ├── scripts/                 # 构建辅助脚本
 │   ├── sign/                    # Vela 签名文件
 │   └── package.json
-├── 化学计算器/                  # Vela：离线反应推导、配平、元素检索、质量计量
-│   ├── src/
-│   ├── tests/                   # 62 项核心逻辑冒烟测试
+├── 化学计算器/                  # Vela：反应推导、配平、元素检索、质量计量
+│   ├── src/                     # 源码
+│   ├── tests/                   # 核心逻辑冒烟测试
 │   ├── scripts/
 │   ├── sign/
 │   └── package.json
 ├── android_src/
-│   └── snapnotes-android/       # Android：同步自 vultra-c/Snapnotes-android
+│   └── snapnotes-android/       # Android：配套手机端应用
 │       ├── app/src/main/java/com/whyy/snapnotes/
-│       ├── app/src/main/res/
 │       └── app/build.gradle.kts
 ├── release/                     # 当前可安装 RPK/APK
 ├── bandburg-kdreader.js         # BandBurg 离线传输脚本
@@ -39,70 +38,59 @@
 └── .claude/skills/              # Vela 开发规范
 ```
 
-旧的废弃 Android 示例工程（包名 `com.silenthong.kdreader`）已经移除，当前唯一 Android 工程是 `android_src/snapnotes-android`，避免多个工程混淆。
-
 ## 功能概览
 
 ### 考点阅读器
 
-- TXT 按原有章节格式解析，JSON 按知识点结构解析。
-- 支持文件夹、多级目录、搜索、分页、百分比跳转和无缝长文阅读。
+- TXT 按章节格式解析，JSON 按知识点结构解析（科目→条目→要点/原文/公式）。
+- 支持文件夹多级目录、搜索（全局/文件夹/单文件）、分页、百分比跳转。
 - 支持通过 Android 手机端或 BandBurg 脚本传输 TXT/JSON。
-- 内置中文、英文输入法（已移除日文），支持拼音连打和右滑返回。
-- Android 端包名与 Vela 端统一为 `com.whyy.snapnotes`。
+- 公式图显示 + 缩放控件。
+- 内置中文/英文输入法，支持拼音连打和右滑返回。
+- 大文件夹分块懒加载，优化打开性能。
 
 ### 化学工具箱
 
-- 纯离线识别化学式和中文物质名称。
+- 纯离线识别化学式和中文物质名称（如 Fe+O2 或 铁+氧气）。
 - 自动推导生成物、配平常规化学方程式。
 - 按任意已知物质质量反推或正向计算全方程式计量结果。
-- 支持按 1～3 个元素检索本地预配平反应库，可输入中文名（铁 氧）或英文符号（Fe O）。
-- 首页为功能列表，点击进入对应计算界面；使用考点阅读器同款中文/英文输入法（已移除日文），所有页面支持右滑返回。
-- 跨页数据通过 Vela 全局 `$app.$def` 传递（不用 `$data`，本机运行时后者不可用）；结果列表与常用物质表均使用考点阅读器同款 `list/list-item` 组件。
+- 按 1~3 个元素检索本地预配平反应库。
+- 常用物质表分块加载，点选自动填入反应计算输入框。
+- 首页为功能列表，使用考点阅读器同款输入法。
+
+### Android 手机端
+
+- 小米 XMS Wearable SDK 连接手环，双向同步文件树。
+- 分片传输 TXT/JSON 文件到手环。
+- JSON 知识点文件支持公式图渲染。
+- Amadeus AI 聊天集成（可选）。
 
 ## 本地构建
 
 ### Vela 应用
 
-两个 Vela 项目使用相同的 aiot-toolkit 构建方式：
-
 ```bash
-cd 考点阅读器
-npm install
-npm run release
-
-cd ../化学计算器
-npm install
-npm run release
-node tests/smoke.mjs
+cd 考点阅读器 && npm install && npm run release
+cd ../化学计算器 && npm install && npm run release
 ```
 
-构建产物首先出现在各项目的 `dist/`（这些目录被忽略）。正式包放入根目录 `release/` 后提交，文件名应与当前版本对应。
+构建产物在各项目的 `dist/`，正式包放入 `release/` 后提交。
 
 ### Android 手机端
 
 ```bash
 cd android_src/snapnotes-android
-ANDROID_HOME=/path/to/android-sdk \\
-ANDROID_SDK_ROOT=/path/to/android-sdk \\
-  bash ./gradlew :app:assembleDebug
+./gradlew :app:assembleDebug
 ```
-
-APK 生成在 `app/build/outputs/apk/debug/app-debug.apk`。Android 构建目录默认忽略；需要交付时，将验证后的 APK 放入根目录 `release/`。
 
 ## 文档
 
 - [`docs/vela/kd-dev-doc/`](docs/vela/kd-dev-doc/)：Vela 开发文档
-- [`docs/vela/vela-all-docs.zip`](docs/vela/vela-all-docs.zip)：Vela 文档集合
-- [`docs/自然语言实现指南.md`](docs/自然语言实现指南.md)：功能实现说明
-- [`docs/archive/`](docs/archive/)：旧 Android 方案和历史部署资料，仅供查阅
+- [`docs/自然语言实现指南.md`](docs/自然语言实现指南.md)：手环与手机数据交换系统实现说明
+- [`docs/archive/`](docs/archive/)：旧方案和历史资料，仅供查阅
 
 ## 签名与版本
 
-- Vela 两个应用分别使用各自 `sign/release/` 下的签名文件，RPK 已在 `release/` 中提供。
-- Android 当前仓库提供的是 Debug APK；Android Release 签名需要在本地配置 `keystore.properties`，该文件不会提交。
-- 具体版本号以各应用的 `src/manifest.json`、Android `app/build.gradle.kts` 和 `release/README.md` 为准。
-
-## 许可证
-
-Android 上游工程保留其 [`AGPL v3 LICENSE`](android_src/snapnotes-android/LICENSE)。本仓库对上游代码的修改遵循相应开源许可证。
+- Vela 两个应用分别使用各自 `sign/release/` 下的签名文件。
+- Android 当前为 Debug APK；Release 签名需本地配置 `keystore.properties`（不提交）。
+- 版本号以各应用 `src/manifest.json`、Android `app/build.gradle.kts` 和 `release/README.md` 为准。
