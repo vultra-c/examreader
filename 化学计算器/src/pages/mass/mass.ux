@@ -45,19 +45,19 @@
         </div>
       </div>
 
-      <!-- 3 · 结果 -->
-      <text if="{{hasResult}}" class="sec-label res-label">各物质质量</text>
-      <list if="{{hasResult}}" class="res-list">
-        <list-item type="res" for="{{resultRows}}" tid="rid">
-          <div class="{{$item.known ? 'res-row-known' : 'res-row'}}">
+      <!-- 3 · 结果（show 常驻，scroll + div for 渲染，内容容器显式列方向） -->
+      <text show="{{hasResult}}" class="sec-label res-label">各物质质量</text>
+      <scroll show="{{hasResult}}" class="res-scroll" scroll-y="true">
+        <div class="res-list">
+          <div for="{{resultRows}}" class="{{$item.known ? 'res-row-known' : 'res-row'}}">
             <div class="res-line">
               <text class="res-f">{{$item.text}}</text>
               <text class="res-m">{{$item.massText}} g</text>
             </div>
             <text class="res-mol">n ≈ {{$item.molText}} mol</text>
           </div>
-        </list-item>
-      </list>
+        </div>
+      </scroll>
     </div>
 
     <input-method hide="{{!showKeyboard}}" keyboardtype="QWERTY" screentype="rect" maxlength="8"
@@ -359,10 +359,13 @@ export default {
   color: #ffffff;
 }
 
-.res-list {
+.res-scroll {
   width: 304px;
   height: 168px;
   margin-top: 4px;
+}
+.res-list {
+  flex-direction: column;
 }
 .res-row {
   width: 304px;

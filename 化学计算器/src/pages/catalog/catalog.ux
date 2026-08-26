@@ -1,7 +1,10 @@
 <!--
   化学工具箱 · 常用物质表（336×480）
-  使用 list + list-item 组件，与 element.ux / index.ux 保持一致的可靠渲染模式。
-  关键：list-item type 必须是静态字符串，不能用 {{}} 绑定。
+  渲染方案：scroll + div for，内容容器显式声明 flex-direction: column。
+  依据小米 Vela 开发文档：flex-direction 默认值为 row，此前版本未显式声明列方向，
+  导致全部行横向排布、屏幕上只露出第一行；而 list-item 组件要求同 type 的
+  DOM 结构完全一致，标题行/物质行混用 if 会触发渲染错误。
+  本页改用普通 div 渲染，无上述限制，且已在设备上验证可渲染。
 -->
 <template>
   <div class="screen" @swipe="onSwipe">
@@ -12,18 +15,24 @@
       <div class="hd-hold"></div>
     </div>
     <text class="sub-tip">点选物质，自动填入「反应计算」输入框</text>
-    <!-- 列表：所有 list-item 使用相同的静态 type="row" -->
-    <list class="scroll-area">
-      <list-item for="{{allRows}}" tid="rid" type="row" class="row-wrap" @click="onRowClick($item)">
-        <div if="{{item.kind === 'title'}}" class="title-row">
-          <text class="title-text">{{item.main}}</text>
+
+    <!-- 列表：scroll + div for，显式列方向；分块加载（依据开发文档：超过10项应分页/懒加载） -->
+    <scroll class="scroll-area" scroll-y="true" onscrollbottom="onReachBottom">
+      <div class="list-content">
+        <div for="{{visibleRows}}" tid="rid" class="row-wrap" @click="onRowClick($item)">
+          <div if="{{$item.kind === 'title'}}" class="title-row">
+            <text class="title-text">{{$item.main}}</text>
+          </div>
+          <div if="{{$item.kind === 'item'}}" class="item-row">
+            <text class="item-main">{{$item.main}}</text>
+            <text class="item-sub">{{$item.sub}}</text>
+          </div>
         </div>
-        <div if="{{item.kind === 'item'}}" class="item-row">
-          <text class="item-main">{{item.main}}</text>
-          <text class="item-sub">{{item.sub}}</text>
+        <div if="{{hasMore}}" class="more-hint">
+          <text class="more-hint-t">▼ 还有 {{total - visibleRows.length}} 条，上滑加载更多</text>
         </div>
-      </list-item>
-    </list>
+      </div>
+    </scroll>
   </div>
 </template>
 
@@ -52,9 +61,29 @@ const ALL_ROWS = []
   }
 })()
 
+// 分块渲染：首屏 24 行，滚动到底追加 24 行（Vela 文档：长列表应分页避免首屏卡顿）
+const CHUNK = 24
+
+function appendChunk(visible, pos) {
+  const end = Math.min(pos + CHUNK, ALL_ROWS.length)
+  const added = ALL_ROWS.slice(pos, end)
+  return { rows: visible.concat(added), pos: end }
+}
+
 export default {
   private: {
-    allRows: ALL_ROWS
+    total: ALL_ROWS.length,
+    visibleRows: ALL_ROWS.slice(0, CHUNK),
+    renderPos: CHUNK,
+    hasMore: ALL_ROWS.length > CHUNK
+  },
+
+  onReachBottom() {
+    if (!this.hasMore) return
+    const r = appendChunk(this.visibleRows, this.renderPos)
+    this.visibleRows = r.rows
+    this.renderPos = r.pos
+    this.hasMore = this.renderPos < this.total
   },
 
   onRowClick(item) {
@@ -131,8 +160,24 @@ export default {
 
 .scroll-area {
   width: 336px;
-  height: 400px;
-  margin-top: 8px;
+  height: 408px;
+  margin-top: 6px;
+}
+
+/* 关键：内容容器显式列方向（Vela 默认 row） */
+.list-content {
+  flex-direction: column;
+}
+
+.more-hint {
+  width: 336px;
+  height: 40px;
+  justify-content: center;
+  align-items: center;
+}
+.more-hint-t {
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.35);
 }
 
 .row-wrap {

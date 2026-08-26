@@ -35,22 +35,24 @@
       </div>
     </div>
 
-    <!-- 结果面板 -->
-    <div if="{{searched}}" class="panel">
+    <!-- 结果面板（show 常驻，scroll + div for 渲染，内容容器显式列方向） -->
+    <div show="{{searched}}" class="panel">
       <div class="panel-hd">
         <text class="panel-hd-t">匹配方程式</text>
         <text class="panel-hd-n">{{elementResults.length}} 条</text>
       </div>
-      <text if="{{elementResults.length == 0}}" class="panel-none">没有同时含这些元素的方程式</text>
-      <!-- 列表组件：使用 if 而非 show，确保 Vela 可靠渲染 -->
-      <list if="{{elementResults.length > 0}}" class="panel-list">
-        <list-item type="eqrow" for="{{elementResults}}" tid="rid" @click="openEquation($item)">
-          <div class="eq-item">
+      <text show="{{searched && elementResults.length == 0}}" class="panel-none">没有同时含这些元素的方程式</text>
+      <scroll show="{{searched && elementResults.length > 0}}" class="panel-scroll" scroll-y="true" onscrollbottom="onReachBottom">
+        <div class="eq-list">
+          <div for="{{visibleResults}}" class="eq-item" @click="openEquation($item)">
             <text class="eq-item-text">{{$item.text}}</text>
             <text class="eq-item-type">{{$item.type}}</text>
           </div>
-        </list-item>
-      </list>
+          <div if="{{hasMoreRes}}" class="more-hint">
+            <text class="more-hint-t">▼ 还有 {{elementResults.length - visibleResults.length}} 条，上滑加载</text>
+          </div>
+        </div>
+      </scroll>
     </div>
     <text if="{{!searched}}" class="panel-idle">点击输入框输入，如：Fe O 或 铁 氧</text>
 
@@ -66,12 +68,18 @@ import prompt from '@system.prompt'
 import { parseElementQuery, searchEquations, buildReactionFromBank, equationText } from '../../common/logic/elementQuery.js'
 import { NAME_MAP } from '../../common/logic/substances.js'
 
+// 分块渲染：首屏 15 条，滚动到底追加 15 条（Vela 文档：长列表应分页避免首屏卡顿）
+const RES_CHUNK = 15
+
 export default {
   private: {
     inputStr: '',
     showKb: false,
     searched: false,
-    elementResults: []
+    elementResults: [],
+    visibleResults: [],
+    renderPos: 0,
+    hasMoreRes: false
   },
 
   toggleKb() {
@@ -113,6 +121,17 @@ export default {
     this.showKb = false
     this.searched = false
     this.elementResults = []
+    this.visibleResults = []
+    this.renderPos = 0
+    this.hasMoreRes = false
+  },
+
+  onReachBottom() {
+    if (!this.hasMoreRes || !this.elementResults.length) return
+    const end = Math.min(this.renderPos + RES_CHUNK, this.elementResults.length)
+    this.visibleResults = this.visibleResults.concat(this.elementResults.slice(this.renderPos, end))
+    this.renderPos = end
+    this.hasMoreRes = this.renderPos < this.elementResults.length
   },
 
   onSearch() {
@@ -137,6 +156,9 @@ export default {
       rows.push({ text: equationText(hits[i]), type: hits[i].t, entry: hits[i], rid: 'e' + i })
     }
     this.elementResults = rows
+    this.visibleResults = rows.slice(0, RES_CHUNK)
+    this.renderPos = Math.min(RES_CHUNK, rows.length)
+    this.hasMoreRes = rows.length > RES_CHUNK
     this.searched = true
     if (rows.length === 0) prompt.showToast({ message: '未找到匹配方程式', duration: 1800 })
   },
@@ -313,10 +335,23 @@ export default {
   color: rgba(255, 255, 255, 0.4);
   margin-top: 60px;
 }
-.panel-list {
+.panel-scroll {
   width: 280px;
   height: 220px;
   margin-top: 4px;
+}
+.eq-list {
+  flex-direction: column;
+}
+.more-hint {
+  width: 280px;
+  height: 36px;
+  justify-content: center;
+  align-items: center;
+}
+.more-hint-t {
+  font-size: 15px;
+  color: rgba(255, 255, 255, 0.35);
 }
 .panel-idle {
   width: 336px;
