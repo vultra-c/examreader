@@ -76,7 +76,17 @@ export default {
     pos: 0
   },
 
-  // 首选装载点：onReady 在页面模板渲染完成后触发，此时 list 必已挂载。
+  // 首选装载点：onInit 在首次渲染前同步执行，首帧即有数据，彻底消除时序问题。
+  onInit() {
+    this.loadData()
+  },
+
+  // 兑底一：页面模板渲染完成后触发
+  onReady() {
+    this.loadData()
+  },
+
+  // 数据装载：幂等，可被 onInit/onReady/onShow/重试行安全地多次调用
   loadData() {
     if (this.rows.length > 0) return
     try {
@@ -87,18 +97,6 @@ export default {
       prompt.showToast({ message: '加载失败', duration: 1500 })
     }
   },
-
-  // 双保险：onShow 同步装载（幂等，rows 已有数据时不打断分页状态）
-  onShow() {
-    this.loadData()
-  },
-
-  // 模板就绪钩子：本机最可靠的挂载后时机
-  onReady() {
-    this.loadData()
-  },
-
-  // 追加下一块数据；未到底时在尾部挂一个「加载更多」行（点击或滚动到底均可触发）
   appendChunk() {
     if (!allRows.length) buildAllRows()
     if (this.pos >= allRows.length) return
