@@ -1,7 +1,7 @@
 <!--
   化学工具箱 · 常用物质表（336×480）
   使用 list + list-item 组件，与 element.ux / index.ux 保持一致的可靠渲染模式。
-  数据在模块加载时一次性同步构建，页面渲染时直接使用，无异步/定时器依赖。
+  关键：list-item type 必须是静态字符串，不能用 {{}} 绑定。
 -->
 <template>
   <div class="screen" @swipe="onSwipe">
@@ -12,9 +12,9 @@
       <div class="hd-hold"></div>
     </div>
     <text class="sub-tip">点选物质，自动填入「反应计算」输入框</text>
-    <!-- 列表：与 element.ux / index.ux 同款 list 组件 -->
-    <list class="scroll-area" if="{{allRows.length > 0}}">
-      <list-item for="{{allRows}}" tid="rid" type="{{item.type}}" class="row-wrap" @click="onRowClick($item)">
+    <!-- 列表：所有 list-item 使用相同的静态 type="row" -->
+    <list class="scroll-area">
+      <list-item for="{{allRows}}" tid="rid" type="row" class="row-wrap" @click="onRowClick($item)">
         <div if="{{item.kind === 'title'}}" class="title-row">
           <text class="title-text">{{item.main}}</text>
         </div>
@@ -37,14 +37,13 @@ const ALL_ROWS = []
   let n = 0
   for (let g = 0; g < CATALOG.length; g++) {
     const cat = CATALOG[g]
-    ALL_ROWS.push({ kind: 'title', rid: 't' + g, type: 'title', main: '【' + cat.group + '】', sub: '' })
+    ALL_ROWS.push({ kind: 'title', rid: 't' + g, main: '【' + cat.group + '】', sub: '' })
     for (let i = 0; i < cat.items.length; i++) {
       const f = cat.items[i]
       const nm = formulaName(f)
       ALL_ROWS.push({
         kind: 'item',
         rid: 'c' + (n++),
-        type: 'item',
         formula: f,
         main: (nm && nm !== f) ? nm : f,
         sub: f

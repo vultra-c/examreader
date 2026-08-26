@@ -42,8 +42,8 @@
         <text class="panel-hd-n">{{elementResults.length}} 条</text>
       </div>
       <text if="{{elementResults.length == 0}}" class="panel-none">没有同时含这些元素的方程式</text>
-      <!-- 列表组件与考点阅读器搜索结果同款：list/list-item（scroll 纵向列表在本机不可靠） -->
-      <list show="{{elementResults.length > 0}}" class="panel-list">
+      <!-- 列表组件：使用 if 而非 show，确保 Vela 可靠渲染 -->
+      <list if="{{elementResults.length > 0}}" class="panel-list">
         <list-item type="eqrow" for="{{elementResults}}" tid="rid" @click="openEquation($item)">
           <div class="eq-item">
             <text class="eq-item-text">{{$item.text}}</text>

@@ -47,7 +47,7 @@
 
       <!-- 3 · 结果 -->
       <text if="{{hasResult}}" class="sec-label res-label">各物质质量</text>
-      <list show="{{hasResult}}" class="res-list">
+      <list if="{{hasResult}}" class="res-list">
         <list-item type="res" for="{{resultRows}}" tid="rid">
           <div class="{{$item.known ? 'res-row-known' : 'res-row'}}">
             <div class="res-line">
