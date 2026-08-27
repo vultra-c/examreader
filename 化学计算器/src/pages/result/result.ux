@@ -1,23 +1,17 @@
 <!--
-  化学工具箱 · 反应结果页（336×480）
+  化学工具箱 · 反应结果页（336×480，闪念小抄风格）
 
   性能要点：整条方程式（含系数与 Unicode 下标）在 JS 里拼成「一个字符串」，
   模板里只有一个 text 节点自动折行 —— 相比逐段多节点渲染大幅减少 VDOM 规模。
+  主体全部 absolute 顶层挂载；mr-list 列表行静态 class + 显式行高 + div 包裹。
 -->
 <template>
-  <div class="screen" @swipe="onSwipe">
-
-    <!-- 顶栏 -->
-    <div class="hd">
-      <div class="hd-back" @click="goBack"><text class="hd-back-t">‹</text></div>
-      <text class="hd-title">反应方程式</text>
-      <div class="hd-hold"></div>
-    </div>
+  <div class="page" @swipe="onSwipe">
 
     <!-- 无数据兜底 -->
     <text if="{{!valid}}" class="none-tip">未找到反应数据</text>
 
-    <!-- 主体（全部 absolute 顶层挂载，坐标固定，避免 flex 测量导致列表行塌陷） -->
+    <!-- 方程式卡片（小抄深色大圆角卡片） -->
     <div if="{{valid}}" class="eq-card">
       <text class="eq-text">{{eqText}}</text>
       <text if="{{condText}}" class="eq-cond">{{condText}}</text>
@@ -37,14 +31,18 @@
     </list>
 
     <!-- 底部操作 -->
-    <div if="{{valid}}" class="foot">
-      <div class="foot-btn" @click="goBack">
-        <text class="foot-btn-t">返回修改</text>
-      </div>
-      <div class="foot-btn foot-btn-main" @click="goMass">
-        <text class="foot-btn-t-main">质量计算</text>
-      </div>
+    <div if="{{valid}}" class="btn-ghost foot-back" @click="goBack">
+      <text class="btn-ghost-t">返回修改</text>
     </div>
+    <div if="{{valid}}" class="btn-main foot-mass" @click="goMass">
+      <text class="btn-main-t">质量计算</text>
+    </div>
+
+    <!-- 顶栏（闪念小抄同款） -->
+    <img static src="/common/images/hd.png" class="hd-bg" />
+    <img static src="/common/images/back.png" class="hd-back" @click="goBack" />
+    <text static class="hd-sub">配平结果</text>
+    <text static class="hd-title">反应方程式</text>
   </div>
 </template>
 
@@ -78,9 +76,7 @@ export default {
     }
     let text = ''
     for (let i = 0; i < parts.length; i++) {
-      if (i > 0 && parts[i] !== '=' && parts[i] !== '+') text += ' '
-      else if (i > 0) text += ' '
-      text += parts[i]
+      text += (i > 0 ? ' ' : '') + parts[i]
     }
     this.eqText = text
     this.condText = r.cond ? '条件：' + r.cond : ''
@@ -116,75 +112,33 @@ export default {
 <style>
 @import '../../common/style.css';
 
-.screen {
-  width: 336px;
-  height: 480px;
-  background-color: #000000;
-  flex-direction: column;
-}
-
-.hd {
-  width: 336px;
-  height: 66px;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 16px 0 12px;
-}
-.hd-back {
-  width: 48px;
-  height: 48px;
-  border-radius: 24px;
-  background-color: #1c1c1e;
-  justify-content: center;
-  align-items: center;
-}
-.hd-back-t {
-  font-size: 36px;
-  line-height: 40px;
-  margin-top: -4px;
-  color: #ffffff;
-  font-weight: bold;
-}
-.hd-title {
-  font-size: 30px;
-  font-weight: bold;
-  color: #ffffff;
-}
-.hd-hold {
-  width: 48px;
-  height: 48px;
-}
-
 .none-tip {
   position: absolute;
   left: 0px;
-  top: 200px;
+  top: 220px;
   width: 336px;
   text-align: center;
   font-size: 24px;
   color: rgba(255, 255, 255, 0.35);
 }
 
-/* ---- 主体（absolute 顶层挂载，坐标固定） ---- */
+/* ---- 方程式卡片（小抄深色大圆角卡片，固定高 200） ---- */
 .eq-card {
   position: absolute;
-  left: 16px;
-  top: 68px;
-  width: 304px;
-  height: 200px;
-  border-radius: 20px;
-  background-color: #161618;
-  border-width: 1px;
-  border-color: #2e2e33;
-  padding: 12px 14px;
+  left: 6px;
+  top: 108px;
+  width: 324px;
+  height: 196px;
+  border-radius: 36px;
+  background-color: #262626;
+  padding: 14px 20px;
   flex-direction: column;
   align-items: center;
 }
 .eq-text {
-  width: 276px;
-  font-size: 26px;
-  line-height: 38px;
+  width: 284px;
+  font-size: 28px;
+  line-height: 40px;
   font-weight: bold;
   color: #ffffff;
   text-align: center;
@@ -192,48 +146,48 @@ export default {
   text-overflow: ellipsis;
 }
 .eq-cond {
-  font-size: 19px;
-  line-height: 25px;
+  font-size: 20px;
+  line-height: 26px;
   color: rgba(255, 255, 255, 0.45);
   margin-top: 4px;
   text-align: center;
 }
 .eq-badge {
-  padding: 4px 16px;
-  border-radius: 13px;
-  background-color: rgba(13, 110, 255, 0.18);
+  padding: 4px 18px;
+  border-radius: 15px;
+  background-color: rgba(13, 110, 255, 0.22);
   margin-top: 6px;
 }
 .eq-badge-t {
-  font-size: 18px;
+  font-size: 19px;
   color: #4da3ff;
 }
 
 .sec-label {
   position: absolute;
-  left: 18px;
-  top: 276px;
-  width: 300px;
-  font-size: 17px;
-  line-height: 20px;
+  left: 16px;
+  top: 310px;
+  width: 304px;
+  font-size: 20px;
+  line-height: 24px;
   color: rgba(255, 255, 255, 0.45);
 }
 
 .mr-list {
   position: absolute;
-  left: 16px;
-  top: 300px;
-  width: 304px;
-  height: 122px;
+  left: 6px;
+  top: 338px;
+  width: 324px;
+  height: 74px;
 }
 /* list-item：静态 class + 显式行高/间距，内容内层 div 包裹 */
 .mr-row {
   width: 100%;
-  height: 50px;
-  border-radius: 14px;
-  background-color: #1c1c1e;
-  padding: 0 14px;
-  margin-bottom: 6px;
+  height: 62px;
+  border-radius: 24px;
+  background-color: #262626;
+  padding: 0 18px;
+  margin-bottom: 8px;
 }
 .mr-content {
   width: 100%;
@@ -243,41 +197,36 @@ export default {
   align-items: center;
 }
 .mr-f {
-  font-size: 22px;
-  color: #ffffff;
-}
-.mr-v {
-  font-size: 21px;
-  color: rgba(255, 255, 255, 0.72);
-}
-
-.foot {
-  position: absolute;
-  left: 16px;
-  top: 428px;
-  width: 304px;
-  height: 48px;
-  flex-direction: row;
-  justify-content: space-between;
-}
-.foot-btn {
-  width: 147px;
-  height: 48px;
-  border-radius: 24px;
-  background-color: #1c1c1e;
-  justify-content: center;
-  align-items: center;
-}
-.foot-btn-main {
-  background-color: #0d6eff;
-}
-.foot-btn-t {
-  font-size: 24px;
-  color: rgba(255, 255, 255, 0.8);
-}
-.foot-btn-t-main {
   font-size: 24px;
   font-weight: bold;
   color: #ffffff;
+}
+.mr-v {
+  font-size: 22px;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+/* ---- 底部操作（56 高，bottom <= 472） ---- */
+.foot-back {
+  position: absolute;
+  left: 6px;
+  top: 418px;
+  width: 158px;
+  height: 56px;
+  border-radius: 28px;
+}
+.foot-mass {
+  position: absolute;
+  left: 172px;
+  top: 418px;
+  width: 158px;
+  height: 56px;
+  border-radius: 28px;
+}
+.foot-back .btn-ghost-t {
+  font-size: 24px;
+}
+.foot-mass .btn-main-t {
+  font-size: 24px;
 }
 </style>

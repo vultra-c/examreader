@@ -1,62 +1,28 @@
 <!--
   化学工具箱 · 主页（336×480）
-  风格对齐考点阅读器：顶部标题栏 + 功能列表，点击进入对应计算界面。
+  闪念小抄 UI 风格：hd.png 顶栏 + 双行居中标题 + 112px 大圆角功能卡片列表。
   右滑 / 返回键退出应用。
 -->
 <template>
-  <div class="screen" @swipe="onSwipe">
+  <div class="page" @swipe="onSwipe">
 
-    <!-- 顶栏 -->
-    <div class="hd">
-      <div class="hd-back" @click="exitApp"><text class="hd-back-t">‹</text></div>
-      <text class="hd-title">化学工具箱</text>
-      <div class="hd-hold"></div>
-    </div>
-
-    <!-- 副标题 -->
-    <text class="sub-tip">离线化学计算 · 反应 · 配平 · 计量</text>
-
-    <!-- 功能列表 -->
-    <div class="menu">
-      <div class="menu-item" @click="goReaction">
-        <div class="mi-badge mi-b-blue"><text class="mi-badge-t">反</text></div>
-        <div class="mi-copy">
-          <text class="mi-title">反应计算</text>
-          <text class="mi-sub">输入反应物，自动推导并配平方程式</text>
+    <!-- 功能卡片列表（分块无需，4 项一次渲染） -->
+    <list class="list" id="menuList">
+      <list-item for="{{menu}}" tid="id" class="item" type="menu" @click="go($item)">
+        <div class="item-content">
+          <text class="itemtext">{{$item.title}}</text>
+          <text class="itemtext2">{{$item.sub}}</text>
         </div>
-        <text class="mi-arrow">›</text>
-      </div>
+        <img static src="/common/images/enter.png" class="arrow" />
+      </list-item>
+    </list>
 
-      <div class="menu-item" @click="goElement">
-        <div class="mi-badge mi-b-green"><text class="mi-badge-t">元</text></div>
-        <div class="mi-copy">
-          <text class="mi-title">元素查询</text>
-          <text class="mi-sub">按元素或物质名称查找方程式</text>
-        </div>
-        <text class="mi-arrow">›</text>
-      </div>
+    <!-- 顶栏（闪念小抄同款：底图 + 返回 + 双行居中标题） -->
+    <img static src="/common/images/hd.png" class="hd-bg" />
+    <img static src="/common/images/back.png" class="hd-back" @click="exitApp" />
+    <text static class="hd-sub">离线化学计算</text>
+    <text static class="hd-title">化学工具箱</text>
 
-      <div class="menu-item" @click="goMass">
-        <div class="mi-badge mi-b-orange"><text class="mi-badge-t">质</text></div>
-        <div class="mi-copy">
-          <text class="mi-title">质量计算</text>
-          <text class="mi-sub">已知一种物质质量，推算全部物质</text>
-        </div>
-        <text class="mi-arrow">›</text>
-      </div>
-
-      <div class="menu-item" @click="goCatalog">
-        <div class="mi-badge mi-b-purple"><text class="mi-badge-t">表</text></div>
-        <div class="mi-copy">
-          <text class="mi-title">常用物质表</text>
-          <text class="mi-sub">浏览常见物质，点选填入反应计算</text>
-        </div>
-        <text class="mi-arrow">›</text>
-      </div>
-    </div>
-
-    <!-- 底部说明 -->
-    <text class="foot-tip">支持化学式（Fe+O2）与中文名（铁+氧气）</text>
   </div>
 </template>
 
@@ -65,17 +31,19 @@ import router from '@system.router'
 import app from '@system.app'
 
 export default {
-  goReaction() {
-    router.push({ uri: 'pages/reaction' })
+  private: {
+    menu: [
+      { id: 'm1', uri: 'pages/reaction', title: '反应计算', sub: '输入反应物，自动推导并配平' },
+      { id: 'm2', uri: 'pages/element', title: '元素查询', sub: '按元素或名称查找方程式' },
+      { id: 'm3', uri: 'pages/mass', title: '质量计算', sub: '已知一种质量，推算全部物质' },
+      { id: 'm4', uri: 'pages/catalog', title: '常用物质表', sub: '浏览常见物质，点选填入' }
+    ]
   },
-  goElement() {
-    router.push({ uri: 'pages/element' })
-  },
-  goMass() {
-    router.push({ uri: 'pages/mass' })
-  },
-  goCatalog() {
-    router.push({ uri: 'pages/catalog' })
+
+  go(item) {
+    if (item && item.uri) {
+      router.push({ uri: item.uri })
+    }
   },
   exitApp() {
     app.terminate()
@@ -94,120 +62,4 @@ export default {
 
 <style>
 @import '../../common/style.css';
-
-.screen {
-  width: 336px;
-  height: 480px;
-  background-color: #000000;
-  flex-direction: column;
-}
-
-/* ---- 顶栏 ---- */
-.hd {
-  width: 336px;
-  height: 66px;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 16px 0 12px;
-}
-.hd-back {
-  width: 48px;
-  height: 48px;
-  border-radius: 24px;
-  background-color: #1c1c1e;
-  justify-content: center;
-  align-items: center;
-}
-.hd-back-t {
-  font-size: 36px;
-  line-height: 40px;
-  margin-top: -4px;
-  color: #ffffff;
-  font-weight: bold;
-}
-.hd-title {
-  font-size: 30px;
-  font-weight: bold;
-  color: #ffffff;
-}
-.hd-hold {
-  width: 48px;
-  height: 48px;
-}
-
-.sub-tip {
-  width: 336px;
-  text-align: center;
-  font-size: 17px;
-  color: rgba(255, 255, 255, 0.35);
-  margin-top: 2px;
-}
-
-/* ---- 功能列表 ---- */
-.menu {
-  width: 304px;
-  margin: 14px 16px 0;
-  flex-direction: column;
-}
-.menu-item {
-  width: 304px;
-  height: 84px;
-  border-radius: 20px;
-  background-color: #161618;
-  border-width: 1px;
-  border-color: #2a2a30;
-  margin-bottom: 10px;
-  flex-direction: row;
-  align-items: center;
-  padding: 0 14px;
-}
-.mi-badge {
-  width: 46px;
-  height: 46px;
-  border-radius: 15px;
-  justify-content: center;
-  align-items: center;
-  margin-right: 12px;
-}
-.mi-b-blue { background-color: rgba(13, 110, 255, 0.22); }
-.mi-b-green { background-color: rgba(48, 176, 122, 0.22); }
-.mi-b-orange { background-color: rgba(255, 159, 10, 0.2); }
-.mi-b-purple { background-color: rgba(167, 118, 255, 0.22); }
-.mi-badge-t {
-  font-size: 24px;
-  font-weight: bold;
-  color: #ffffff;
-}
-.mi-copy {
-  flex: 1;
-  flex-direction: column;
-}
-.mi-title {
-  font-size: 23px;
-  line-height: 30px;
-  font-weight: bold;
-  color: #ffffff;
-}
-.mi-sub {
-  font-size: 15px;
-  line-height: 20px;
-  color: rgba(255, 255, 255, 0.4);
-  lines: 1;
-  text-overflow: ellipsis;
-  margin-top: 2px;
-}
-.mi-arrow {
-  font-size: 34px;
-  color: rgba(255, 255, 255, 0.35);
-  margin-left: 8px;
-}
-
-.foot-tip {
-  width: 336px;
-  text-align: center;
-  font-size: 16px;
-  color: rgba(255, 255, 255, 0.28);
-  margin-top: 2px;
-}
 </style>

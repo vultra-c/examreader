@@ -1,21 +1,13 @@
 <!--
-  化学工具箱 · 常用物质表（336×480）
-  渲染方案：完全对齐考点阅读器（真机已验证）的 list 模式：
+  化学工具箱 · 常用物质表（336×480，闪念小抄风格）
+  渲染方案：完全对齐考点阅读器（真机已验证）的 list 模式 + 小抄深色卡片：
   - list 使用 absolute 定位、显式宽高，挂为页面顶层子节点（不参与 flex 流测量）
   - list-item 声明静态 class + 显式高度/间距，内容统一用内层 div 包裹
   - 同 type 的 list-item DOM 结构完全一致，禁止内部 if 混用
   - for 变量 $item，tid 唯一
 -->
 <template>
-  <div class="screen" @swipe="onSwipe">
-    <!-- 顶栏（流式） -->
-    <div class="hd">
-      <div class="hd-back" @click="goBack"><text class="hd-back-t">‹</text></div>
-      <text class="hd-title">常用物质表</text>
-      <div class="hd-hold"></div>
-    </div>
-    <text class="sub-tip">点选物质，自动填入「反应计算」输入框</text>
-
+  <div class="page" @swipe="onSwipe">
     <!-- 列表（absolute 顶层挂载，分块加载） -->
     <list class="cat-list" if="{{visibleRows.length > 0}}" onscrollbottom="onReachBottom">
       <list-item for="{{visibleRows}}" tid="rid" type="row" class="cat-item" @click="onRowClick($item)">
@@ -30,6 +22,12 @@
         </div>
       </list-item>
     </list>
+
+    <!-- 顶栏（闪念小抄同款） -->
+    <img static src="/common/images/hd.png" class="hd-bg" />
+    <img static src="/common/images/back.png" class="hd-back" @click="goBack" />
+    <text static class="hd-sub">点选自动填入</text>
+    <text static class="hd-title">常用物质表</text>
   </div>
 </template>
 
@@ -100,73 +98,24 @@ export default {
 <style>
 @import '../../common/style.css';
 
-.screen {
-  width: 336px;
-  height: 480px;
-  background-color: #000000;
-  flex-direction: column;
-}
-
-.hd {
-  width: 336px;
-  height: 52px;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  padding-left: 12px;
-  padding-right: 16px;
-}
-.hd-back {
-  width: 46px;
-  height: 46px;
-  border-radius: 23px;
-  background-color: #1c1c1e;
-  justify-content: center;
-  align-items: center;
-}
-.hd-back-t {
-  font-size: 34px;
-  line-height: 38px;
-  margin-top: -4px;
-  color: #ffffff;
-  font-weight: bold;
-}
-.hd-title {
-  font-size: 28px;
-  font-weight: bold;
-  color: #ffffff;
-}
-.hd-hold {
-  width: 46px;
-  height: 46px;
-}
-
-.sub-tip {
-  width: 336px;
-  text-align: center;
-  font-size: 16px;
-  color: rgba(255, 255, 255, 0.32);
-  margin-top: 2px;
-}
-
-/* 列表：absolute 顶层挂载，显式宽高（与考点阅读器一致的真机可用模式） */
+/* 列表：absolute 顶层挂载，显式宽高（顶栏 102px 之下） */
 .cat-list {
   position: absolute;
   left: 0px;
-  top: 80px;
+  top: 102px;
   width: 336px;
-  height: 400px;
-  padding: 0px 16px;
+  height: 378px;
+  padding: 0px 6px;
 }
 
-/* list-item：静态 class + 显式高度/间距，内容由内层 div 包裹 */
+/* list-item：小抄深色卡片风；静态 class + 显式行高/间距，内容内层 div 包裹 */
 .cat-item {
   width: 100%;
-  height: 52px;
-  padding: 0 14px;
-  margin-bottom: 7px;
-  border-radius: 13px;
-  background-color: #1c1c1e;
+  height: 72px;
+  padding: 0 22px;
+  margin-bottom: 8px;
+  border-radius: 30px;
+  background-color: #262626;
 }
 .cat-content {
   width: 100%;
@@ -179,19 +128,20 @@ export default {
   justify-content: center;
 }
 .cat-main {
-  font-size: 20px;
+  font-size: 26px;
+  font-weight: bold;
   color: #ffffff;
   lines: 1;
   text-overflow: ellipsis;
 }
 .cat-sub {
-  font-size: 20px;
+  font-size: 24px;
   font-weight: bold;
   color: rgba(255, 255, 255, 0.55);
   lines: 1;
 }
 .cat-more {
-  font-size: 16px;
+  font-size: 20px;
   color: rgba(255, 255, 255, 0.35);
 }
 </style>

@@ -293,7 +293,10 @@ export default {
       return
     }
 
-    this.parsedData = result.data
+    // parsedData/entryItems 存为非响应式实例属性：
+    // 全书 JSON 结构与含全文 raw 的条目不进入框架观察，
+    // 列表行只保留 {id,title,subtitle,idx} 轻量字段，点击时按 idx 回取。
+    this._parsedData = result.data
 
     const rows = []
     const subs = result.subjects
@@ -320,14 +323,15 @@ export default {
 
   enterSubject(subjectName) {
     this.curSubject = subjectName
-    const items = getItems(this.parsedData, subjectName)
+    const items = getItems(this._parsedData, subjectName)
+    this._entryItems = items
     const rows = []
     for (let i = 0; i < items.length; i++) {
       rows.push({
         id: 'entry_' + i + '_' + items[i].id,
         title: items[i].title,
         subtitle: items[i].desc || '查看详情',
-        item: items[i]
+        idx: i
       })
     }
     this.entryRows = rows
@@ -340,7 +344,7 @@ export default {
   },
 
   onItemClick(row) {
-    this.openDetail(row.item)
+    this.openDetail(this._entryItems[row.idx])
   },
 
   openDetail(item) {

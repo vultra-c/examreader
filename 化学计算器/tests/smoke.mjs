@@ -174,5 +174,32 @@ T('计量 Zn+HCl 已知锌求氢气', () => {
   assert(Math.abs(out[3].mass - 2.016) / 2.016 < 0.001, 'H2 应约 2.016，实际 ' + out[3].mass)
 })
 
+// ---- 化学专属输入词库（gen_chem_dict.py 生成；防回归） ----
+const { SimpleInputMethod } = await import('../src/components/InputMethod/assets/dicUtil.js')
+const { getWords } = await import('../src/components/InputMethod/assets/dic_words.js')
+SimpleInputMethod.initDict()
+T('词库 yangqi→氧气', () => {
+  const r = SimpleInputMethod.getHanzi('yangqi', 'cn')
+  assert((r.multi.words || []).indexOf('氧气') !== -1, 'yangqi 应出整词氧气')
+})
+T('词库 tsg→碳酸钙（简拼）', () => {
+  const r = SimpleInputMethod.getHanzi('tsg', 'cn')
+  assert((r.multi.words || []).indexOf('碳酸钙') !== -1, 'tsg 应出整词碳酸钙')
+})
+T('词库 tansuangai→碳酸钙（全拼连打）', () => {
+  const r = SimpleInputMethod.getHanzi('tansuangai', 'cn')
+  assert((r.multi.words || []).indexOf('碳酸钙') !== -1)
+})
+T('词库 lv→铝（多词同拼合并）', () => {
+  const w = getWords()
+  assert(Array.isArray(w['lv']) && w['lv'].indexOf('铝') !== -1)
+})
+T('词库 fanying 反应族齐备', () => {
+  const w = getWords()
+  for (const k of ['fenjiefanying', 'huahefanying', 'zhihuanfanying', 'fufenjiefanying']) {
+    assert(w[k], k + ' 应在词库中')
+  }
+})
+
 console.log('\n==== RESULT:', pass, 'passed,', fail, 'failed ====')
 process.exit(fail ? 1 : 0)
