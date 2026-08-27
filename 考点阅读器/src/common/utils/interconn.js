@@ -8,9 +8,8 @@ export default class interconn{
         this.conn = interconnect.instance();
 
         this.conn.onmessage = ({ data }) => {
-            // 日志：记录收到的原始数据
-            console.log('[interconn] onmessage: type=' + typeof data + ', value=' + (typeof data === 'string' ? data.substring(0, 200) : JSON.stringify(data).substring(0, 200)));
-
+            // 热路径：文件传输分片 ping-pong 场景每条消息打日志会持续分配字符串 + 阻塞主线程，
+            // 成功路径一律静默，仅保留失败/异常日志。
             let parsed;
             // 处理 string 和 object 两种可能的 data 格式
             if (typeof data === 'string') {
@@ -29,7 +28,6 @@ export default class interconn{
             }
 
             const { tag, ...playload } = parsed;
-            console.log('[interconn] message tag=' + tag + ', payload keys=' + Object.keys(playload).join(','));
 
             this.connected = true;
             if (this.callbacks[tag]) {
@@ -100,11 +98,10 @@ export default class interconn{
      */
     send(tag, playload) {
         const data = typeof playload === 'object' ? { ...playload, tag } : { msg: playload, tag }
-        console.log('[interconn] send: tag=' + tag + ', data=' + JSON.stringify(data).substring(0, 200));
+        // 热路径：发送成功不打日志（传输分片每片一条，日志即吞吐）
         return new Promise((resolve, reject) => {
             this.conn.send({
                 data, success: () => {
-                    console.log('[interconn] send success: tag=' + tag);
                     resolve();
                 }, fail: (e) => {
                     console.error('[interconn] send fail: tag=' + tag + ', error=' + JSON.stringify(e));

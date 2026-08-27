@@ -159,8 +159,7 @@ export default class interconnfile {
         const chapterData = JSON.parse(data);
         const { index, name, content, wordCount, chunkNum, totalChunks } = chapterData;
 
-        console.log('[BT-File] Chunk ' + (chunkNum + 1) + '/' + totalChunks + ' for chapter ' + index);
-
+        // 热路径：分片级日志会显著拖慢传输吞吐，静默处理
         const state = this.chapterWriteState.get(index) || {
             started: false,
             completed: false,
@@ -419,10 +418,12 @@ export default class interconnfile {
             this.send({ type: "error", message: 'chunks incomplete ' + st.receivedChunks + '/' + st.totalChunks });
             return;
         }
-        let full = '';
+        // 数组收集 + join：避免逐片 += 的 O(n²) 中间字符串分配
+        const parts = new Array(st.totalChunks);
         for (let i = 0; i < st.totalChunks; i++) {
-            full += st.buffer[i] != null ? st.buffer[i] : '';
+            parts[i] = st.buffer[i] != null ? st.buffer[i] : '';
         }
+        const full = parts.join('');
         this.snState = null;
 
         if (st.mode === 'formula') {

@@ -91,7 +91,7 @@ export default {
     timer: null,
     timeFormat: '24h',
     pageName: '全文',
-    pages: [],
+    // pages 数组移至 this._pages（非响应式），避免大数组进框架观察
     currentPageContent: '',
     currentPage: 0,
     totalPages: 1,
@@ -400,7 +400,7 @@ export default {
 
       this.pagesLoaded = true
       // 清理分页缓存数据释放内存
-      this.pages = []
+      this._pages = []
       this.currentPageContent = ''
       this.totalPages = 1
       appState.totalPages = 1
@@ -421,7 +421,7 @@ export default {
     }
     if (!this.$valid) return
 
-    this.pages = pages
+    this._pages = pages
     this.totalPages = pages.length
     // 同步总页数到 appState，供 pageJump / percentJump 复用
     appState.totalPages = this.totalPages
@@ -461,7 +461,9 @@ export default {
   },
 
   updatePageContent() {
-    this.currentPageContent = this.pages[this.currentPage] || '无内容'
+    // _pages 为非响应式实例属性：整本书分页数组不进框架观察，
+    // 避免大数组 setData 的 diff 开销与内存双引用
+    this.currentPageContent = (this._pages && this._pages[this.currentPage]) || '无内容'
     this.atScrollBottom = false
     this.$nextTick(() => {
       if (!this.$valid) return
@@ -480,10 +482,11 @@ export default {
       // 无缝模式：跟踪滚动位置（scrollTop / scrollY 兼容），换段时以此为准做高度补偿
       if (this.seamWait) return
       const st = (e && (e.scrollTop || e.scrollY)) || (e && e.detail && e.detail.scrollTop) || 0
+      // 每帧只记两个标量：
+      // - 不回写 seamScrollTopValue（受控属性「事件→写回」循环，多一次属性更新检查；滚动位置的变更由换段路径显式赋值）
+      // - 不调用 updateSeamPercentFromScroll（readingPercent 无 UI 消费，且内部每次都要拼接两段文本估算高度；需要它的换段路径已自行调用）
       this.seamScrollTop = st
-      this.seamScrollTopValue = st
       this.seamSavedScrollOffset = st
-      this.updateSeamPercentFromScroll()
     } else if (this.atScrollBottom) {
       // 分页模式：页面内容不超一屏，仅复位底部标记
       this.atScrollBottom = false

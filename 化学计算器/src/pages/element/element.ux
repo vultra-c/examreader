@@ -35,24 +35,25 @@
       </div>
     </div>
 
-    <!-- 结果面板（show 常驻，scroll + div for 渲染，内容容器显式列方向） -->
-    <div show="{{searched}}" class="panel">
-      <div class="panel-hd">
-        <text class="panel-hd-t">匹配方程式</text>
-        <text class="panel-hd-n">{{elementResults.length}} 条</text>
-      </div>
-      <text show="{{searched && elementResults.length == 0}}" class="panel-none">没有同时含这些元素的方程式</text>
-      <!-- 结果列表：list + list-item，样式在 list-item 上（与考点阅读器一致，行不会塌陷） -->
-      <list show="{{searched && elementResults.length > 0}}" class="panel-list" onscrollbottom="onReachBottom">
-        <list-item for="{{visibleResults}}" tid="rid" type="eq" class="eq-item" @click="openEquation($item)">
+    <!-- 结果区（全部 absolute 顶层挂载；list 不参与 flex 流测量，避免行塌陷） -->
+    <div show="{{searched}}" class="panel-bg"></div>
+    <text show="{{searched}}" class="panel-hd-t">匹配方程式</text>
+    <text show="{{searched}}" class="panel-hd-n">{{elementResults.length}} 条</text>
+    <text show="{{searched && elementResults.length == 0}}" class="panel-none">没有同时含这些元素的方程式</text>
+    <!-- 结果列表：list + list-item，静态 class 显式行高，内容 div 包裹（与考点阅读器一致的真机可用模式） -->
+    <list show="{{searched && elementResults.length > 0}}" class="eq-list" onscrollbottom="onReachBottom">
+      <list-item for="{{visibleResults}}" tid="rid" type="eq" class="eq-item" @click="openEquation($item)">
+        <div class="eq-content">
           <text class="eq-item-text">{{$item.text}}</text>
           <text class="eq-item-type">{{$item.type}}</text>
-        </list-item>
-        <list-item if="{{hasMoreRes}}" type="more" class="more-row" @click="onReachBottom">
+        </div>
+      </list-item>
+      <list-item if="{{hasMoreRes}}" type="more" class="eq-more" @click="onReachBottom">
+        <div class="eq-more-content">
           <text class="more-text">▼ 还有 {{elementResults.length - visibleResults.length}} 条，上滑加载</text>
-        </list-item>
-      </list>
-    </div>
+        </div>
+      </list-item>
+    </list>
     <text if="{{!searched}}" class="panel-idle">点击输入框输入，如：Fe O 或 铁 氧</text>
 
     <!-- 共享输入法 -->
@@ -299,47 +300,56 @@ export default {
   color: #ffffff;
 }
 
-/* ---- 结果面板（固定高度，不使用 flex:1，确保子列表拿到确定高度） ---- */
-.panel {
+/* ---- 结果区（全部 absolute 顶层挂载，list 固定坐标，避免 flex 流测量导致行塌陷） ---- */
+.panel-bg {
+  position: absolute;
+  left: 16px;
+  top: 208px;
   width: 304px;
-  height: 266px;
-  margin: 10px 16px 0;
+  height: 264px;
   border-radius: 20px;
   background-color: #141416;
   border-width: 1px;
   border-color: #2a2a30;
-  flex-direction: column;
-  padding: 8px 12px 10px;
-}
-.panel-hd {
-  width: 280px;
-  height: 26px;
-  flex-direction: row;
-  justify-content: space-between;
-  align-items: center;
 }
 .panel-hd-t {
+  position: absolute;
+  left: 28px;
+  top: 216px;
+  width: 180px;
   font-size: 21px;
+  line-height: 26px;
   font-weight: bold;
   color: #ffffff;
 }
 .panel-hd-n {
+  position: absolute;
+  left: 228px;
+  top: 218px;
+  width: 76px;
   font-size: 17px;
+  line-height: 22px;
+  text-align: right;
   color: #4da3ff;
 }
 .panel-none {
+  position: absolute;
+  left: 28px;
+  top: 320px;
   width: 280px;
   text-align: center;
   font-size: 18px;
   color: rgba(255, 255, 255, 0.4);
-  margin-top: 60px;
 }
-.panel-list {
-  width: 280px;
-  height: 220px;
-  margin-top: 4px;
+.eq-list {
+  position: absolute;
+  left: 16px;
+  top: 250px;
+  width: 304px;
+  height: 214px;
+  padding: 0px 12px;
 }
-/* list-item 本身带高度/内边距/间距 */
+/* list-item：静态 class + 显式行高/间距，内容内层 div 包裹 */
 .eq-item {
   width: 100%;
   height: 52px;
@@ -347,6 +357,10 @@ export default {
   margin-bottom: 6px;
   border-radius: 12px;
   background-color: #222226;
+}
+.eq-content {
+  width: 100%;
+  height: 100%;
   flex-direction: column;
   justify-content: center;
 }
@@ -364,9 +378,14 @@ export default {
   color: #4da3ff;
   margin-top: 1px;
 }
-.more-row {
+.eq-more {
   width: 100%;
   height: 40px;
+  margin-bottom: 6px;
+}
+.eq-more-content {
+  width: 100%;
+  height: 100%;
   justify-content: center;
   align-items: center;
 }
@@ -375,10 +394,12 @@ export default {
   color: rgba(255, 255, 255, 0.35);
 }
 .panel-idle {
+  position: absolute;
+  left: 0px;
+  top: 320px;
   width: 336px;
   text-align: center;
   font-size: 18px;
   color: rgba(255, 255, 255, 0.3);
-  margin-top: 60px;
 }
 </style>

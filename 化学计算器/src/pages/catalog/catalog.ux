@@ -1,15 +1,14 @@
 <!--
   化学工具箱 · 常用物质表（336×480）
-  渲染方案：list + list-item，样式（高度/内边距/间距）直接声明在 list-item 元素上，
-  与考点阅读器（已验证可用）完全一致：
-  - list-item 必须有显式高度，否则行会塌陷成细线
-  - 同 type 的 list-item DOM 结构必须完全一致，禁止内部 if 混用
-  - for 循环变量为 $item
-  标题行与物质行共用同一结构（两个 text），仅内容不同，通过 kind 字段区分点击行为。
+  渲染方案：完全对齐考点阅读器（真机已验证）的 list 模式：
+  - list 使用 absolute 定位、显式宽高，挂为页面顶层子节点（不参与 flex 流测量）
+  - list-item 声明静态 class + 显式高度/间距，内容统一用内层 div 包裹
+  - 同 type 的 list-item DOM 结构完全一致，禁止内部 if 混用
+  - for 变量 $item，tid 唯一
 -->
 <template>
   <div class="screen" @swipe="onSwipe">
-    <!-- 顶栏 -->
+    <!-- 顶栏（流式） -->
     <div class="hd">
       <div class="hd-back" @click="goBack"><text class="hd-back-t">‹</text></div>
       <text class="hd-title">常用物质表</text>
@@ -17,14 +16,18 @@
     </div>
     <text class="sub-tip">点选物质，自动填入「反应计算」输入框</text>
 
-    <!-- 列表：list + list-item，样式在 list-item 上；分块加载 -->
-    <list class="catalog-list" if="{{visibleRows.length > 0}}" onscrollbottom="onReachBottom">
-      <list-item for="{{visibleRows}}" tid="rid" type="row" class="row-row" @click="onRowClick($item)">
-        <text class="row-main">{{$item.main}}</text>
-        <text class="row-sub">{{$item.sub}}</text>
+    <!-- 列表（absolute 顶层挂载，分块加载） -->
+    <list class="cat-list" if="{{visibleRows.length > 0}}" onscrollbottom="onReachBottom">
+      <list-item for="{{visibleRows}}" tid="rid" type="row" class="cat-item" @click="onRowClick($item)">
+        <div class="cat-content">
+          <text class="cat-main">{{$item.main}}</text>
+          <text class="cat-sub">{{$item.sub}}</text>
+        </div>
       </list-item>
-      <list-item if="{{hasMore}}" type="more" class="more-row" @click="onReachBottom">
-        <text class="more-text">▼ 还有 {{total - visibleRows.length}} 条，上滑加载更多</text>
+      <list-item if="{{hasMore}}" type="more" class="cat-item" @click="onReachBottom">
+        <div class="cat-content cat-content-center">
+          <text class="cat-more">▼ 还有 {{total - visibleRows.length}} 条，上滑加载更多</text>
+        </div>
       </list-item>
     </list>
   </div>
@@ -146,45 +149,48 @@ export default {
   margin-top: 2px;
 }
 
-/* 列表：显式高度 */
-.catalog-list {
+/* 列表：absolute 顶层挂载，显式宽高（与考点阅读器一致的真机可用模式） */
+.cat-list {
+  position: absolute;
+  left: 0px;
+  top: 80px;
   width: 336px;
-  height: 392px;
-  margin-top: 6px;
+  height: 400px;
+  padding: 0px 16px;
 }
 
-/* list-item 本身带高度/内边距/间距（关键：样式在 list-item 上，行才不会塌陷） */
-.row-row {
+/* list-item：静态 class + 显式高度/间距，内容由内层 div 包裹 */
+.cat-item {
   width: 100%;
   height: 52px;
   padding: 0 14px;
   margin-bottom: 7px;
   border-radius: 13px;
   background-color: #1c1c1e;
+}
+.cat-content {
+  width: 100%;
+  height: 100%;
   flex-direction: row;
   justify-content: space-between;
   align-items: center;
 }
-.row-main {
+.cat-content-center {
+  justify-content: center;
+}
+.cat-main {
   font-size: 20px;
   color: #ffffff;
   lines: 1;
   text-overflow: ellipsis;
 }
-.row-sub {
+.cat-sub {
   font-size: 20px;
   font-weight: bold;
   color: rgba(255, 255, 255, 0.55);
   lines: 1;
 }
-
-.more-row {
-  width: 100%;
-  height: 44px;
-  justify-content: center;
-  align-items: center;
-}
-.more-text {
+.cat-more {
   font-size: 16px;
   color: rgba(255, 255, 255, 0.35);
 }

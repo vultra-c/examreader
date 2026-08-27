@@ -2,11 +2,16 @@
  * 化学计算器 - 元素查询模块
  * 输入一个或多个元素（如 Fe、Fe O、Na C O），本地检索含有这些元素的方程式
  * （输入几个元素，方程式就必须同时含有这几个元素）
+ *
+ * 性能：元素集合与中文反查表在首次查询时惰性构建一次；
+ * 方程式展示文本走 fmt.equationText 的挂载缓存，滚动分块渲染零重复解析。
  */
 import { ELEMENT_BANK } from './elementBank.js'
 import { ATOMIC_MASSES } from './elements.js'
 import { parseFormula, molarMass } from './parser.js'
-import { NAME_MAP } from './substances.js'
+import { equationText } from './fmt.js'
+
+export { equationText } from './fmt.js'
 
 /** 已知元素符号集合（用于校验输入） */
 export const ELEMENT_SYMBOLS = Object.keys(ATOMIC_MASSES)
@@ -75,15 +80,28 @@ export function parseElementQuery(raw, nameMap) {
 
 /**
  * 搜索含有全部指定元素的方程式
+ * 元素集合索引在首次搜索时构建一次（每条 entry 预存为数组，避免重复 split）。
  * @param {string[]} elems 如 ['Fe','O']
  * @param {number} limit 返回条数上限
  * @returns {Array} 匹配的方程式条目 [{r,p,c,t,n,e, full}]
  */
+let _ready = false
+function ensureIndex() {
+  if (_ready) return
+  _ready = true
+  for (let i = 0; i < ELEMENT_BANK.length; i++) {
+    const entry = ELEMENT_BANK[i]
+    // 挂载非序列化辅助字段；entry 仅作本地数据用，不参与传输
+    try { entry._elems = entry.e.split(' ') } catch (err) { /* ignore */ }
+  }
+}
+
 export function searchEquations(elems, limit = 30) {
   if (!elems || elems.length === 0) return []
+  ensureIndex()
   const results = []
   for (const entry of ELEMENT_BANK) {
-    const inSet = entry.e.split(' ')
+    const inSet = entry._elems
     let all = true
     for (const e of elems) {
       if (inSet.indexOf(e) === -1) { all = false; break }
@@ -101,50 +119,26 @@ export function formatElems(elemStr) {
 
 /**
  * 由银行条目重建 reaction 对象（供结果页/质量页使用）
+ * segs 缓存在 entry._segs 上，mr 缓存在 entry._mr 上：
+ * 同一条目从「方程式列表」进入结果页再进质量页，解析只发生一次。
  * @returns {Object} {reactants, products, coefs, mr, segs, type, cond}
  */
 export function buildReactionFromBank(entry) {
-  const all = entry.r.concat(entry.p)
-  const parsed = all.map(f => parseFormula(f))
+  if (!entry._segs) {
+    const all = entry.r.concat(entry.p)
+    try {
+      const parsed = all.map(f => parseFormula(f))
+      entry._segs = parsed.map(p => p.segs)
+      entry._mr = parsed.map(p => molarMass(p.counts))
+    } catch (err) { /* ignore */ }
+  }
   return {
     reactants: entry.r.slice(),
     products: entry.p.slice(),
     coefs: entry.c.slice(),
-    mr: parsed.map(p => molarMass(p.counts)),
-    segs: parsed.map(p => p.segs),
+    mr: entry._mr.slice(),
+    segs: entry._segs,
     type: entry.t,
     cond: entry.n
   }
-}
-
-/** 方程式渲染文本（系数 + 化学式，数字下标转 Unicode） */
-const SUB = { '0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉' }
-function subDigit(num) {
-  return String(num).split('').map(c => SUB[c] || c).join('')
-}
-export function renderFormulaText(segs, coef) {
-  let s = ''
-  for (const seg of segs) {
-    if (seg.t === 'el') s += seg.s
-    else if (seg.t === 'num') s += subDigit(seg.s)
-    else s += seg.s
-  }
-  return (coef > 1 ? coef : '') + s
-}
-
-/** 整条方程式渲染文本，如 "2Cu + O₂ = 2CuO" */
-export function equationText(entry) {
-  const all = entry.r.concat(entry.p)
-  const segsList = all.map(f => {
-    const pr = parseFormula(f)
-    return pr.ok ? pr.segs : [{ t: 'el', s: f }]
-  })
-  const parts = entry.c.map((c, i) => renderFormulaText(segsList[i], c))
-  const nR = entry.r.length
-  let s = ''
-  for (let i = 0; i < parts.length; i++) {
-    if (i > 0) s += i === nR ? ' = ' : ' + '
-    s += parts[i]
-  }
-  return s
 }

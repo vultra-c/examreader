@@ -562,6 +562,8 @@ export default {
         break;
       case "down":
         this.downFlag = this.downFlag === "down" ? "" : "down";
+        // 下展候选数据惰性构建（按键路径只做标记，避免每键预算 120 项装箱网格）
+        if (this.downFlag === "down") this.buildDownLists();
         break;
       case "select":
         if (this.lastWaitingStr != sign && this.lastWaitingStr) {
@@ -683,6 +685,16 @@ export default {
     this.resultRow0 = row0;
     this.resultRow0IsWord = row0IsWord;
 
+    // 下展分页/装箱网格（最多 120 候选）惰性构建：
+    // 键盘收起时这些数据模板根本不渲染，按键路径只做脏标记；
+    // 真正构建发生在 onBtnClick('down') 展开时（或已展开时源变化即时刷新）。
+    this._downDirty = true;
+    if (this.downFlag === 'down') this.buildDownLists();
+  },
+  buildDownLists() {
+    if (!this._downDirty) return;
+    this._downDirty = false;
+    const cap = parseInt(this.maxlength);
     // 下展分页（down 展开）：整词优先，再单字，每页 maxlength 个
     this.resultList2 = [];
     let array = [];

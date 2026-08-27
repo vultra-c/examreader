@@ -17,33 +17,32 @@
     <!-- 无数据兜底 -->
     <text if="{{!valid}}" class="none-tip">未找到反应数据</text>
 
-    <div if="{{valid}}" class="body">
-      <!-- 方程式卡片 -->
-      <div class="eq-card">
-        <text class="eq-text">{{eqText}}</text>
-        <text if="{{condText}}" class="eq-cond">{{condText}}</text>
-        <div class="eq-badge">
-          <text class="eq-badge-t">{{rxnType}}</text>
-        </div>
+    <!-- 主体（全部 absolute 顶层挂载，坐标固定，避免 flex 测量导致列表行塌陷） -->
+    <div if="{{valid}}" class="eq-card">
+      <text class="eq-text">{{eqText}}</text>
+      <text if="{{condText}}" class="eq-cond">{{condText}}</text>
+      <div class="eq-badge">
+        <text class="eq-badge-t">{{rxnType}}</text>
       </div>
+    </div>
 
-      <!-- 相对分子质量列表（list + list-item，样式在 list-item 上） -->
-      <text class="sec-label">相对分子质量 · 点按进入质量计算</text>
-      <list class="mr-list">
-        <list-item for="{{mrRows}}" tid="rid" type="mr" class="mr-row" @click="onPickMass($item)">
+    <text if="{{valid}}" class="sec-label">相对分子质量 · 点按进入质量计算</text>
+    <list if="{{valid}}" class="mr-list">
+      <list-item for="{{mrRows}}" tid="rid" type="mr" class="mr-row" @click="onPickMass($item)">
+        <div class="mr-content">
           <text class="mr-f">{{$item.text}}</text>
           <text class="mr-v">M = {{$item.mrText}}</text>
-        </list-item>
-      </list>
+        </div>
+      </list-item>
+    </list>
 
-      <!-- 底部操作 -->
-      <div class="foot">
-        <div class="foot-btn" @click="goBack">
-          <text class="foot-btn-t">返回修改</text>
-        </div>
-        <div class="foot-btn foot-btn-main" @click="goMass">
-          <text class="foot-btn-t-main">质量计算</text>
-        </div>
+    <!-- 底部操作 -->
+    <div if="{{valid}}" class="foot">
+      <div class="foot-btn" @click="goBack">
+        <text class="foot-btn-t">返回修改</text>
+      </div>
+      <div class="foot-btn foot-btn-main" @click="goMass">
+        <text class="foot-btn-t-main">质量计算</text>
       </div>
     </div>
   </div>
@@ -53,23 +52,7 @@
 import router from '@system.router'
 import prompt from '@system.prompt'
 import { fmtNum } from '../../common/logic/parser.js'
-
-const SUB = { '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄', '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉' }
-
-function subDigit(num) {
-  return String(num).split('').map(c => SUB[c] || c).join('')
-}
-
-/** 系数+分段 → 展示文本，如 2CuO */
-function segsToText(segs, coef) {
-  let s = ''
-  for (let i = 0; i < segs.length; i++) {
-    const seg = segs[i]
-    if (seg.t === 'num') s += subDigit(seg.s)
-    else s += seg.s
-  }
-  return (coef > 1 ? coef : '') + s
-}
+import { segsToText } from '../../common/logic/fmt.js'
 
 export default {
   protected: {
@@ -174,26 +157,27 @@ export default {
 }
 
 .none-tip {
+  position: absolute;
+  left: 0px;
+  top: 200px;
   width: 336px;
   text-align: center;
   font-size: 24px;
   color: rgba(255, 255, 255, 0.35);
-  margin-top: 180px;
 }
 
-.body {
-  width: 336px;
-  flex-direction: column;
-  padding: 2px 16px 0;
-}
-
+/* ---- 主体（absolute 顶层挂载，坐标固定） ---- */
 .eq-card {
+  position: absolute;
+  left: 16px;
+  top: 68px;
   width: 304px;
+  height: 200px;
   border-radius: 20px;
   background-color: #161618;
   border-width: 1px;
   border-color: #2e2e33;
-  padding: 14px 14px 16px;
+  padding: 12px 14px;
   flex-direction: column;
   align-items: center;
 }
@@ -204,19 +188,21 @@ export default {
   font-weight: bold;
   color: #ffffff;
   text-align: center;
+  lines: 3;
+  text-overflow: ellipsis;
 }
 .eq-cond {
   font-size: 19px;
   line-height: 25px;
   color: rgba(255, 255, 255, 0.45);
-  margin-top: 5px;
+  margin-top: 4px;
   text-align: center;
 }
 .eq-badge {
   padding: 4px 16px;
   border-radius: 13px;
   background-color: rgba(13, 110, 255, 0.18);
-  margin-top: 9px;
+  margin-top: 6px;
 }
 .eq-badge-t {
   font-size: 18px;
@@ -224,24 +210,34 @@ export default {
 }
 
 .sec-label {
-  width: 304px;
+  position: absolute;
+  left: 18px;
+  top: 276px;
+  width: 300px;
   font-size: 17px;
+  line-height: 20px;
   color: rgba(255, 255, 255, 0.45);
-  margin: 10px 2px 5px;
 }
 
 .mr-list {
+  position: absolute;
+  left: 16px;
+  top: 300px;
   width: 304px;
-  height: 160px;
+  height: 122px;
 }
-/* list-item 本身带高度/内边距/间距 */
+/* list-item：静态 class + 显式行高/间距，内容内层 div 包裹 */
 .mr-row {
   width: 100%;
-  height: 56px;
+  height: 50px;
   border-radius: 14px;
   background-color: #1c1c1e;
   padding: 0 14px;
   margin-bottom: 6px;
+}
+.mr-content {
+  width: 100%;
+  height: 100%;
   flex-direction: row;
   justify-content: space-between;
   align-items: center;
@@ -256,16 +252,18 @@ export default {
 }
 
 .foot {
+  position: absolute;
+  left: 16px;
+  top: 428px;
   width: 304px;
-  height: 58px;
-  margin-top: 8px;
+  height: 48px;
   flex-direction: row;
   justify-content: space-between;
 }
 .foot-btn {
   width: 147px;
-  height: 58px;
-  border-radius: 29px;
+  height: 48px;
+  border-radius: 24px;
   background-color: #1c1c1e;
   justify-content: center;
   align-items: center;
