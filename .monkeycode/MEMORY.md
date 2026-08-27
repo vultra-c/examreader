@@ -33,6 +33,20 @@ Entries discovered by the Agent during task execution should follow this format:
 
 [Project Knowledge Summary]
 - Date: 2026-08-27
+- Context: Discovered by Agent while splitting the monorepo into three repositories per user instruction
+- Category: Operations & Deployment
+- Instructions:
+  - 项目已拆分为三个独立仓库，均由用户提供的 GitHub token 管理推送（token 只能用户临时提供，绝不写入任何仓库文件）：
+    - vultra-c/examreader：手环端考点阅读器（本仓库，含 考点阅读器/、release/rpk、docs、bandburg-kdreader.js）
+    - vultra-c/Snapnotes-android：Android 手机端（源码等同旧 android_src/snapnotes-android）
+    - vultra-c/Chemical-calculator：化学工具箱（源码等同旧 化学计算器/）
+  - 三仓均有 .github/workflows/，push main 自动构建安装包传 artifact：安卓 assembleRelease（JDK21+gradle）；两个 Vela 应用 setup-node 20 + npm install（postinstall 打 patch-aiotpack）+ npm run release，工件在 dist/（其 .gitignore 忽略）
+  - 签名规范：手环 rpk 证书 考点阅读器/sign/release（CN=snapnotes）与化学 sign/release（CN=com.whyy.chemcalc）不可更换，换手环签名=旧用户无法覆盖升级；APK 用 Snapnotes-android/app/snapnotes.p12 共享签名（由手环私钥合成，有效期 2053），CI/本地构建签名统一，覆盖安装不冲突
+  - 手环连接只校验包名 + __hs__ 握手版本号（手机端 MIN_BAND_VERSION_CODE=2），与 APK 签名无关
+  - 手环端 BAND_VERSION_CODE（interconnHs.js）必须与 manifest.json versionCode 保持同步（手机端校验的是 manifest 版本，握手上报版本仅作展示与阈值判定）
+
+[Project Knowledge Summary]
+- Date: 2026-08-27
 - Context: Discovered by Agent while fixing 化学工具箱 list row-collapse and optimizing both Vela apps
 - Category: Troubleshooting & Debugging
 - Instructions:

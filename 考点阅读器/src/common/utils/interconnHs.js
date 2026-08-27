@@ -2,17 +2,16 @@
  * 考点阅读器 - Snapnotes 握手/心跳模块（tag="__hs__"）
  *
  * 与 Snapnotes-android 的 InterHandshake.kt 完全对齐：
- *   手机发 count=0 → 手环回 count=1(带本端 versionCode) → 手机回 count=2 → 握手完成
- *   握手完成后手机每 5s 发 count=0 心跳；手环收到任何握手包都应答保活
+ * 手机发 count=0 → 手环回 count=1(带本端 versionCode) → 手机回 count=2 → 握手完成
+ * 握手完成后手机每 5s 发 count=0 心跳；手环收到任何握手包都应答保活
  *
  * 手机端 MIN_BAND_VERSION_CODE = 2，低于该值会弹版本不兼容弹窗。
  * 这里上报与 src/manifest.json versionCode 一致的常量（改版本时两处同步）。
  */
 import { interconnModule } from './interconn.js'
 
-// 与 manifest.json 的 versionCode 保持一致
-// 与 manifest.json versionCode 保持一致（V26.8.0 = 260800）
-const BAND_VERSION_CODE = 260840
+// 与 manifest.json 的 versionCode 保持一致（V26.8.30 = 2608300）
+const BAND_VERSION_CODE = 2608300
 
 const HS_TIMEOUT_MS = 10000   // 发出 count=1 后等 count>=2 的超时
 const HEARTBEAT_MS = 5000     // 心跳周期（与手机端 PING_INTERVAL 对齐）
