@@ -1,0 +1,37 @@
+name: Build Vela RPK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: 考点阅读器/package-lock.json
+
+    # npm install 的 postinstall 会自动执行 scripts/patch-aiotpack.js
+    # （rspack 原生绑定在部分环境 SIGBUS，补丁回退到 webpack5 + terser）
+    - name: Install dependencies
+      run: npm install
+      working-directory: 考点阅读器
+
+    - name: Build release RPK
+      run: npm run release
+      working-directory: 考点阅读器
+
+    - name: Upload RPK artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: snapnotes-release-rpk
+        path: 考点阅读器/dist/*.rpk
+        retention-days: 30
