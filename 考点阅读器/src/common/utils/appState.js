@@ -38,7 +38,11 @@ const state = {
   fontSize: 26,
 
   // 当前阅读行间距（缓存 storage 读取，reader -> readerSettings）
-  lineHeight: 30
+  lineHeight: 30,
+
+  // JSON 阅读器一维进度（jsonReader -> percentJump 显示当前百分比）
+  jsonIndex: -1,
+  jsonTotal: 0
 }
 
 export function getState() {

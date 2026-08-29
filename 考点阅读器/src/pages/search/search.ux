@@ -19,18 +19,23 @@
       <text class="clear-icon" static>×</text>
     </div>
 
-    <!-- Results list (hidden while keyboard is open) -->
-    <list class="result-list" show="{{hasSearched && !showKeyboard}}">
-      <list-item class="result-item" type="result" for="{{results}}" tid="id" @click="onResultClick($item)">
+    <!-- Results list (hidden while keyboard is open)：同一文件的重复命中归在其文件行下方，分块渲染 -->
+    <list class="result-list" show="{{hasSearched && !showKeyboard}}" onscrollbottom="onReachBottom">
+      <list-item class="result-item" type="row" for="{{visibleRows}}" tid="id" @click="onResultClick($item)">
         <div class="result-content">
-          <text class="result-name">{{$item.name}}</text>
-          <text class="result-snippet">{{$item.snippet}}</text>
+          <text class="result-name">{{$item.line1}}</text>
+          <text class="result-snippet">{{$item.line2}}</text>
+        </div>
+      </list-item>
+      <list-item if="{{hasMoreRows}}" type="more" class="result-item" @click="loadMoreRows">
+        <div class="result-content">
+          <text class="result-snippet">▼ 加载更多 ({{allRows.length - visibleRows.length}})</text>
         </div>
       </list-item>
     </list>
 
-    <!-- No results hint -->
-    <text class="empty-hint" show="{{hasSearched && results.length == 0 && !showKeyboard}}">无结果</text>
+    <!-- No results hint（搜索过程中不显示，避免闪现） -->
+    <text class="empty-hint" show="{{hasSearched && !searching && allRows.length == 0 && !showKeyboard}}">无结果</text>
 
     <!-- Input method keyboard -->
     <input-method hide="{{!showKeyboard}}" keyboardtype="QWERTY" screentype="rect" maxlength="5" vibratemode="short" @complete="onComplete" @delete="onDelete"></input-method>
@@ -47,10 +52,11 @@
 <script>
 import router from '@system.router'
 import prompt from '@system.prompt'
-import storage from '@system.storage'
 import dataManager from '../../common/utils/dataManager.js'
 import { getNowTime } from '../../common/utils/timeUtil.js'
-import appState from '../../common/utils/appState.js'
+
+// 结果分块渲染参数：首屏 24 行，滚动追加
+const CHUNK_SIZE = 24
 
 export default {
   private: {
@@ -59,8 +65,12 @@ export default {
     searchText: '',
     searchDisplay: '',
     showKeyboard: false,
-    results: [],
+    allRows: [],
+    visibleRows: [],
+    hasMoreRows: false,
+    renderPos: 0,
     hasSearched: false,
+    searching: false,
     scopeName: ''
   },
   protected: {
@@ -134,7 +144,67 @@ export default {
     this.searchText = ''
     this.searchDisplay = ''
     this.hasSearched = false
-    this.results = []
+    this.allRows = []
+    this.visibleRows = []
+    this.hasMoreRows = false
+    this.renderPos = 0
+  },
+
+  // 把 dataManager 的分组结果展平为列表行：
+  // 每个文件一行（统计命中数），其后紧跟该文件的全部命中行，同文件命中归在一起
+  buildRows(groups) {
+    const rows = []
+    for (let g = 0; g < groups.length; g++) {
+      const group = groups[g]
+      const matches = group.matches || []
+      rows.push({
+        id: 'f_' + group.path,
+        kind: 'file',
+        path: group.path,
+        fmt: group.fmt || '',
+        type: group.type || '',
+        line1: group.name,
+        line2: matches.length > 0 ? (matches.length + ' 处匹配') : '文件名匹配',
+        match: matches.length > 0 ? matches[0] : null
+      })
+      for (let i = 0; i < matches.length; i++) {
+        const m = matches[i]
+        rows.push({
+          id: 'm_' + group.path + '_' + i,
+          kind: 'match',
+          path: group.path,
+          fmt: group.fmt || '',
+          type: group.type || '',
+          line1: m.position >= 0
+            ? ('第 ' + (i + 1) + ' 处')
+            : ((m.subject || '') + ' · ' + (m.entryTitle || '')),
+          line2: m.snippet || '',
+          match: m
+        })
+      }
+    }
+    return rows
+  },
+
+  appendVisibleChunk() {
+    const start = this.renderPos
+    const end = Math.min(start + CHUNK_SIZE, this.allRows.length)
+    const newRows = this.allRows.slice(start, end)
+    if (newRows.length > 0) {
+      this.visibleRows = this.visibleRows.concat(newRows)
+      this.renderPos = end
+    }
+    this.hasMoreRows = this.renderPos < this.allRows.length
+  },
+
+  onReachBottom() {
+    if (this.hasMoreRows) {
+      this.appendVisibleChunk()
+    }
+  },
+
+  loadMoreRows() {
+    this.appendVisibleChunk()
   },
 
   // Run a content search and display results
@@ -146,90 +216,64 @@ export default {
     }
     this.showKeyboard = false
     this.hasSearched = true
+    this.searching = true
 
-    let list
+    // 范围逻辑：主页=全部内容；文件夹页=该文件夹子树；阅读设置=单文件
+    let groups
     if (this.scope === 'single' && this.searchPath) {
       // 单文件搜索（考点阅读设置进入）
-      const matches = await dataManager.searchContentInFile(this.searchPath, keyword)
-      const name = dataManager.getUnifiedNodeName(this.searchPath)
-      list = (matches || []).map((m, i) => ({
-        id: this.searchPath + '_' + i,
-        name: name,
-        path: this.searchPath,
-        snippet: m.snippet,
-        position: m.position,
-        fmt: (name || '').toLowerCase().indexOf('.json') === name.length - 5 ? 'json' : ''
-      }))
+      const group = await dataManager.searchContentInFile(this.searchPath, keyword)
+      groups = (group && group.matches && group.matches.length > 0) ? [group] : []
     } else if (this.scope === 'folder' && this.searchPath) {
       // 文件夹内搜索：只搜该文件夹子树内的内容
-      list = await dataManager.searchContentInFolder(this.searchPath, keyword)
-      list = (list || []).map((item, i) => ({
-        name: item.name,
-        path: item.path,
-        snippet: item.snippet,
-        position: item.position,
-        type: item.type,
-        fmt: item.fmt || '',
-        id: item.path + '_' + i
-      }))
+      groups = await dataManager.searchContentInFolder(this.searchPath, keyword)
     } else {
-      // 全局搜索
-      list = await dataManager.searchContent(keyword)
-      if (list && list.length > 0) {
-        list = list.map((item, i) => {
-          return {
-            name: item.name,
-            path: item.path,
-            snippet: item.snippet,
-            position: item.position,
-            type: item.type,
-            fmt: item.fmt || '',
-            id: item.path + '_' + i
-          }
-        })
-      }
+      // 全局搜索（主页进入）
+      groups = await dataManager.searchContent(keyword)
     }
-
-    // 全局结果同样带上 fmt（dataManager 已返回），统一映射
     if (!this.$valid) return
-    this.results = (list || []).map(item => ({ fmt: '', ...item }))
+
+    this.searching = false
+    this.allRows = this.buildRows(groups || [])
+    this.renderPos = 0
+    this.visibleRows = []
+    this.appendVisibleChunk()
   },
 
-  // 点击搜索结果：搜索页直接分页，搜索关键词在第几页，传给 reader
-  async onResultClick(item) {
-    // 从 storage 读取字号
-    const fontSizeStr = await new Promise((resolve) => {
-      storage.get({ key: 'KD_FONT_SIZE', success: (d) => resolve(d), fail: () => resolve(null) })
-    })
-    let fontSize = fontSizeStr ? parseInt(fontSizeStr) : 26
-    if (isNaN(fontSize)) fontSize = 26
+  // 打开文件（无定位信息时使用）
+  openFilePlain(row) {
+    if (row.fmt === 'json') {
+      router.push({ uri: '/pages/jsonReader', params: { path: row.path } })
+    } else {
+      router.push({ uri: '/pages/reader', params: { path: row.path } })
+    }
+  },
 
-    // JSON 知识点文件：直接打开知识点阅读器（无页码概念）
-    if (item.fmt === 'json') {
-      router.push({ uri: '/pages/jsonReader', params: { path: item.path } })
+  // 点击结果行：文件行跳首个命中；命中行跳该命中在文内的具体位置
+  onResultClick(row) {
+    const match = row.match
+    if (!match) {
+      this.openFilePlain(row)
       return
     }
-
-    // 直接调用 getReaderPages 拿到和 reader 完全一样的分页
-    const pages = await dataManager.getReaderPages(item.path, fontSize)
-
-    // 在分页数组中搜索关键词所在页
-    let targetPage = 0
-    const keyword = this.searchText.trim().toLowerCase()
-    if (pages && pages.length > 0) {
-      for (let i = 0; i < pages.length; i++) {
-        if (pages[i] && pages[i].toLowerCase().indexOf(keyword) >= 0) {
-          targetPage = i
-          break
+    if (row.fmt === 'json' || match.position === -1) {
+      // JSON 知识点：定位到具体 科目 → 条目
+      router.push({
+        uri: '/pages/jsonReader',
+        params: {
+          path: row.path,
+          jumpSubject: match.subject || '',
+          jumpIndex: (match.entryIdx != null && match.entryIdx !== undefined) ? match.entryIdx : -1
         }
-      }
+      })
+      return
     }
-
+    // TXT：按字符位置跳转，阅读器按当前模式换算（分页→页码 / 无缝→滚动位置）
     router.push({
       uri: '/pages/reader',
       params: {
-        path: item.path,
-        targetPage: targetPage
+        path: row.path,
+        targetChar: match.position
       }
     })
   },

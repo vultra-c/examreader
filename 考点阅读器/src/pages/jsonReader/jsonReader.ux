@@ -122,11 +122,12 @@
 
 <script>
 import router from '@system.router'
+import prompt from '@system.prompt'
 import storage from '@system.storage'
 import brightness from '@system.brightness'
 import file from '@system.file'
 import dataManager from '../../common/utils/dataManager.js'
-import { parseKnowledgeJson, getItems } from '../../common/utils/jsonParser.js'
+import { getSubjects } from '../../common/utils/jsonParser.js'
 import { getFormattedTimeNow } from '../../common/utils/timeUtil.js'
 import appState from '../../common/utils/appState.js'
 
@@ -171,7 +172,9 @@ export default {
     formulaFilePath: ''
   },
   protected: {
-    path: ''
+    path: '',
+    jumpSubject: '',
+    jumpIndex: -1
   },
 
   onInit() {
@@ -192,6 +195,16 @@ export default {
       appState.refreshReader = false
       router.back()
       return
+    }
+    // 百分比跳转（jsonReaderSettings → percentJump 回跳链路）
+    if (appState.jumpToPercent != null && appState.jumpToPercent !== undefined) {
+      const percent = parseInt(appState.jumpToPercent)
+      appState.jumpToPercent = null
+      if (this.loaded) {
+        this.applyJsonPercentJump(percent)
+      } else {
+        this._pendingPercent = percent
+      }
     }
     this.loadDisplaySettings()
   },
@@ -270,25 +283,18 @@ export default {
   },
 
   async loadJson() {
-    const content = await dataManager.getBluetoothFileContent(this.path)
+    // 解析结果走 dataManager FIFO 缓存：重复打开/搜索共享，避免大文件反复 JSON.parse
+    const result = await dataManager.getParsedKnowledge(this.path)
     if (!this.$valid) return
 
-    if (!content || content.length === 0) {
-      this.loadError = '内容为空'
-      this.loaded = true
-      return
-    }
-
-    const result = parseKnowledgeJson(content)
-    if (!this.$valid) return
-    if (!result.ok) {
+    if (!result || !result.ok) {
       const errMap = {
         'parse-fail': 'JSON 解析失败',
         'bad-structure': 'JSON 结构无效',
         'no-valid-items': '无有效知识点',
         'empty': '内容为空'
       }
-      this.loadError = errMap[result.error] || '解析失败'
+      this.loadError = errMap[result && result.error] || '解析失败'
       this.loaded = true
       return
     }
@@ -312,18 +318,35 @@ export default {
     const name = dataManager.getNodeName(this.path) || '知识点'
     this.pageTitle = name.replace(/\.json$/i, '')
 
-    if (rows.length === 1) {
+    // 搜索定位跳转：直接打开指定 科目 → 条目
+    if (this.jumpSubject) {
+      const js = this.jumpSubject
+      const ji = (this.jumpIndex != null && this.jumpIndex !== undefined) ? this.jumpIndex : -1
+      this.jumpSubject = ''
+      this.jumpIndex = -1
+      this.openLocatedEntry(js, ji)
+    } else if (rows.length === 1) {
       this.enterSubject(rows[0].name)
     } else {
       this.viewMode = 'subjects'
       this.pageTitle = this.pageTitle + ' · 科目'
     }
     this.loaded = true
+
+    // 页面加载完成前到达的百分比跳转请求
+    if (this._pendingPercent != null && this._pendingPercent !== undefined) {
+      const percent = this._pendingPercent
+      this._pendingPercent = null
+      this.applyJsonPercentJump(percent)
+    }
   },
 
   enterSubject(subjectName) {
     this.curSubject = subjectName
-    const items = getItems(this._parsedData, subjectName)
+    // parseKnowledgeJson 已完成条目清洗，直接取用，避免每次进科目重复 cleanItem
+    const items = (this._parsedData && Array.isArray(this._parsedData[subjectName]))
+      ? this._parsedData[subjectName]
+      : []
     this._entryItems = items
     const rows = []
     for (let i = 0; i < items.length; i++) {
@@ -347,11 +370,63 @@ export default {
     this.openDetail(this._entryItems[row.idx])
   },
 
+  /** 搜索结果定位：打开指定科目的指定条目 */
+  openLocatedEntry(subject, idx) {
+    this.enterSubject(subject)
+    const items = this._entryItems || []
+    if (idx >= 0 && idx < items.length) {
+      this.openDetail(items[idx])
+    }
+  },
+
+  /** 百分比跳转：全部条目按科目顺序展开为一维进度，跳到对应条目 */
+  applyJsonPercentJump(percent) {
+    if (!this._parsedData) return
+    if (isNaN(percent)) percent = 0
+    if (percent < 0) percent = 0
+    if (percent > 100) percent = 100
+    const subs = getSubjects(this._parsedData)
+    let total = 0
+    for (let i = 0; i < subs.length; i++) total += subs[i].count
+    if (total <= 0) return
+    let idx = Math.round(percent / 100 * (total - 1))
+    for (let i = 0; i < subs.length; i++) {
+      if (idx < subs[i].count) {
+        this.enterSubject(subs[i].name)
+        const items = this._entryItems || []
+        if (items.length > 0) {
+          this.openDetail(items[Math.min(idx, items.length - 1)])
+        }
+        prompt.showToast({ message: '已跳转到 ' + percent + '%', duration: 1000 })
+        return
+      }
+      idx -= subs[i].count
+    }
+  },
+
   openDetail(item) {
+    if (!item) return
     this.curTitle = item.title
     this.curDesc = item.desc || ''
     this.curPoints = item.points || []
     this.curFormulas = item.formulas || []
+
+    // 记录一维阅读位置（percentJump 用它显示当前进度）
+    const items = this._entryItems || []
+    const idx = items.indexOf(item)
+    if (idx >= 0) {
+      const subs = getSubjects(this._parsedData)
+      let base = 0
+      let total = 0
+      for (let i = 0; i < subs.length; i++) {
+        if (subs[i].name === this.curSubject) {
+          base = total
+        }
+        total += subs[i].count
+      }
+      appState.jsonIndex = base + idx
+      appState.jsonTotal = total
+    }
 
     const raw = item.raw || ''
     this.rawVisible = raw.length > 0

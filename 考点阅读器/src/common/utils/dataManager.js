@@ -106,71 +106,205 @@ function saveDeletedSet(deletedSet) {
   })
 }
 
-// ==================== JSON 搜索辅助 ====================
+// ==================== 搜索辅助（条目缓存 + JSON 解析缓存） ====================
 
 // 缓存 id → {text, lower}：搜索用展示文本及其小写形式。
-// 避免重复 JSON.parse 与每次搜索整本书的 toLowerCase 全尺寸拷贝。
-// FIFO 限 12 条；删除文件时同步失效；内存占用有界。
+// 避免重复 toLowerCase 全尺寸拷贝；按总字节数 FIFO 淘汰，
+// 上限 300KB，大文件不会把缓存撑爆（手环内存极小）。
 const _searchableTextCache = new Map()
-const SEARCH_CACHE_MAX = 12
+let _searchCacheBytes = 0
+const SEARCH_CACHE_MAX_BYTES = 300 * 1024
 
 function _searchCacheSet(id, entry) {
-  if (_searchableTextCache.has(id)) _searchableTextCache.delete(id)
+  const bytes = (entry.text ? entry.text.length : 0) + (entry.lower ? entry.lower.length : 0)
+  // 单条超过上限直接不缓存（避免反复淘汰全部条目仍装不下）
+  if (bytes > SEARCH_CACHE_MAX_BYTES) return
+  _searchCacheDelete(id)
+  entry._bytes = bytes
   _searchableTextCache.set(id, entry)
-  while (_searchableTextCache.size > SEARCH_CACHE_MAX) {
+  _searchCacheBytes += bytes
+  while (_searchCacheBytes > SEARCH_CACHE_MAX_BYTES && _searchableTextCache.size > 1) {
     const oldestKey = _searchableTextCache.keys().next().value
-    _searchableTextCache.delete(oldestKey)
+    _searchCacheDelete(oldestKey)
   }
 }
 
-// 从 JSON 知识点内容中提取可搜索的文本（标题、描述、要点、原文、公式）
-function _extractJsonText(content) {
-  try {
-    const result = parseKnowledgeJson(content)
-    if (!result.ok || !result.data) return content
-    const parts = []
-    const data = result.data
-    const names = Object.keys(data)
-    for (let i = 0; i < names.length; i++) {
-      parts.push(names[i])
-      const items = data[names[i]]
-      if (!Array.isArray(items)) continue
-      for (let j = 0; j < items.length; j++) {
-        const it = items[j]
-        if (it.title) parts.push(it.title)
-        if (it.desc) parts.push(it.desc)
-        if (it.raw) parts.push(it.raw)
-        if (Array.isArray(it.points)) {
-          for (let k = 0; k < it.points.length; k++) parts.push(it.points[k])
-        }
-        if (Array.isArray(it.formulas)) {
-          for (let k = 0; k < it.formulas.length; k++) parts.push(it.formulas[k])
-        }
-      }
-    }
-    return parts.join('\n')
-  } catch (e) {
-    return content
+function _searchCacheGet(id) {
+  const entry = _searchableTextCache.get(id)
+  if (!entry) return null
+  // touch：重插到末尾维持热度
+  _searchableTextCache.delete(id)
+  _searchableTextCache.set(id, entry)
+  return entry
+}
+
+function _searchCacheDelete(id) {
+  const entry = _searchableTextCache.get(id)
+  if (entry) {
+    _searchCacheBytes -= entry._bytes || 0
+    if (_searchCacheBytes < 0) _searchCacheBytes = 0
+    _searchableTextCache.delete(id)
   }
+}
+
+function _searchCacheClear() {
+  _searchableTextCache.clear()
+  _searchCacheBytes = 0
+}
+
+// JSON 知识点解析结果缓存（id → parseKnowledgeJson 结果）：
+// JSON.parse 大文件代价高；阅读页与搜索共享同一份解析结果。
+// FIFO 限 3 条，超出即淘汰，内存占用有界。
+const _parsedJsonCache = new Map()
+const PARSED_JSON_CACHE_MAX = 3
+
+function _parsedJsonCacheSet(id, result) {
+  if (_parsedJsonCache.has(id)) _parsedJsonCache.delete(id)
+  _parsedJsonCache.set(id, result)
+  while (_parsedJsonCache.size > PARSED_JSON_CACHE_MAX) {
+    const oldestKey = _parsedJsonCache.keys().next().value
+    _parsedJsonCache.delete(oldestKey)
+  }
+}
+
+function _getParsedJson(id, content) {
+  let result = _parsedJsonCache.get(id)
+  if (result) {
+    _parsedJsonCache.delete(id)
+    _parsedJsonCache.set(id, result)
+    return result
+  }
+  try {
+    result = parseKnowledgeJson(content || '')
+  } catch (e) {
+    result = { ok: false, error: 'parse-fail' }
+  }
+  _parsedJsonCacheSet(id, result)
+  return result
 }
 
 /**
- * 取某文件的搜索条目 {text, lower}（带 id 键缓存）。
- * JSON 文件 text 为解析后的展示文本；TXT 为正文本身。
+ * 取某 TXT 文件的搜索条目 {text, lower}（带 id 键缓存）。
  * 重复搜索（逐字输入触发）时整本书只小写化一次，热点全在缓存命中。
  */
 function _getSearchEntry(id, fmt, content) {
-  let entry = _searchableTextCache.get(id)
-  if (entry) {
-    // touch：重插到末尾维持热度
-    _searchableTextCache.delete(id)
-    _searchableTextCache.set(id, entry)
-    return entry
-  }
-  const text = (fmt === 'json') ? _extractJsonText(content) : (content || '')
-  entry = { text: text, lower: text.toLowerCase() }
+  const cached = _searchCacheGet(id)
+  if (cached) return cached
+  const text = content || ''
+  const entry = { text: text, lower: text.toLowerCase() }
   _searchCacheSet(id, entry)
   return entry
+}
+
+// 关键词上下文片段
+function _makeSnippet(text, pos, kwLen) {
+  const start = Math.max(0, pos - 10)
+  const end = Math.min(text.length, pos + kwLen + 20)
+  return (start > 0 ? '...' : '') + text.substring(start, end) + (end < text.length ? '...' : '')
+}
+
+// 每个文件最多保留的命中数（同一文件重复命中分组展示，供任意选择跳转）
+const MAX_MATCHES_PER_FILE = 12
+// 搜索结果最多保留的文件数
+const MAX_RESULT_FILES = 50
+
+/**
+ * TXT：在搜索条目上收集全部命中位置（截断到上限）
+ * @returns {Array<{position:number, snippet:string}>}
+ */
+function _collectTxtMatches(entry, kw, max) {
+  const matches = []
+  let pos = 0
+  const limit = max || MAX_MATCHES_PER_FILE
+  const lower = entry.lower
+  while (matches.length < limit) {
+    pos = lower.indexOf(kw, pos)
+    if (pos < 0) break
+    matches.push({ position: pos, snippet: _makeSnippet(entry.text, pos, kw.length) })
+    pos += kw.length
+  }
+  return matches
+}
+
+/**
+ * JSON：在解析结果上按「科目→条目」定位命中（条目级跳转定位用）
+ * @returns {Array<{position:-1, subject:string, entryIdx:number, entryTitle:string, snippet:string}>}
+ */
+function _collectJsonMatches(parsed, kw, max) {
+  const matches = []
+  const limit = max || MAX_MATCHES_PER_FILE
+  if (!parsed || !parsed.ok || !parsed.data) return matches
+  const data = parsed.data
+  const subjects = Object.keys(data)
+  for (let i = 0; i < subjects.length; i++) {
+    const subject = subjects[i]
+    const items = data[subject]
+    if (!Array.isArray(items)) continue
+    for (let j = 0; j < items.length; j++) {
+      const it = items[j]
+      const fields = [it.title || '', it.desc || '', it.raw || '']
+      if (Array.isArray(it.points)) fields.push(it.points.join('\n'))
+      if (Array.isArray(it.formulas)) fields.push(it.formulas.join('\n'))
+      const haystack = fields.join('\n')
+      const pos = haystack.toLowerCase().indexOf(kw)
+      if (pos >= 0) {
+        matches.push({
+          position: -1,
+          subject: subject,
+          entryIdx: j,
+          entryTitle: it.title || '',
+          snippet: _makeSnippet(haystack, pos, kw.length)
+        })
+        if (matches.length >= limit) return matches
+      }
+    }
+  }
+  return matches
+}
+
+// 按 id 获取 JSON 解析结果（缓存命中零 I/O；未命中读正文并解析入缓存）
+function _parsedJsonById(id) {
+  return new Promise((resolve) => {
+    const cached = _parsedJsonCache.get(id)
+    if (cached) {
+      _parsedJsonCache.delete(id)
+      _parsedJsonCache.set(id, cached)
+      resolve(cached)
+      return
+    }
+    getBluetoothFileContent(id).then((content) => resolve(_getParsedJson(id, content)))
+  })
+}
+
+/**
+ * 对单个蓝牙文件执行搜索，返回分组结果 {name, path, fmt, type, matches}
+ * TXT 命中带字符位置；JSON 命中带 科目/条目 定位；文件名为空数组。
+ * 命中缓存时跳过正文读取（大文件重复搜索从「读全部块」降为「内存命中」）。
+ */
+function _searchOneBtFile(item, kw) {
+  return new Promise((resolve) => {
+    const finish = (matches) => resolve({
+      name: item.name,
+      path: item.id,
+      fmt: item.fmt || '',
+      type: 'bluetooth',
+      matches: matches
+    })
+    if (item.fmt === 'json') {
+      _parsedJsonById(item.id).then((parsed) => {
+        finish(_collectJsonMatches(parsed, kw))
+      })
+      return
+    }
+    const cachedEntry = _searchCacheGet(item.id)
+    if (cachedEntry) {
+      finish(_collectTxtMatches(cachedEntry, kw))
+      return
+    }
+    getBluetoothFileContent(item.id).then((content) => {
+      finish(_collectTxtMatches(_getSearchEntry(item.id, '', content), kw))
+    })
+  })
 }
 
 // ==================== 蓝牙传输内容存储（分 key） ====================
@@ -253,21 +387,64 @@ function _btFileCacheClear() {
 }
 
 // 章节目录缓存（参考 com.bandbbs.ebook 的分章模型：
-// 只保存 {title,start} 轻量索引，正文按需读取）
+// 只保存 {title,start} 轻量索引，正文按需读取）；FIFO 限容防长会话堆积
 const _btChaptersCache = new Map()
+const BT_CHAPTERS_CACHE_MAX = 8
+
+function _btChaptersCacheSet(id, result) {
+  if (_btChaptersCache.has(id)) _btChaptersCache.delete(id)
+  _btChaptersCache.set(id, result)
+  while (_btChaptersCache.size > BT_CHAPTERS_CACHE_MAX) {
+    const oldestKey = _btChaptersCache.keys().next().value
+    _btChaptersCache.delete(oldestKey)
+  }
+}
 // 蓝牙内容分页缓存 Map<id_fontSize, pages>
-// 限容 4 个 key（当前书不同字号 + 短暂历史），FIFO 淘汰；
-// 分页数组体积大，不限容会在多本书 × 多字号下线性堆积。
+// 分页数组≈整书文本体积，按总字节数 FIFO 淘汰（上限 320KB），
+// 多本书 × 多字号时内存占用有界；同时保留「当前书」级别的缓存命中。
 const _btPagesCache = new Map()
-const BT_PAGES_CACHE_MAX = 4
+let _btPagesCacheBytes = 0
+const BT_PAGES_CACHE_MAX_BYTES = 320 * 1024
 
 function _btPagesCacheSet(cacheKey, pages) {
-  if (_btPagesCache.has(cacheKey)) _btPagesCache.delete(cacheKey)
-  _btPagesCache.set(cacheKey, pages)
-  while (_btPagesCache.size > BT_PAGES_CACHE_MAX) {
-    const oldestKey = _btPagesCache.keys().next().value
-    _btPagesCache.delete(oldestKey)
+  let bytes = 0
+  if (pages) {
+    for (let i = 0; i < pages.length; i++) {
+      bytes += pages[i] ? pages[i].length : 0
+    }
   }
+  // 单本书分页超过上限不缓存（大书每次打开重分页，避免撑爆内存）
+  if (bytes > BT_PAGES_CACHE_MAX_BYTES) return
+  _btPagesCacheDelete(cacheKey)
+  _btPagesCache.set(cacheKey, { pages: pages, bytes: bytes })
+  _btPagesCacheBytes += bytes
+  while (_btPagesCacheBytes > BT_PAGES_CACHE_MAX_BYTES && _btPagesCache.size > 1) {
+    const oldestKey = _btPagesCache.keys().next().value
+    _btPagesCacheDelete(oldestKey)
+  }
+}
+
+function _btPagesCacheGet(cacheKey) {
+  const entry = _btPagesCache.get(cacheKey)
+  if (!entry) return null
+  // touch：重插到末尾维持热度
+  _btPagesCache.delete(cacheKey)
+  _btPagesCache.set(cacheKey, entry)
+  return entry.pages
+}
+
+function _btPagesCacheDelete(cacheKey) {
+  const entry = _btPagesCache.get(cacheKey)
+  if (entry) {
+    _btPagesCacheBytes -= entry.bytes || 0
+    if (_btPagesCacheBytes < 0) _btPagesCacheBytes = 0
+    _btPagesCache.delete(cacheKey)
+  }
+}
+
+function _btPagesCacheClear() {
+  _btPagesCache.clear()
+  _btPagesCacheBytes = 0
 }
 // 迁移单例 Promise，保证只跑一次
 let _btMigrationPromise = null
@@ -759,11 +936,106 @@ function _streamSegments(id, chunkCount, linesPerSegment) {
   })
 }
 
+// 流式按字符位置定位页码（与 findPageFromContent 同一分页口径）：
+// 逐块读取并累计全局字符偏移，越过目标位置即提前结束，
+// 大文件跳转不把整本书读进内存。
+function _streamFindPageByChar(id, chunkCount, charPosition, fontSize) {
+  return new Promise((resolve) => {
+    const fs = fontSize || DEFAULT_FONT_SIZE
+    const charsPerLine = Math.max(1, Math.floor(SCREEN_TEXT_WIDTH / fs))
+    const maxLines = Math.max(1, Math.floor(SCREEN_TEXT_HEIGHT / (fs + 4)))
+    let lineCount = 0
+    let currentPage = 0
+    let globalCharPos = 0
+    let pendingLine = ''
+    let readIndex = 0
+    let done = false
+
+    function finish(page) {
+      if (done) return
+      done = true
+      resolve(page)
+    }
+
+    // 喂入一个完整行；返回 false 表示已定位可停止
+    function feedLine(line) {
+      if (line.length === 0) {
+        if (lineCount >= maxLines) {
+          if (charPosition < globalCharPos) { finish(currentPage); return false }
+          currentPage++
+          lineCount = 0
+        }
+        globalCharPos += 1 // \n
+        lineCount++
+        return true
+      }
+      let remaining = line
+      while (remaining.length > 0 || line.length === 0) {
+        let sub
+        if (remaining.length > charsPerLine) {
+          sub = remaining.substring(0, charsPerLine)
+          remaining = remaining.substring(charsPerLine)
+        } else {
+          sub = remaining
+          remaining = ''
+        }
+        if (lineCount >= maxLines) {
+          if (charPosition < globalCharPos) { finish(currentPage); return false }
+          currentPage++
+          lineCount = 0
+        }
+        globalCharPos += sub.length + 1 // +1 for \n（与 findPageFromContent 同口径）
+        lineCount++
+        if (remaining.length === 0) break
+      }
+      return true
+    }
+
+    function processChunkLines(lines) {
+      for (let i = 0; i < lines.length; i++) {
+        let line = lines[i]
+        if (i === 0 && pendingLine !== '') {
+          line = pendingLine + line
+          pendingLine = ''
+        }
+        if (i === lines.length - 1) {
+          pendingLine = line
+          break
+        }
+        if (!feedLine(line)) return false
+      }
+      return true
+    }
+
+    function readNext() {
+      if (done) return
+      if (readIndex >= chunkCount) {
+        if (pendingLine !== '') feedLine(pendingLine)
+        finish(currentPage)
+        return
+      }
+      storage.get({
+        key: STORAGE_KEY_BT_CHUNK_PREFIX + id + '_' + readIndex,
+        success: (data) => {
+          if (data && data.length > 0) {
+            if (!processChunkLines(data.split('\n'))) return
+          }
+          readIndex++
+          readNext()
+        },
+        fail: () => finish(currentPage)
+      })
+    }
+    readNext()
+  })
+}
+
 // 删除单个文件正文键（同步清缓存）
 // 同时删除新版分块键和旧版单键
 function _deleteBtFileKey(id) {
   _btFileCacheDelete(id)
-  _searchableTextCache.delete(id)
+  _searchCacheDelete(id)
+  _parsedJsonCache.delete(id)
   return new Promise((resolve) => {
     let pending = 1 // 旧版单键
     const done = () => {
@@ -810,7 +1082,7 @@ function _clearBtPagesCacheForId(id) {
     if (key.indexOf(id + '_') === 0) keysToDelete.push(key)
   })
   for (let i = 0; i < keysToDelete.length; i++) {
-    _btPagesCache.delete(keysToDelete[i])
+    _btPagesCacheDelete(keysToDelete[i])
   }
   // 章节目录缓存同步失效
   _btChaptersCache.delete(id)
@@ -1000,8 +1272,9 @@ export default {
   invalidateCache() {
     _btMetaCache = null
     _btFileCacheClear()
-    _searchableTextCache.clear()
-    _btPagesCache.clear()
+    _searchCacheClear()
+    _btPagesCacheClear()
+    _parsedJsonCache.clear()
   },
 
   /**
@@ -1112,8 +1385,9 @@ export default {
       // 蓝牙传输内容：ID 以 bt_ 开头
       if (pathStr && pathStr.startsWith('bt_')) {
         const cacheKey = pathStr + '_' + fs
-        if (_btPagesCache.has(cacheKey)) {
-          resolve(_btPagesCache.get(cacheKey))
+        const cachedPages = _btPagesCacheGet(cacheKey)
+        if (cachedPages) {
+          resolve(cachedPages)
           return
         }
         // 先检查分块数量，决定是否使用流式分页
@@ -1323,7 +1597,8 @@ export default {
               // 新保存的小文件直接进 LRU 缓存（随后阅读/搜索零 I/O）；
               // 大文件不入缓存，按需从 storage 流式读取
               _btFileCacheSet(id, content || '')
-              _searchableTextCache.delete(id)
+              _searchCacheDelete(id)
+              _parsedJsonCache.delete(id)
               _clearBtPagesCacheForId(id)
               console.log('[DM] Bluetooth content saved (chunked): ' + filename +
                 ' (' + (content || '').length + ' chars, ' +
@@ -1572,6 +1847,14 @@ export default {
     })
   },
 
+  /**
+   * 获取蓝牙 JSON 文件的解析结果（parseKnowledgeJson 返回结构）
+   * 带 FIFO 缓存：阅读页与搜索共享同一份解析，避免大文件反复 JSON.parse
+   */
+  getParsedKnowledge(id) {
+    return _parsedJsonById(id)
+  },
+
   // ==================== 阅读进度 ====================
 
   /**
@@ -1658,9 +1941,10 @@ export default {
   /**
    * Search all content (bluetooth + builtin examples)
    * knowledgeTree 搜索分支已清理（knowledgeTree 为空）
-   * 蓝牙分支逐个 getBluetoothFileContent(id) 读取正文搜索，结果上限 50 条
+   * 按文件分组返回全部命中（上限 MAX_RESULT_FILES 个文件），
+   * 同一文件内重复命中的关键词归在一起，供任意选择跳转。
    * @param {string} keyword - search keyword
-   * @returns {Promise<Array>} array of {name, path, snippet, type}
+   * @returns {Promise<Array>} array of {name, path, fmt, type, matches:[]}
    */
   searchContent(keyword) {
     return new Promise((resolve) => {
@@ -1670,7 +1954,6 @@ export default {
       }
       const kw = keyword.trim().toLowerCase()
       const results = []
-      const MAX_RESULTS = 50
 
       getBluetoothMeta().then((metaList) => {
         const contentItems = (metaList || []).filter(m => m.type === 'content')
@@ -1678,24 +1961,17 @@ export default {
 
         const searchBuiltinExamples = () => {
           builtinExamples.forEach(item => {
-            if (results.length >= MAX_RESULTS) return
+            if (results.length >= MAX_RESULT_FILES) return
             const formatted = _builtinFormattedCache[item.id] || item.content
-            const content = formatted.toLowerCase()
-            const name = (item.name || '').toLowerCase()
-            if (content.includes(kw) || name.includes(kw)) {
-              const pos = content.indexOf(kw)
-              let snippet = ''
-              if (pos >= 0) {
-                const start = Math.max(0, pos - 10)
-                const end = Math.min(content.length, pos + kw.length + 20)
-                snippet = (start > 0 ? '...' : '') + formatted.substring(start, end) + (end < content.length ? '...' : '')
-              }
+            const entry = { text: formatted, lower: formatted.toLowerCase() }
+            const matches = _collectTxtMatches(entry, kw)
+            if (matches.length > 0 || (item.name || '').toLowerCase().indexOf(kw) >= 0) {
               results.push({
                 name: item.name,
                 path: item.id,
-                snippet: snippet,
-                position: pos,
-                type: 'example'
+                fmt: '',
+                type: 'example',
+                matches: matches
               })
             }
           })
@@ -1703,36 +1979,15 @@ export default {
         }
 
         const searchNext = () => {
-          if (idx >= contentItems.length || results.length >= MAX_RESULTS) {
+          if (idx >= contentItems.length || results.length >= MAX_RESULT_FILES) {
             searchBuiltinExamples()
             return
           }
           const item = contentItems[idx++]
-          getBluetoothFileContent(item.id).then((content) => {
-            if (results.length < MAX_RESULTS) {
-              // JSON 文件搜索解析后的展示文本；text/lower 均走 id 键缓存，
-              // 逐字输入触发的重复搜索零 JSON.parse、零整书小写化
-              const entry = _getSearchEntry(item.id, item.fmt || '', content)
-              const searchable = entry.text
-              const lowerContent = entry.lower
-              const lowerName = (item.name || '').toLowerCase()
-              if (lowerContent.includes(kw) || lowerName.includes(kw)) {
-                const pos = lowerContent.indexOf(kw)
-                let snippet = ''
-                if (pos >= 0) {
-                  const start = Math.max(0, pos - 10)
-                  const end = Math.min(searchable.length, pos + kw.length + 20)
-                  snippet = (start > 0 ? '...' : '') + searchable.substring(start, end) + (end < searchable.length ? '...' : '')
-                }
-                results.push({
-                  name: item.name,
-                  path: item.id,
-                  snippet: snippet,
-                  position: pos,
-                  type: 'bluetooth',
-                  fmt: item.fmt || ''
-                })
-              }
+          _searchOneBtFile(item, kw).then((group) => {
+            if (results.length < MAX_RESULT_FILES &&
+              (group.matches.length > 0 || (item.name || '').toLowerCase().indexOf(kw) >= 0)) {
+              results.push(group)
             }
             searchNext()
           })
@@ -1743,15 +1998,10 @@ export default {
   },
 
   /**
-   * 在单个文件中搜索关键词，返回匹配位置列表
-   * @param {string} pathStr 文件路径
-   * @param {string} keyword 搜索关键词
-   * @returns {Promise<Array>} [{ position: number, snippet: string }]
-   */
-  /**
    * 在指定文件夹子树内搜索考点内容
    * @param {string} folderId 文件夹 id（bt_root 表示主页全局）
- * @param {string} keyword 关键词
+   * @param {string} keyword 关键词
+   * @returns {Promise<Array>} array of {name, path, fmt, type, matches:[]}
    */
   searchContentInFolder(folderId, keyword) {
     return new Promise((resolve) => {
@@ -1782,35 +2032,17 @@ export default {
         })
 
         const results = []
-        const MAX_RESULTS = 50
         let idx = 0
         const searchNext = () => {
-          if (idx >= inFolder.length || results.length >= MAX_RESULTS) {
+          if (idx >= inFolder.length || results.length >= MAX_RESULT_FILES) {
             resolve(results)
             return
-          }          const item = inFolder[idx++]
-          getBluetoothFileContent(item.id).then((content) => {
-            // text/lower 均走 id 键缓存（与全局搜索共享同一份缓存）
-            const entry = _getSearchEntry(item.id, item.fmt || '', content)
-            const searchable = entry.text
-            const lowerContent = entry.lower
-            const lowerName = (item.name || '').toLowerCase()
-            if (lowerContent.includes(kw) || lowerName.includes(kw)) {
-              const pos = lowerContent.indexOf(kw)
-              let snippet = ''
-              if (pos >= 0) {
-                const start = Math.max(0, pos - 10)
-                const end = Math.min(searchable.length, pos + kw.length + 20)
-                snippet = (start > 0 ? '...' : '') + searchable.substring(start, end) + (end < searchable.length ? '...' : '')
-              }
-              results.push({
-                name: item.name,
-                path: item.id,
-                snippet: snippet,
-                position: pos,
-                type: 'bluetooth',
-                fmt: item.fmt || ''
-              })
+          }
+          const item = inFolder[idx++]
+          _searchOneBtFile(item, kw).then((group) => {
+            if (results.length < MAX_RESULT_FILES &&
+              (group.matches.length > 0 || (item.name || '').toLowerCase().indexOf(kw) >= 0)) {
+              results.push(group)
             }
             searchNext()
           })
@@ -1822,15 +2054,17 @@ export default {
   },
 
   /**
-   * 在单个文件中搜索关键词，返回匹配位置列表
+   * 在单个文件中搜索关键词，返回该文件的分组结果
    * @param {string} pathStr 文件路径
    * @param {string} keyword 搜索关键词
-   * @returns {Promise<Array>} [{ position: number, snippet: string }]
+   * @returns {Promise<{name, path, fmt, type, matches:[]}>}
+   *   TXT 命中为 {position, snippet}；JSON 命中为 {position:-1, subject, entryIdx, entryTitle, snippet}
    */
   searchContentInFile(pathStr, keyword) {
     return new Promise((resolve) => {
+      const empty = { name: '', path: pathStr, fmt: '', type: 'bluetooth', matches: [] }
       if (!keyword || keyword.trim().length === 0) {
-        resolve([])
+        resolve(empty)
         return
       }
       const kw = keyword.trim().toLowerCase()
@@ -1840,28 +2074,25 @@ export default {
         const meta = _btMetaCache.find(m => m.id === pathStr)
         if (meta) fileFmt = meta.fmt || ''
       }
+      if (pathStr && pathStr.indexOf('bt_') === 0) {
+        const item = { id: pathStr, name: this.getUnifiedNodeName(pathStr), fmt: fileFmt }
+        _searchOneBtFile(item, kw).then(resolve)
+        return
+      }
+      // 内置示例等非 bt_ 内容
       this.getReaderFullContent(pathStr).then((content) => {
         if (!content) {
-          resolve([])
+          resolve(empty)
           return
         }
-        // text/lower 均走 id 键缓存
-        const entry = _getSearchEntry(pathStr, fileFmt, content)
-        const searchable = entry.text
-        const lowerContent = entry.lower
-        const matches = []
-        let pos = 0
-        while (true) {
-          pos = lowerContent.indexOf(kw, pos)
-          if (pos < 0) break
-          const start = Math.max(0, pos - 10)
-          const end = Math.min(searchable.length, pos + kw.length + 20)
-          const snippet = (start > 0 ? '...' : '') + searchable.substring(start, end) + (end < searchable.length ? '...' : '')
-          matches.push({ position: pos, snippet: snippet })
-          pos += kw.length
-          if (matches.length >= 20) break
-        }
-        resolve(matches)
+        const entry = { text: content, lower: content.toLowerCase() }
+        resolve({
+          name: this.getUnifiedNodeName(pathStr),
+          path: pathStr,
+          fmt: '',
+          type: 'example',
+          matches: _collectTxtMatches(entry, kw)
+        })
       })
     })
   },
@@ -1952,8 +2183,24 @@ export default {
         return
       }
       if (pathStr && pathStr.startsWith('bt_')) {
-        getBluetoothFileContent(pathStr).then((content) => {
-          findPageFromContent(content)
+        // 大文件（>10 块）流式定位，避免整书入内存；小文件走缓存读全量
+        storage.get({
+          key: STORAGE_KEY_BT_CHUNK_PREFIX + pathStr + '_count',
+          success: (countStr) => {
+            const count = parseInt(countStr)
+            if (count && count > 10) {
+              _streamFindPageByChar(pathStr, count, charPosition, fs).then(resolve)
+              return
+            }
+            getBluetoothFileContent(pathStr).then((content) => {
+              findPageFromContent(content)
+            })
+          },
+          fail: () => {
+            getBluetoothFileContent(pathStr).then((content) => {
+              findPageFromContent(content)
+            })
+          }
         })
         return
       }
@@ -2092,7 +2339,7 @@ export default {
           return
         }
         const result = { list: buildChapterIndex(content), totalLength: content.length }
-        _btChaptersCache.set(pathStr, result)
+        _btChaptersCacheSet(pathStr, result)
         resolve(result)
       })
     })
@@ -2117,8 +2364,10 @@ function clearAllBluetooth() {
     getBluetoothMeta().then((metaList) => {
       const contentIds = (metaList || []).filter(m => m.type === 'content').map(m => m.id)
       saveBluetoothMeta([]).then(() => {
-        // 清除所有分页缓存
-        _btPagesCache.clear()
+        // 清除所有分页缓存（含字节计数器）
+        _btPagesCacheClear()
+        _searchCacheClear()
+        _parsedJsonCache.clear()
         if (contentIds.length === 0) {
           resolve(true)
           return

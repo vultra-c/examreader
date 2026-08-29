@@ -105,7 +105,8 @@ export default {
     // 无缝模式相关（V26.8.4 复刻弦电子书 detail.ux 两段式无缝阅读）
     modesLoaded: false,
     readingMode: '',
-    fullContent: '',
+    // 全文移至 this._fullContent（非响应式）：大字符串不进框架观察，
+    // 避免大字段进入 data 后在每次 setData diff 时参与遍历，浪费内存与 CPU
     readingPercent: 0,
     modeChanged: false,
     rawProgress: null,
@@ -123,7 +124,8 @@ export default {
   },
   protected: {
     path: '',
-    targetPage: -1
+    targetPage: -1,
+    targetChar: -1
   },
 
   onInit() {
@@ -149,6 +151,24 @@ export default {
     if (!this.$valid) return
     await this.loadContent()
     if (!this.$valid) return
+
+    // 搜索结果跳转：按字符位置定位（分页→页码；无缝→滚动位置）
+    if (this.targetChar != null && this.targetChar !== undefined && this.targetChar >= 0) {
+      const chars = this.targetChar
+      this.targetChar = -1
+      if (this.readingMode === 'seamless') {
+        this.jumpSeamToChar(chars)
+      } else {
+        const page = await dataManager.findPageByCharPosition(this.path, chars, this.fontSize)
+        if (!this.$valid) return
+        if (page >= 0 && page < this.totalPages) {
+          this.currentPage = page
+        }
+        this.updatePageContent()
+      }
+      this.saveProgress()
+      return
+    }
 
     // 搜索结果跳转：直接跳到指定页码
     if (this.targetPage != null && this.targetPage >= 0 && this.targetPage < this.totalPages) {
@@ -320,19 +340,32 @@ export default {
     }
   },
 
+  /**
+   * 无缝模式按字符偏移跳转：page1 从目标前 200 字开始，
+   * 段内滚动位置按行高估算（同弦电子书 estimateScrollTopByOffset），
+   * 立即同步滚动标量，保证随后的进度保存拿到一致位置。
+   */
+  jumpSeamToChar(chars) {
+    let target = chars
+    if (isNaN(target)) target = 0
+    if (target < 0) target = 0
+    if (target > this.seamAllSize) target = this.seamAllSize
+    this.seamFileOffset = Math.max(0, target - 200)
+    this.seamSavedScrollOffset = this.estimateSeamScrollTopByOffset(target - this.seamFileOffset)
+    this.seamScrollTop = this.seamSavedScrollOffset
+    this.loadSeamInitial()
+  },
+
   applyJumpToPage() {
-    // 无缝模式：百分比跳转 → 全局行号 → 定位段
+    // 无缝模式：百分比跳转 → 字符偏移 → 定位段
     if (appState.jumpToPercent != null && appState.jumpToPercent !== undefined) {
       const percent = parseInt(appState.jumpToPercent)
       appState.jumpToPercent = null
       if (this.readingMode === 'seamless' && this.pagesLoaded) {
         if (percent < 0) percent = 0
         if (percent > 100) percent = 100
-        // 目标字符偏移 → page1 从目标前 200 字开始，段内滚动精确定位（同弦电子书 estimateScrollTopByOffset）
         const targetChars = Math.round(percent / 100 * Math.max(1, this.seamAllSize))
-        this.seamFileOffset = Math.max(0, targetChars - 200)
-        this.seamSavedScrollOffset = this.estimateSeamScrollTopByOffset(targetChars - this.seamFileOffset)
-        this.loadSeamInitial()
+        this.jumpSeamToChar(targetChars)
         this.saveProgress()
         prompt.showToast({ message: '已跳转到 ' + percent + '%', duration: 1000 })
         return
@@ -365,7 +398,7 @@ export default {
     if (this.readingMode === 'seamless') {
       const fullContent = await dataManager.getReaderFullContent(this.path)
       if (!this.$valid) return
-      this.fullContent = fullContent
+      this._fullContent = fullContent
       this.seamAllSize = fullContent ? fullContent.length : 0
 
       const name = dataManager.getUnifiedNodeName(this.path)
@@ -576,7 +609,7 @@ export default {
     if (readOffset >= this.seamAllSize) { cb('', 0); return }
     const start = Math.max(0, readOffset)
     const len = Math.min(400, this.seamAllSize - start)
-    const str = this.fullContent ? this.fullContent.substring(start, start + len) : ''
+    const str = this._fullContent ? this._fullContent.substring(start, start + len) : ''
     cb(str, str.length)
   },
 

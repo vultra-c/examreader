@@ -36,6 +36,18 @@
         <img src="{{keepScreenOn ? '/common/images/Switch_ON.png' : '/common/images/Switch_OFF.png'}}" class="switch" />
       </list-item>
 
+      <!-- 阅读导航分区 -->
+      <list-item class="item" style="padding: 7px 16px; height: 50px;" type="tip">
+        <text class="section-title" static>阅读导航</text>
+      </list-item>
+      <list-item class="item" @click="goPercentJump" type="item">
+        <div class="item-content">
+          <text class="itemtext" static>按百分比跳转</text>
+          <text class="itemtext2" static>跳转到指定进度</text>
+        </div>
+        <img static src="/common/images/enter.png" class="arrow" />
+      </list-item>
+
       <!-- 文件管理分区 -->
       <list-item class="item" style="padding: 7px 16px; height: 50px;" type="tip">
         <text class="section-title" static>文件管理</text>
@@ -99,6 +111,12 @@ export default {
 
   onShow() {
     if (!this.$valid) return
+    // 百分比跳转确认后自动返回到阅读页（与 TXT 阅读设置同一回跳链路）
+    if (appState.needBackToReader) {
+      appState.needBackToReader = false
+      router.back()
+      return
+    }
     this.loadAllSettings()
   },
 
@@ -165,6 +183,13 @@ export default {
     this.keepScreenOn = !this.keepScreenOn
     storage.set({ key: 'KD_KEEP_SCREEN_ON', value: this.keepScreenOn.toString() })
     brightness.setKeepScreenOn({ keepScreenOn: this.keepScreenOn })
+  },
+
+  goPercentJump() {
+    router.push({
+      uri: '/pages/percentJump',
+      params: { path: this.contentPath }
+    })
   },
 
   goDeleteConfirm() {
