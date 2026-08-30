@@ -61,9 +61,6 @@
       "pages/jsonReaderSettings": {
         "component": "jsonReaderSettings"
       },
-      "pages/chapterList": {
-        "component": "chapterList"
-      },
       "pages/globalSettings": {
         "component": "globalSettings"
       },

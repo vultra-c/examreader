@@ -14,12 +14,25 @@
 
     <!-- 文件夹/考点列表（分块渲染） -->
     <list class="list" if="{{visibleItems.length > 0}}" id="subList" onscrollbottom="onReachBottom">
+      <!-- 排序模式提示 -->
+      <list-item if="{{sortMode}}" class="item" style="padding: 7px 16px; height: 50px;" type="section">
+        <text class="section-title" static>排序模式：↑/↓ 排序，··· 管理，返回键退出</text>
+      </list-item>
       <list-item for="{{visibleItems}}" tid="id" class="item" type="item" @click="onItemClick($item)" @longpress="onLongPress($item)">
         <div class="item-content">
           <text class="itemtext">{{$item.name}}</text>
           <text class="itemtext2">{{$item.subtitle}}</text>
         </div>
-        <img static src="/common/images/enter.png" class="arrow" />
+        <!-- 排序模式显示上下移按钮；正常模式显示箭头 -->
+        <div if="{{sortMode}}" style="flex-direction: row; align-items: center;">
+          <div class="sort-btn" @click="moveItem($item, -1)">
+            <text class="sort-btn-text" static>↑</text>
+          </div>
+          <div class="sort-btn" @click="moveItem($item, 1)">
+            <text class="sort-btn-text" static>↓</text>
+          </div>
+        </div>
+        <img if="{{!sortMode}}" static src="/common/images/enter.png" class="arrow" />
       </list-item>
       <list-item if="{{hasMore}}" type="more" class="item" @click="loadMore">
         <div class="item-content">
@@ -28,8 +41,8 @@
       </list-item>
     </list>
 
-    <!-- 右下角搜索图标 -->
-    <img static src="/common/images/search.png" @click="goSearch" style="position: absolute; left: 258px; top: 402px; width: 72px; height: 72px;" />
+    <!-- 右下角搜索图标（排序模式隐藏） -->
+    <img if="{{!sortMode}}" static src="/common/images/search.png" @click="goSearch" style="position: absolute; left: 258px; top: 402px; width: 72px; height: 72px;" />
 
     <!-- 顶部栏 -->
     <img static src="/common/images/hd.png" style="position: absolute; left: 0px; top: 0px; width: 336px; height: 102px;" />
@@ -61,7 +74,9 @@ export default {
     loading: true,
     renderPos: 0,
     isNavigating: false,
-    longPressTriggered: false
+    longPressTriggered: false,
+    // 排序模式：用 ↑/↓ 按钮调整条目顺序，用 ··· 或返回键退出/删除
+    sortMode: false
   },
   protected: {
     path: ''
@@ -150,6 +165,8 @@ export default {
       this.longPressTriggered = false
       return
     }
+    // 排序模式下点击条目只排序不跳转
+    if (this.sortMode) return
     this.isNavigating = true
 
     setTimeout(() => { if (this.$valid) this.isNavigating = false }, 2000)
@@ -209,15 +226,22 @@ export default {
 
     setTimeout(() => { if (this.$valid) this.isNavigating = false }, 2000)
 
+    // 手环内容：
     if (this.path && this.path.startsWith('bt_')) {
-      router.push({
-        uri: '/pages/deleteConfirm',
-        params: {
-          action: item.type === 'folder' ? 'deleteFolder' : 'deleteContent',
-          path: item.id,
-          name: item.name
-        }
-      })
+      if (this.sortMode) {
+        // 排序模式下长按条目 → 删除
+        router.push({
+          uri: '/pages/deleteConfirm',
+          params: {
+            action: item.type === 'folder' ? 'deleteFolder' : 'deleteContent',
+            path: item.id,
+            name: item.name
+          }
+        })
+      } else {
+        // 正常模式下长按 → 进入排序模式
+        this.sortMode = true
+      }
       return
     }
 
@@ -233,17 +257,55 @@ export default {
     })
   },
 
+  /** 排序模式：上移/下移当前文件夹内条目（蓝牙内容节点） */
+  async moveItem(item, delta) {
+    if (!this.path || !this.path.startsWith('bt_')) return
+    const ok = await dataManager.moveBluetoothNode(item.id, delta)
+    if (!this.$valid) return
+    if (ok) {
+      const idx = this.allItems.indexOf(item)
+      const target = idx + delta
+      if (target >= 0 && target < this.allItems.length) {
+        const swapped = this.allItems[target]
+        this.allItems[target] = item
+        this.allItems[idx] = swapped
+        // 重建可见列表
+        this.renderPos = 0
+        this.visibleItems = []
+        this.appendVisibleChunk()
+      }
+    }
+  },
+
+  /** 排序模式下 ··· 菜单：长按任一条目后选择删除或退出排序 */
+  goSettings() {
+    if (this.sortMode) {
+      // 排序模式：··· 进入删除页或退出
+      this.sortMode = false
+      return
+    }
+    router.push({ uri: '/pages/globalSettings' })
+  },
+
   goBack() {
     router.back()
   },
 
-  onSwipe(e) {
+onSwipe(e) {
     if (e.direction === 'right') {
+      if (this.sortMode) {
+        this.sortMode = false
+        return
+      }
       router.back()
     }
   },
 
   onBackPress() {
+    if (this.sortMode) {
+      this.sortMode = false
+      return true
+    }
     router.back()
     return true
   }
@@ -256,5 +318,21 @@ export default {
     height: 394px;
     top: 86px;
     padding: 0px 6px;
+  }
+  .sort-btn {
+    width: 56px;
+    height: 56px;
+    border-radius: 28px;
+    background-color: rgba(13, 110, 255, 0.25);
+    justify-content: center;
+    align-items: center;
+    margin-left: 6px;
+  }
+  .sort-btn-text {
+    font-size: 30px;
+    font-weight: bold;
+    color: #4DA3FF;
+    text-align: center;
+    line-height: 56px;
   }
 </style>

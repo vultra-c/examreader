@@ -18,6 +18,13 @@
       <list-item class="item" style="padding: 7px 16px; height: 50px;" type="tip">
         <text class="section-title" static>阅读导航</text>
       </list-item>
+      <list-item class="item" @click="goLastRead" type="item">
+        <div class="item-content">
+          <text class="itemtext" static>回到上次位置</text>
+          <text class="itemtext2" static>{{lastReadHint}}</text>
+        </div>
+        <img static src="/common/images/enter.png" class="arrow" />
+      </list-item>
       <list-item class="item" @click="goPageJump" if="{{readingMode !== 'seamless'}}" type="item">
         <div class="item-content">
           <text class="itemtext" static>按页数跳转</text>
@@ -106,7 +113,8 @@ export default {
     keepScreenOn: false,
     readingMode: 'paginated',
     contentPath: '',
-    contentName: '阅读设置'
+    contentName: '阅读设置',
+    lastReadHint: '读取中…'
   },
   protected: {
     path: ''
@@ -125,10 +133,11 @@ export default {
       this.contentName = name
     }
     this.loadAllSettings()
+    this.loadLastReadHint()
   },
 
   onShow() {
-    // 跳转页（pageJump/percentJump/chapterList）确认后邮箱里有待消费请求，
+    // 跳转页（pageJump/percentJump）确认后邮箱里有待消费请求，
     // 自动回退到阅读页由 reader.onShow 消费
     const req = jumpBus.peekJump()
     if (req && req.path === this.contentPath) {
@@ -137,6 +146,7 @@ export default {
     }
     if (!this.$valid) return
     this.loadAllSettings()
+    this.loadLastReadHint()
   },
 
   onDestroy() {
@@ -147,68 +157,44 @@ export default {
   },
 
   loadAllSettings() {
-    storage.get({
-      key: 'KD_FONT_SIZE',
-      success: (data) => {
-        if (!this.$valid) return
-        if (data) {
-          this.fontSizeValue = parseInt(data)
-        }
-      },
-      fail: () => {
-        if (!this.$valid) return
-        this.fontSizeValue = 26
-      }
+    // 并发批量读取 4 项设置，减少 storage IPC 往返
+    const read = (key) => new Promise(res => {
+      storage.get({ key: key, success: (d) => res(d), fail: () => res(null) })
     })
-    storage.get({
-      key: 'KD_LINE_HEIGHT',
-      success: (data) => {
-        if (!this.$valid) return
-        if (data) {
-          this.lineHeightValue = parseInt(data)
-        }
-      },
-      fail: () => {
-        if (!this.$valid) return
-        this.lineHeightValue = 30
-      }
-    })
-    storage.get({
-      key: 'KD_KEEP_SCREEN_ON',
-      success: (data) => {
-        if (!this.$valid) return
-        this.keepScreenOn = data === 'true'
-      },
-      fail: () => {
-        if (!this.$valid) return
-        this.keepScreenOn = false
-      }
-    })
-    storage.get({
-      key: 'KD_READING_MODE',
-      success: (data) => {
-        if (!this.$valid) return
-        this.readingMode = data === 'seamless' ? 'seamless' : 'paginated'
-      },
-      fail: () => {
-        if (!this.$valid) return
-        this.readingMode = 'paginated'
-      }
+    Promise.all([
+      read('KD_FONT_SIZE'),
+      read('KD_LINE_HEIGHT'),
+      read('KD_KEEP_SCREEN_ON'),
+      read('KD_READING_MODE')
+    ]).then((results) => {
+      if (!this.$valid) return
+      const fs = results[0] ? parseInt(results[0]) : 26
+      this.fontSizeValue = (isNaN(fs) || fs < 12) ? 12 : (fs > 64 ? 64 : fs)
+      const lh = results[1] ? parseInt(results[1]) : 30
+      this.lineHeightValue = (isNaN(lh) || lh < 18) ? 30 : (lh > 80 ? 80 : lh)
+      this.keepScreenOn = results[2] === 'true'
+      this.readingMode = results[3] === 'seamless' ? 'seamless' : 'paginated'
+    }).catch(() => {
+      if (!this.$valid) return
+      this.fontSizeValue = 26
+      this.lineHeightValue = 30
+      this.keepScreenOn = false
+      this.readingMode = 'paginated'
     })
   },
 
   adjustFontSize(delta) {
     let val = this.fontSizeValue + delta
-    if (val < 16) val = 16
-    if (val > 48) val = 48
+    if (val < 12) val = 12
+    if (val > 64) val = 64
     this.fontSizeValue = val
     storage.set({ key: 'KD_FONT_SIZE', value: val.toString() })
   },
 
   adjustLineHeight(delta) {
     let val = this.lineHeightValue + delta
-    if (val < 20) val = 20
-    if (val > 64) val = 64
+    if (val < 18) val = 18
+    if (val > 80) val = 80
     this.lineHeightValue = val
     storage.set({ key: 'KD_LINE_HEIGHT', value: val.toString() })
   },
@@ -235,6 +221,42 @@ export default {
       uri: '/pages/percentJump',
       params: { path: this.contentPath }
     })
+  },
+
+  /** 回到上次阅读位置：向阅读页发送跳转请求并返回 */
+  async goLastRead() {
+    const progress = await dataManager.getReadingProgress(this.contentPath)
+    if (!this.$valid) return
+    if (!progress || (typeof progress === 'number' && progress <= 0)) {
+      this.lastReadHint = '从头开始阅读'
+      return
+    }
+    if (progress.mode === 'seam') {
+      // 无缝模式：发 percent 跳转（近似即可）
+      jumpBus.requestJump({ type: 'percent', value: progress._percentHint || 0, path: this.contentPath })
+      this.lastReadHint = '已返回上次滚动位置'
+    } else if (typeof progress === 'number') {
+      jumpBus.requestJump({ type: 'page', value: progress, path: this.contentPath })
+      this.lastReadHint = '第 ' + (progress + 1) + ' 页'
+    } else {
+      this.lastReadHint = '无记录'
+      return
+    }
+    // 邮箱有请求，onShow 会自动 back 回阅读页
+    router.back()
+  },
+
+  /** 加载上次阅读提示 */
+  async loadLastReadHint() {
+    const progress = await dataManager.getReadingProgress(this.contentPath)
+    if (!this.$valid) return
+    if (progress && progress.mode === 'seam') {
+      this.lastReadHint = '无缝 · 上次滚动位置'
+    } else if (typeof progress === 'number' && progress > 0) {
+      this.lastReadHint = '读到第 ' + (progress + 1) + ' 页'
+    } else {
+      this.lastReadHint = '从头开始'
+    }
   },
 
   goDeleteConfirm() {

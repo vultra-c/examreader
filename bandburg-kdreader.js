@@ -1291,45 +1291,45 @@ function showMainGui() {
   mainGui = sandbox.gui({
     title: '考点传输',
     elements: [
-      // 文件树
-      { type: 'label', text: '文件树' },
+      // ── 第一步：选择目标位置 ──
+      { type: 'label', text: '—— ① 选择手环目标文件夹 ——' },
       {
         type: 'select',
         id: 'targetFolder',
-        label: '当前文件夹',
+        label: '手环当前文件夹',
         options: folderOptions
       },
       { type: 'button', id: 'btnRefresh', text: '刷新文件树' },
+      { type: 'input', id: 'newFolderName', placeholder: '新文件夹名（留空跳过）', value: '' },
+      { type: 'button', id: 'btnNewFolder', text: '在当前位置新建文件夹' },
 
-      // 选中文件夹后的操作
-      { type: 'label', text: '在当前文件夹下操作：' },
+      // ── 第二步：导入 ──（选完文件自动传输，无需再点按钮）
+      { type: 'label', text: '—— ② 导入考点（选完自动传到目标文件夹）——' },
+      { type: 'file', id: 'fileInput', label: '导入单个 TXT / JSON 文件', accept: '.txt,.json' },
+      { type: 'label', text: '批量导入（同一批文件会放进一个新文件夹）：' },
+      { type: 'file', id: 'batchFiles', label: '多选文件批量导入', accept: '.txt,.json', multiple: true },
+      { type: 'file', id: 'dirFiles', label: '整目录导入（部分手机适用）', accept: '.txt,.json', multiple: true, directory: true },
+      { type: 'button', id: 'btnAddToQueue', text: '单选手机适用：逐个加入批量队列' },
+      { type: 'input', id: 'batchFolderName', placeholder: '手环新文件夹名（留空=传到当前位置）', value: '' },
 
-      // 选项一：新建文件夹
-      { type: 'input', id: 'newFolderName', placeholder: '输入文件夹名称', value: '' },
-      { type: 'button', id: 'btnNewFolder', text: '新建文件夹' },
-      // 选项二：导入考点（TXT 或 JSON）
-      { type: 'file', id: 'fileInput', label: '选择TXT/JSON考点文件', accept: '.txt,.json' },
-      { type: 'button', id: 'btnImport', text: '导入考点到当前文件夹' },
-
-      // 选项三：批量导入本地文件夹内多个文件
-      { type: 'label', text: '批量导入（选择本地文件夹内多个文件）：' },
-      { type: 'file', id: 'batchFiles', label: '选择文件夹内多个TXT/JSON文件', accept: '.txt,.json', multiple: true },
-      { type: 'file', id: 'dirFiles', label: '直接选择本地文件夹（部分手机适用）', accept: '.txt,.json', multiple: true, directory: true },
-      { type: 'button', id: 'btnAddToQueue', text: '把单选文件加入批量队列（仅支持单选的手机适用）' },
-      { type: 'input', id: 'batchFolderName', placeholder: '手环新文件夹名（留空=传入当前文件夹）', value: '' },
-      { type: 'button', id: 'btnBatchImport', text: '批量导入选中文件' },
-
-      // 选项四：调整手环端条目顺序
-      { type: 'label', text: '编辑手环文件顺序（对当前文件夹下的条目生效）：' },
+      // ── 第三步：调整顺序（可选）──
+      { type: 'label', text: '—— ③ 调整手环内顺序（可选）——' },
       { type: 'select', id: 'orderItem', label: '当前文件夹内条目', options: childOptions },
       { type: 'button', id: 'btnMoveUp', text: '上移选中条目' },
       { type: 'button', id: 'btnMoveDown', text: '下移选中条目' },
 
-      // 其他
+      // ── 诊断工具 ──
       { type: 'button', id: 'btnCheckApps', text: '检测手环已装应用' },
       { type: 'button', id: 'btnRelaunch', text: '重新启动手环应用' }
     ]
   });
+  // 打印简化操作指引
+  sandbox.log('━━━━━━━━ 操作流程 ━━━━━━━━');
+  sandbox.log('1. 上方选择手环目标文件夹（默认主页）');
+  sandbox.log('2. 点「导入单个 TXT / JSON 文件」→ 选手环文件 → 自动传输');
+  sandbox.log('   批量：用「多选/整目录/队列」选好后再填文件夹名即传');
+  sandbox.log('3. 需要调整顺序时在「③ 调整手环内顺序」里点上移/下移');
+  sandbox.log('━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
   // 导入考点 — 选择文件后自动开始传输（简化流程：选完即传，无需再点导入）
   mainGui.on('file:change', 'fileInput', async function (file) {
@@ -1453,7 +1453,8 @@ function showMainGui() {
   }
 
   // 批量导入文件选择（多选时 BandBurg 可能返回数组，归一化处理）
-  mainGui.on('file:change', 'batchFiles', function (file) {
+  // 批量多选：选完自动开始传输（需先选手环目标文件夹）
+  mainGui.on('file:change', 'batchFiles', async function (file) {
     var list = [];
     if (Array.isArray(file)) list = file;
     else if (file) list = [file];
@@ -1462,76 +1463,19 @@ function showMainGui() {
       var names = [];
       for (var i = 0; i < list.length; i++) names.push(list[i].name || '未知文件');
       sandbox.log('已选择 ' + list.length + ' 个文件: ' + names.join(', '));
+      sandbox.log('→ 自动开始批量导入...');
+      // 沿用 btnBatchImport 的处理逻辑
+      await doBatchImport();
     } else {
       sandbox.log('已清空批量选择');
     }
   });
 
-  // 直接选择文件夹（部分手机适用）：BandBurg 可能返回文件数组 /
-  // 带 files/children 的容器对象，归一化为文件列表；同时尝试从
-  // 文件路径推断文件夹名，自动填到手环新文件夹名。
-  mainGui.on('file:change', 'dirFiles', function (file) {
-    var list = normalizeDirPick(file);
-    // 调试：打印对象键，排查不同 BandBurg 版本返回格式
-    try {
-      if (file && typeof file === 'object' && !Array.isArray(file)) {
-        sandbox.log('[调试] 目录选择对象键: ' + Object.keys(file).join(', '));
-      } else if (Array.isArray(file) && file.length > 0 && file[0]) {
-        sandbox.log('[调试] 目录选择首项键: ' + Object.keys(file[0]).join(', '));
-      }
-    } catch (e) {}
-    if (list.length > 0) {
-      state.batchFiles = list;
-      var names = [];
-      for (var i = 0; i < list.length; i++) names.push(list[i].name || '未知文件');
-      sandbox.log('已从目录选择 ' + list.length + ' 个文件: ' + names.join(', '));
-      // 自动推断父文件夹名（仅当手环新文件夹名留空时）
-      try {
-        var cur = mainGui.getValue('batchFolderName');
-        if (!cur || ('' + cur).trim() === '') {
-          var guessed = guessParentFolderName(list[0]);
-          if (guessed) {
-            mainGui.setValue('batchFolderName', guessed);
-            sandbox.log('已自动填入手环新文件夹名: ' + guessed + '（可在输入框修改/清空）');
-          }
-        }
-      } catch (e) {}
-    } else {
-      sandbox.log('[提示] 目录选择未得到文件，请改用多选或队列方式');
-    }
-  });
-
-  // 单选手机兜底：把「选择TXT/JSON考点文件」里选中的文件逐个加入批量队列
-  mainGui.on('button:click', 'btnAddToQueue', function () {
-    if (!state.selectedFile) {
-      sandbox.log('请先用「选择TXT/JSON考点文件」选择一个文件');
-      return;
-    }
-    var q = state.batchFiles || [];
-    for (var i = 0; i < q.length; i++) {
-      if (q[i].name === state.selectedFile.name && q[i].size === state.selectedFile.size) {
-        sandbox.log('该文件已在队列中，跳过');
-        return;
-      }
-    }
-    q.push(state.selectedFile);
-    state.batchFiles = q;
-    var names = [];
-    for (var j = 0; j < q.length; j++) names.push(q[j].name || '未知文件');
-    sandbox.log('队列现有 ' + q.length + ' 个文件: ' + names.join(', '));
-  });
-
-  // 排序条目选择
-  mainGui.on('select:change', 'orderItem', function (value) {
-    var resolved = resolveOrderNodeId(value);
-    if (resolved && resolved !== '__empty__') state.orderNodeId = resolved;
-  });
-
-  // 批量导入选中文件到（可选）新手环文件夹
-  mainGui.on('button:click', 'btnBatchImport', async function () {
+  /** 批量导入实现：startBatchImport 和 btnBatchImport 共用 */
+  async function doBatchImport() {
     var files = state.batchFiles || [];
     if (files.length === 0) {
-      sandbox.log('请先在「选择文件夹内多个TXT/JSON文件」里选择文件');
+      sandbox.log('批量队列为空');
       return;
     }
     if (state.transferring) {
@@ -1571,6 +1515,71 @@ function showMainGui() {
     }
     sandbox.log('批量导入完成: 成功 ' + okCount + '/' + files.length + ' → ' + destName);
     state.batchFiles = [];
+  }
+
+  // 直接选择文件夹（部分手机适用）：BandBurg 可能返回文件数组 /
+  // 带 files/children 的容器对象，归一化为文件列表；同时尝试从
+  // 文件路径推断文件夹名，自动填到手环新文件夹名。
+  mainGui.on('file:change', 'dirFiles', async function (file) {
+    var list = normalizeDirPick(file);
+    // 调试：打印对象键，排查不同 BandBurg 版本返回格式
+    try {
+      if (file && typeof file === 'object' && !Array.isArray(file)) {
+        sandbox.log('[调试] 目录选择对象键: ' + Object.keys(file).join(', '));
+      } else if (Array.isArray(file) && file.length > 0 && file[0]) {
+        sandbox.log('[调试] 目录选择首项键: ' + Object.keys(file[0]).join(', '));
+      }
+    } catch (e) {}
+    if (list.length > 0) {
+      state.batchFiles = list;
+      var names = [];
+      for (var i = 0; i < list.length; i++) names.push(list[i].name || '未知文件');
+      sandbox.log('已从目录选择 ' + list.length + ' 个文件: ' + names.join(', '));
+      // 自动推断父文件夹名（仅当手环新文件夹名留空时）
+      try {
+        var cur = mainGui.getValue('batchFolderName');
+        if (!cur || ('' + cur).trim() === '') {
+          var guessed = guessParentFolderName(list[0]);
+          if (guessed) {
+            mainGui.setValue('batchFolderName', guessed);
+            sandbox.log('已自动填入手环新文件夹名: ' + guessed + '（可在输入框修改/清空）');
+          }
+        }
+      } catch (e) {}
+      // 自动开始批量传输
+      sandbox.log('→ 自动开始批量导入...');
+      await doBatchImport();
+    } else {
+      sandbox.log('[提示] 目录选择未得到文件，请改用多选或队列方式');
+    }
+  });
+
+  // 单选手机兜底：把「选择TXT/JSON考点文件」里选中的文件逐个加入批量队列
+  mainGui.on('button:click', 'btnAddToQueue', function () {
+    if (!state.selectedFile) {
+      sandbox.log('请先用「选择TXT/JSON考点文件」选择一个文件');
+      return;
+    }
+    var q = state.batchFiles || [];
+    for (var i = 0; i < q.length; i++) {
+      if (q[i].name === state.selectedFile.name && q[i].size === state.selectedFile.size) {
+        sandbox.log('该文件已在队列中，跳过');
+        return;
+      }
+    }
+    q.push(state.selectedFile);
+    state.batchFiles = q;
+    var names = [];
+    for (var j = 0; j < q.length; j++) names.push(q[j].name || '未知文件');
+    sandbox.log('队列现有 ' + q.length + ' 个文件: ' + names.join(', '));
+    sandbox.log('  队列模式需要手动传输：请点击「多选文件批量导入」→ 任选文件后队列自动传入');
+    sandbox.log('  （或改用「② 导入单个 TXT / JSON 文件」逐个直传）');
+  });
+
+  // 排序条目选择
+  mainGui.on('select:change', 'orderItem', function (value) {
+    var resolved = resolveOrderNodeId(value);
+    if (resolved && resolved !== '__empty__') state.orderNodeId = resolved;
   });
 
   // 上移选中条目

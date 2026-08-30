@@ -278,12 +278,12 @@ export default {
 
     let fontSize = fontSizeStr ? parseInt(fontSizeStr) : 26
     if (isNaN(fontSize)) fontSize = 26
-    if (fontSize < 16) fontSize = 16
-    if (fontSize > 48) fontSize = 48
+    if (fontSize < 12) fontSize = 12
+    if (fontSize > 64) fontSize = 64
 
     let lineHeight = lineHeightStr ? parseInt(lineHeightStr) : Math.round(fontSize * 1.15)
     if (isNaN(lineHeight) || lineHeight < 20) lineHeight = Math.round(fontSize * 1.15)
-    if (lineHeight > 64) lineHeight = 64
+    if (lineHeight > 80) lineHeight = 80
 
     const fontChanged = (this.fontSize !== fontSize)
     const wasLoaded = this.modesLoaded

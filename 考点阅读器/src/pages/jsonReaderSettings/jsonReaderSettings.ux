@@ -40,6 +40,13 @@
       <list-item class="item" style="padding: 7px 16px; height: 50px;" type="tip">
         <text class="section-title" static>阅读导航</text>
       </list-item>
+      <list-item class="item" @click="goLastRead" type="item">
+        <div class="item-content">
+          <text class="itemtext" static>回到上次位置</text>
+          <text class="itemtext2" static>{{lastReadHint}}</text>
+        </div>
+        <img static src="/common/images/enter.png" class="arrow" />
+      </list-item>
       <list-item class="item" @click="goPercentJump" type="item">
         <div class="item-content">
           <text class="itemtext" static>按百分比跳转</text>
@@ -87,7 +94,8 @@ export default {
     lineHeightValue: 30,
     keepScreenOn: false,
     contentPath: '',
-    contentName: '阅读设置'
+    contentName: '阅读设置',
+    lastReadHint: '读取中…'
   },
   protected: {
     path: ''
@@ -107,6 +115,7 @@ export default {
       this.contentName = name.replace(/\.json$/i, '')
     }
     this.loadAllSettings()
+    this.loadLastReadHint()
   },
 
   onShow() {
@@ -118,6 +127,7 @@ export default {
       return
     }
     this.loadAllSettings()
+    this.loadLastReadHint()
   },
 
   onDestroy() {
@@ -128,53 +138,41 @@ export default {
   },
 
   loadAllSettings() {
-    storage.get({
-      key: 'KD_FONT_SIZE',
-      success: (data) => {
-        if (!this.$valid) return
-        this.fontSizeValue = data ? parseInt(data) : 26
-      },
-      fail: () => {
-        if (!this.$valid) return
-        this.fontSizeValue = 26
-      }
+    // 并发批量读取 3 项设置 + clamp 校验
+    const read = (key) => new Promise(res => {
+      storage.get({ key: key, success: (d) => res(d), fail: () => res(null) })
     })
-    storage.get({
-      key: 'KD_LINE_HEIGHT',
-      success: (data) => {
-        if (!this.$valid) return
-        this.lineHeightValue = data ? parseInt(data) : 30
-      },
-      fail: () => {
-        if (!this.$valid) return
-        this.lineHeightValue = 30
-      }
-    })
-    storage.get({
-      key: 'KD_KEEP_SCREEN_ON',
-      success: (data) => {
-        if (!this.$valid) return
-        this.keepScreenOn = data === 'true'
-      },
-      fail: () => {
-        if (!this.$valid) return
-        this.keepScreenOn = false
-      }
+    Promise.all([
+      read('KD_FONT_SIZE'),
+      read('KD_LINE_HEIGHT'),
+      read('KD_KEEP_SCREEN_ON')
+    ]).then((results) => {
+      if (!this.$valid) return
+      const fs = results[0] ? parseInt(results[0]) : 26
+      this.fontSizeValue = (isNaN(fs) || fs < 12) ? 12 : (fs > 64 ? 64 : fs)
+      const lh = results[1] ? parseInt(results[1]) : 30
+      this.lineHeightValue = (isNaN(lh) || lh < 18) ? 30 : (lh > 80 ? 80 : lh)
+      this.keepScreenOn = results[2] === 'true'
+    }).catch(() => {
+      if (!this.$valid) return
+      this.fontSizeValue = 26
+      this.lineHeightValue = 30
+      this.keepScreenOn = false
     })
   },
 
   adjustFontSize(delta) {
     let val = this.fontSizeValue + delta
-    if (val < 16) val = 16
-    if (val > 48) val = 48
+    if (val < 12) val = 12
+    if (val > 64) val = 64
     this.fontSizeValue = val
     storage.set({ key: 'KD_FONT_SIZE', value: val.toString() })
   },
 
   adjustLineHeight(delta) {
     let val = this.lineHeightValue + delta
-    if (val < 20) val = 20
-    if (val > 64) val = 64
+    if (val < 18) val = 18
+    if (val > 80) val = 80
     this.lineHeightValue = val
     storage.set({ key: 'KD_LINE_HEIGHT', value: val.toString() })
   },
@@ -190,6 +188,35 @@ export default {
       uri: '/pages/percentJump',
       params: { path: this.contentPath }
     })
+  },
+
+  /** 回到上次阅读的科目+条目（JSON 知识点进度记忆） */
+  async goLastRead() {
+    const progress = await dataManager.getReadingProgress(this.contentPath)
+    if (!this.$valid) return
+    if (progress && progress.mode === 'json' && progress.subject) {
+      jumpBus.requestJump({
+        type: 'json',
+        subject: progress.subject,
+        index: (typeof progress.idx === 'number') ? progress.idx : -1,
+        path: this.contentPath
+      })
+      router.back()
+    } else {
+      this.lastReadHint = '从头开始阅读'
+    }
+  },
+
+  /** 加载上次阅读提示 */
+  async loadLastReadHint() {
+    const progress = await dataManager.getReadingProgress(this.contentPath)
+    if (!this.$valid) return
+    if (progress && progress.mode === 'json' && progress.subject) {
+      const idx = (typeof progress.idx === 'number' && progress.idx >= 0) ? progress.idx + 1 : 1
+      this.lastReadHint = progress.subject + ' · 第 ' + idx + ' 条'
+    } else {
+      this.lastReadHint = '从头开始'
+    }
   },
 
   goDeleteConfirm() {

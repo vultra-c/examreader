@@ -132,6 +132,9 @@ import { getFormattedTimeNow } from '../../common/utils/timeUtil.js'
 import jumpBus from '../../common/utils/jumpBus.js'
 
 const RAW_PAGE_CHAR_LIMIT = 320
+// JSON 阅读进度存入 KD_READING_PROGRESS，key 与 dataManager.getReadingProgress 共用；
+// 值为对象 {mode:'json', subject:'科目名', idx:条目索引}，与 TXT 的页码/无缝偏移互斥但共存于同一 storage。
+const KEY_RECENT = 'KD_RECENT_READ'
 // 公式图默认尺寸
 const FORMULA_BASE_W = 260
 const FORMULA_BASE_H = 200
@@ -235,46 +238,27 @@ export default {
   },
 
   loadDisplaySettings() {
-    storage.get({
-      key: 'KD_FONT_SIZE',
-      success: (data) => {
-        if (!this.$valid) return
-        let fs = data ? parseInt(data) : 26
-        if (isNaN(fs) || fs < 16) fs = 16
-        if (fs > 48) fs = 48
-        this.fontSize = fs
-      },
-      fail: () => {
-        if (!this.$valid) return
-        this.fontSize = 26
-      }
+    // 并发批量读取显示设置，减少 IPC 往返
+    const read = (key) => new Promise(res => {
+      storage.get({ key: key, success: (d) => res(d), fail: () => res(null) })
     })
-    storage.get({
-      key: 'KD_LINE_HEIGHT',
-      success: (data) => {
-        if (!this.$valid) return
-        let lh = data ? parseInt(data) : 30
-        if (isNaN(lh) || lh < 20) lh = 30
-        if (lh > 50) lh = 50
-        this.lineHeight = lh
-        this.paraLineHeight = lh + 10
-      },
-      fail: () => {
-        if (!this.$valid) return
-        this.lineHeight = 30
-        this.paraLineHeight = 40
-      }
-    })
-    storage.get({
-      key: 'KD_KEEP_SCREEN_ON',
-      success: (data) => {
-        if (!this.$valid) return
-        brightness.setKeepScreenOn({ keepScreenOn: data === 'true' })
-      },
-      fail: () => {
-        if (!this.$valid) return
-        brightness.setKeepScreenOn({ keepScreenOn: false })
-      }
+    Promise.all([
+      read('KD_FONT_SIZE'),
+      read('KD_LINE_HEIGHT'),
+      read('KD_KEEP_SCREEN_ON')
+    ]).then((results) => {
+      if (!this.$valid) return
+      const fs = results[0] ? parseInt(results[0]) : 26
+      const lh = results[1] ? parseInt(results[1]) : 30
+      this.fontSize = (isNaN(fs) || fs < 12) ? 12 : (fs > 64 ? 64 : fs)
+      this.lineHeight = (isNaN(lh) || lh < 18) ? 30 : (lh > 80 ? 80 : lh)
+      this.paraLineHeight = this.lineHeight + 10
+      brightness.setKeepScreenOn({ keepScreenOn: results[2] === 'true' })
+    }).catch(() => {
+      if (!this.$valid) return
+      this.fontSize = 26
+      this.lineHeight = 30
+      this.paraLineHeight = 40
     })
   },
 
@@ -347,19 +331,45 @@ export default {
     const name = dataManager.getNodeName(this.path) || '知识点'
     this.pageTitle = name.replace(/\.json$/i, '')
 
+    // 读取上次阅读进度（科目+条目索引），搜索跳转优先
+    this._savedProgress = await dataManager.getReadingProgress(this.path)
+    if (!this.$valid) return
+
     // 最近阅读打点（蓝牙文件；fire & forget）
     dataManager.touchRecent(this.path)
+    // 记录最近阅读（主页最近阅读展示）
+    this.saveRecentRead()
 
     // 搜索定位跳转：直接打开指定 科目 → 条目（经跳转邮箱传递）
     const jreq = jumpBus.peekJump()
     if (jreq && jreq.path === this.path && jreq.type === 'json') {
       jumpBus.consumeJump()
       this.openLocatedEntry(jreq.subject || '', (jreq.index != null && jreq.index !== undefined) ? jreq.index : -1)
-    } else if (rows.length === 1) {
-      this.enterSubject(rows[0].name)
     } else {
-      this.viewMode = 'subjects'
-      this.pageTitle = this.pageTitle + ' · 科目'
+      // 恢复上次阅读位置
+      let restored = false
+      const prog = this._savedProgress
+      if (prog && typeof prog === 'object' && prog.mode === 'json' && prog.subject) {
+        const subjName = prog.subject
+        const idx = (typeof prog.idx === 'number') ? prog.idx : -1
+        // 校验科目仍存在
+        if (this._parsedData && Array.isArray(this._parsedData[subjName])) {
+          this.enterSubject(subjName)
+          const items = this._entryItems || []
+          if (idx >= 0 && idx < items.length) {
+            this.openDetail(items[idx])
+          }
+          restored = true
+        }
+      }
+      if (!restored) {
+        if (rows.length === 1) {
+          this.enterSubject(rows[0].name)
+        } else {
+          this.viewMode = 'subjects'
+          this.pageTitle = this.pageTitle + ' · 科目'
+        }
+      }
     }
     this.loaded = true
 
@@ -436,6 +446,8 @@ export default {
 
   openDetail(item) {
     if (!item) return
+    // 存当前条目信息用于进度保存
+    this._curEntryItem = item
     this.curTitle = item.title
     this.curDesc = item.desc || ''
     this.curPoints = item.points || []
@@ -474,6 +486,32 @@ export default {
 
     this.viewMode = 'detail'
     this.pageTitle = this.curSubject
+
+    // 保存阅读进度：科目 + 条目索引
+    const allItems = this._entryItems || []
+    const curIdx = allItems.indexOf(item)
+    if (curIdx >= 0) {
+      dataManager.saveReadingProgress(this.path, {
+        mode: 'json',
+        subject: this.curSubject,
+        idx: curIdx
+      })
+    }
+  },
+
+  /** 保存最近阅读记录（主页「最近阅读」读取） */
+  saveRecentRead() {
+    try {
+      if (!this.path) return
+      const name = dataManager.getNodeName(this.path) || ''
+      const rec = {
+        path: this.path,
+        name: name.replace(/\.json$/i, ''),
+        fmt: 'json',
+        ts: Date.now()
+      }
+      storage.set({ key: KEY_RECENT, value: JSON.stringify(rec) })
+    } catch (e) {}
   },
 
   /**

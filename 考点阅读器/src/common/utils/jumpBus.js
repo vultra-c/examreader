@@ -2,7 +2,7 @@
  * 跨页跳转请求邮箱（globalThis 载体）。
  * aiot-toolkit 会把公共模块内联进每个页面 bundle，模块级变量跨页不共享；
  * globalThis 已在真机验证跨页共享（app.ux 互连接口同机制），
- * 因此 pageJump / percentJump / chapterList / search 发起的跳转请求
+ * 因此 pageJump / percentJump / search 发起的跳转请求
  * 统一经此邮箱传递，由 reader / jsonReader 在 onShow / 初始化时消费。
  */
 
