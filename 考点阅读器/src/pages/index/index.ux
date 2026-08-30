@@ -27,8 +27,8 @@
       </list-item>
 
       <!-- 排序模式提示 -->
-      <list-item if="{{sortMode}}" class="item" style="padding: 7px 16px; height: 50px;" type="section">
-        <text class="section-title" static>排序模式：点击 ↑/↓ 调整顺序，再按返回退出</text>
+      <list-item if="{{sortMode}}" class="item" style="padding: 7px 16px; height: 72px;" type="section">
+        <text class="section-title" style="lines: 2; width: 100%;" static>排序模式：↑/↓ 调整 · 长按删除 · 返回退出</text>
       </list-item>
 
 
@@ -90,7 +90,6 @@ export default {
     timeFormat: '24h',
     allItems: [],
     visibleItems: [],
-    visibleRecent: [],
     hasMore: false,
     loading: true,
     isNavigating: false,
@@ -146,11 +145,11 @@ export default {
 
   async loadData() {
     this.loading = true
-    const folders = await dataManager.getTopLevelFolders()
-    if (!this.$valid) return
-
-    // 最近阅读（标签区，最多 5 条）
-    this.visibleRecent = await dataManager.getRecentList(5)
+    // 并发：顶层文件夹列表 + 蓝牙 meta（最近阅读复用）
+    const [folders, meta] = await Promise.all([
+      dataManager.getTopLevelFolders(),
+      dataManager.getBluetoothMeta()
+    ])
     if (!this.$valid) return
 
     const items = []
@@ -175,11 +174,11 @@ export default {
     this.visibleItems = []
     this.loading = false
     this.appendVisibleChunk()
-    this.loadRecent()
+    this.loadRecent(meta)
   },
 
-  /** 读取最近阅读记录，匹配当前文件列表取名称与进度 */
-  async loadRecent() {
+  /** 读取最近阅读，meta 传入可复用 loadData 的并发结果，避免重复 storage 读 */
+  async loadRecent(metaHint) {
     const rec = await new Promise((resolve) => {
       storage.get({
         key: KEY_RECENT,
@@ -195,9 +194,12 @@ export default {
       this.recentItem = null
       return
     }
-    // 从列表里找该文件（可能在子文件夹，不在根列表也允许直接打开）
-    const meta = await dataManager.getBluetoothMeta()
-    if (!this.$valid) return
+    // 优先用 loadData 传入的 meta 缓存；缺失才现场拉
+    let meta = metaHint
+    if (!meta) {
+      meta = await dataManager.getBluetoothMeta()
+      if (!this.$valid) return
+    }
     let name = rec.name || ''
     let fmt = rec.fmt || ''
     if (meta) {
@@ -257,6 +259,8 @@ export default {
       this.longPressTriggered = false
       return
     }
+    // 排序模式下点击条目不开详情（↑/↓ 按钮冒泡过来的 click 也走这里被拦）
+    if (this.sortMode) return
     this.isNavigating = true
     setTimeout(() => { if (this.$valid) this.isNavigating = false }, 2000)
 
@@ -278,29 +282,45 @@ export default {
     }
   },
 
-  /** 长按：进入/退出排序模式（长按任意条目切换） */
+  /** 长按：
+   *  - 正常模式 → 进入排序模式
+   *  - 排序模式 → 删除该条目（替代旧版长按删除入口）
+   */
   onLongPress(item) {
     if (this.isNavigating) return
     this.longPressTriggered = true
     this.isNavigating = true
     setTimeout(() => { if (this.$valid) this.isNavigating = false }, 2000)
+    if (this.sortMode) {
+      router.push({
+        uri: '/pages/deleteConfirm',
+        params: {
+          action: item.type === 'folder' ? 'deleteFolder' : 'deleteContent',
+          path: item.id,
+          name: item.name
+        }
+      })
+      return
+    }
     // 长按进入排序模式
     this.sortMode = true
   },
 
-  /** 排序模式：上移/下移 */
+  /** 排序模式：上移/下移。加 150ms 节流防连点，持久化 seq 后原位交换数组元素 */
   async moveItem(item, delta) {
+    if (this._moving) return
+    this._moving = true
+    setTimeout(() => { this._moving = false }, 150)
     const ok = await dataManager.moveBluetoothNode(item.id, delta)
     if (!this.$valid) return
     if (ok) {
-      // 重新加载列表
       const idx = this.allItems.indexOf(item)
       const target = idx + delta
       if (target >= 0 && target < this.allItems.length) {
-        const swapped = this.allItems[target]
-        this.allItems[target] = item
-        this.allItems[idx] = swapped
-        // 刷新可见列表（简单起见直接重建）
+        const t = this.allItems[target]
+        this.allItems.splice(target, 1, item)
+        this.allItems.splice(idx, 1, t)
+        // 重建可见列表清空 setData 触发区域（原数组引用保持）
         this.renderPos = 0
         this.visibleItems = []
         this.appendVisibleChunk()
@@ -315,17 +335,6 @@ export default {
       return
     }
     app.terminate()
-  },
-
-  onRecentClick(item) {
-    if (this.isNavigating) return
-    this.isNavigating = true
-    setTimeout(() => { if (this.$valid) this.isNavigating = false }, 2000)
-    if (item.fmt === 'json') {
-      router.push({ uri: '/pages/jsonReader', params: { path: item.id } })
-    } else {
-      router.push({ uri: '/pages/reader', params: { path: item.id } })
-    }
   },
 
   goSettings() {

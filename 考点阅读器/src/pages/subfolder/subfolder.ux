@@ -15,8 +15,8 @@
     <!-- 文件夹/考点列表（分块渲染） -->
     <list class="list" if="{{visibleItems.length > 0}}" id="subList" onscrollbottom="onReachBottom">
       <!-- 排序模式提示 -->
-      <list-item if="{{sortMode}}" class="item" style="padding: 7px 16px; height: 50px;" type="section">
-        <text class="section-title" static>排序模式：↑/↓ 排序，··· 管理，返回键退出</text>
+      <list-item if="{{sortMode}}" class="item" style="padding: 7px 16px; height: 72px;" type="section">
+        <text class="section-title" style="lines: 2; width: 100%;" static>排序模式：↑/↓ 排序 · 长按删除 · 返回退出</text>
       </list-item>
       <list-item for="{{visibleItems}}" tid="id" class="item" type="item" @click="onItemClick($item)" @longpress="onLongPress($item)">
         <div class="item-content">
@@ -257,19 +257,22 @@ export default {
     })
   },
 
-  /** 排序模式：上移/下移当前文件夹内条目（蓝牙内容节点） */
+  /** 排序模式：上移/下移当前文件夹内条目（蓝牙内容节点）。150ms 节流防连点 */
   async moveItem(item, delta) {
     if (!this.path || !this.path.startsWith('bt_')) return
+    if (this._moving) return
+    this._moving = true
+    setTimeout(() => { this._moving = false }, 150)
     const ok = await dataManager.moveBluetoothNode(item.id, delta)
     if (!this.$valid) return
     if (ok) {
       const idx = this.allItems.indexOf(item)
       const target = idx + delta
       if (target >= 0 && target < this.allItems.length) {
-        const swapped = this.allItems[target]
-        this.allItems[target] = item
-        this.allItems[idx] = swapped
-        // 重建可见列表
+        const t = this.allItems[target]
+        this.allItems.splice(target, 1, item)
+        this.allItems.splice(idx, 1, t)
+        // 重建可见列表清空 setData 触发区域
         this.renderPos = 0
         this.visibleItems = []
         this.appendVisibleChunk()
