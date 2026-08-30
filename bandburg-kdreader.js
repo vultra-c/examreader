@@ -691,12 +691,10 @@ function validateKnowledgeJson(text) {
 }
 
 /**
- * 读取并预处理一个待传文件：读文本、识别 TXT/JSON、校验 JSON 结构。
- * 供单文件导入与批量导入共用。返回 { fileName, text }；校验失败返回 null。
+ * 内容预处理（文件名 + 文本）：识别 TXT/JSON、校验 JSON 结构。
+ * 供单文件导入、批量导入与 zip 解压上传共用。返回 { fileName, text }；校验失败返回 null。
  */
-async function prepareTransfer(file) {
-  var text = await readFileAsText(file);
-  var rawName = file.name || 'untitled';
+async function prepareTransferContent(rawName, text) {
   var isJson = /\.json$/i.test(rawName);
   // TXT 去掉后缀传输（旧格式）；JSON 必须保留 .json 后缀，手环据此路由到知识点阅读器
   var fileName = isJson ? rawName : rawName.replace(/\.txt$/i, '');
@@ -740,6 +738,243 @@ async function prepareTransfer(file) {
     }
   }
   return { fileName: fileName, text: text };
+}
+
+/**
+ * 读取并预处理一个待传文件：读文本、识别 TXT/JSON、校验 JSON 结构。
+ * 供单文件导入与批量导入共用。返回 { fileName, text }；校验失败返回 null。
+ */
+async function prepareTransfer(file) {
+  var text = await readFileAsText(file);
+  var rawName = file.name || 'untitled';
+  return prepareTransferContent(rawName, text);
+}
+
+// ==================== ZIP 考点包（本地解压 + 按路径建目录上传） ====================
+
+// 读取文件为 ArrayBuffer（与 readFileAsText 同级的多方式兼容）
+async function readFileAsArrayBuffer(file) {
+  if (!file) throw new Error('文件对象为空');
+  if (typeof file.arrayBuffer === 'function') {
+    var buf = await file.arrayBuffer();
+    if (buf && buf.byteLength !== undefined) return buf;
+  }
+  var filePath = file.path || file.filePath || file.uri;
+  if (filePath && sandbox.fs) {
+    if (typeof sandbox.fs.read === 'function') {
+      var c = await sandbox.fs.read(filePath);
+      if (typeof c === 'string') return base64ToArrayBuffer(c);
+      if (c && c.byteLength !== undefined) return c;
+    }
+    if (typeof sandbox.fs.readFile === 'function') {
+      var c2 = await sandbox.fs.readFile(filePath);
+      if (typeof c2 === 'string') return base64ToArrayBuffer(c2);
+      if (c2 && c2.byteLength !== undefined) return c2;
+    }
+  }
+  // FileReader 兜底（readAsArrayBuffer）
+  if (typeof FileReader !== 'undefined' && typeof Blob !== 'undefined' && (file instanceof Blob || (file && file.size !== undefined))) {
+    return await new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () { resolve(reader.result); };
+      reader.onerror = function () { reject(new Error('FileReader 读取 ArrayBuffer 失败')); };
+      reader.readAsArrayBuffer(file);
+    });
+  }
+  throw new Error('无法以二进制方式读取文件，无法解析 zip');
+}
+
+function base64ToArrayBuffer(b64) {
+  var trimmed = ('' + b64).replace(/\s/g, '');
+  var binary = atob(trimmed);
+  var bytes = new Uint8Array(binary.length);
+  for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+
+// 解析 ZIP 中央目录，返回条目列表 {name, method, compSize, dataStart}
+function parseZipEntries(buffer) {
+  var view = new DataView(buffer);
+  var u8 = new Uint8Array(buffer);
+  var minEocd = Math.max(0, buffer.byteLength - 22 - 65536);
+  var eocd = -1;
+  for (var i = buffer.byteLength - 22; i >= minEocd; i--) {
+    if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error('zip 无效：找不到中央目录结束标记');
+  var entryCount = view.getUint16(eocd + 10, true);
+  var cdOffset = view.getUint32(eocd + 16, true);
+  var dec = new TextDecoder('utf-8');
+  var entries = [];
+  var p = cdOffset;
+  for (var e = 0; e < entryCount; e++) {
+    if (view.getUint32(p, true) !== 0x02014b50) throw new Error('zip 无效：中央目录损坏');
+    var method = view.getUint16(p + 10, true);
+    var compSize = view.getUint32(p + 20, true);
+    var nameLen = view.getUint16(p + 28, true);
+    var extraLen = view.getUint16(p + 30, true);
+    var commentLen = view.getUint16(p + 32, true);
+    var localOffset = view.getUint32(p + 42, true);
+    var name = dec.decode(u8.subarray(p + 46, p + 46 + nameLen));
+    var lfnLen = view.getUint16(localOffset + 26, true);
+    var lExtraLen = view.getUint16(localOffset + 28, true);
+    entries.push({ name: name, method: method, compSize: compSize, dataStart: localOffset + 30 + lfnLen + lExtraLen });
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return entries;
+}
+
+// deflate(方法8) 解压：用浏览器原生 DecompressionStream；不支持时给出明确提示
+async function inflateRaw(data) {
+  if (typeof DecompressionStream === 'undefined') {
+    throw new Error('当前环境不支持解压 deflate，请用「仅存储」方式压缩 zip（或换用 Chrome 内核浏览器）');
+  }
+  var ds = new DecompressionStream('deflate-raw');
+  var stream = new Blob([data]).stream().pipeThrough(ds);
+  var buf = await new Response(stream).arrayBuffer();
+  return new Uint8Array(buf);
+}
+
+// 解压 zip 文件 → [{path, dir, bytes}]（保留原内部路径）
+async function unzipToEntries(file) {
+  var buffer = await readFileAsArrayBuffer(file);
+  var u8 = new Uint8Array(buffer);
+  var entries = parseZipEntries(buffer);
+  var out = [];
+  var skipped = 0;
+  for (var i = 0; i < entries.length; i++) {
+    var en = entries[i];
+    var isDir = /\/$/.test(en.name);
+    if (isDir) {
+      out.push({ path: en.name, dir: true, bytes: null });
+      continue;
+    }
+    var raw = u8.subarray(en.dataStart, en.dataStart + en.compSize);
+    var data;
+    if (en.method === 0) {
+      data = raw;
+    } else if (en.method === 8) {
+      data = await inflateRaw(raw);
+    } else {
+      sandbox.log('⏭️ 跳过不支持压缩方式(' + en.method + ')的条目: ' + en.name);
+      skipped++;
+      continue;
+    }
+    out.push({ path: en.name, dir: false, bytes: data });
+  }
+  if (out.length === 0) throw new Error('zip 中没有可用的文件条目' + (skipped > 0 ? '（' + skipped + ' 个条目不支持）' : ''));
+  return out;
+}
+
+function normalizeZipPath(p) {
+  return ('' + p).replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '');
+}
+
+// 规范化条目路径：把 zip 内的路径映射到手环路径（保留文件夹层级）
+function splitZipPath(path) {
+  var parts = normalizeZipPath(path).split('/').filter(function (s) { return s.length > 0; });
+  return parts;
+}
+
+// 在手环上按路径逐级创建文件夹，返回最终文件夹 ID（全部已存在则直接返回）
+async function ensureFolderPath(parts, rootFolderId) {
+  var cur = rootFolderId || 'bt_root';
+  if (!parts || parts.length === 0) return cur;
+  for (var i = 0; i < parts.length; i++) {
+    var name = parts[i];
+    // 先查文件树里是否已存在同名子文件夹（避免重复创建）
+    var existing = findChildFolderId(state.fileTree, cur, name);
+    if (existing) {
+      cur = existing;
+      continue;
+    }
+    var id = await createFolderRaw(name, cur);
+    if (!id) {
+      sandbox.log('❌ 创建文件夹失败: ' + name + '（在 ' + cur + ' 下）');
+      throw new Error('创建文件夹失败: ' + name);
+    }
+    cur = id;
+    await new Promise(function (r) { setTimeout(r, 120); }); // 轻量防抖，避免连发过快
+  }
+  return cur;
+}
+
+// 在文件树中查找指定父文件夹下的同名子文件夹 ID
+function findChildFolderId(nodes, parentId, name) {
+  if (!nodes) return null;
+  for (var i = 0; i < nodes.length; i++) {
+    var n = nodes[i];
+    if (n.id === parentId && n.children) {
+      for (var j = 0; j < n.children.length; j++) {
+        var c = n.children[j];
+        if (c.type === 'folder' && c.name === name) return c.id;
+      }
+      return null;
+    }
+    if (n.children) {
+      var found = findChildFolderId(n.children, parentId, name);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+// zip 内条目文本读取（兼容中文、UTF-8 无 BOM）
+function bytesToText(bytes) {
+  if (typeof TextDecoder !== 'undefined') {
+    return new TextDecoder('utf-8').decode(bytes);
+  }
+  var bin = '';
+  for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  try { return decodeURIComponent(escape(bin)); } catch (e) { return bin; }
+}
+
+/**
+ * 导入一个 zip 考点包：解压 → 按内部路径在手环建目录 → 逐文件上传（txt/json 均支持）
+ */
+async function importZipPackage(file, targetFolder) {
+  if (state.transferring) throw new Error('正在传输中');
+  sandbox.log('正在解析 zip 考点包: ' + (file.name || '未知') + ' (' + (file.size || 0) + ' 字节)...');
+  var entries = await unzipToEntries(file);
+
+  // 过滤出可上传文件（txt/json），其它类型（png 等）提示跳过
+  var files = [];
+  var skippedOther = 0;
+  for (var i = 0; i < entries.length; i++) {
+    var en = entries[i];
+    if (en.dir) continue;
+    var n = normalizeZipPath(en.path);
+    if (!/\.(txt|json)$/i.test(n)) { skippedOther++; continue; }
+    files.push({ path: en.path, bytes: en.bytes });
+  }
+  if (files.length === 0) {
+    throw new Error('zip 中没有 .txt / .json 考点文件' + (skippedOther > 0 ? '（另有 ' + skippedOther + ' 个其它类型文件已跳过）' : ''));
+  }
+  if (skippedOther > 0) {
+    sandbox.log('⏭️ 已跳过 ' + skippedOther + ' 个非 txt/json 文件（如公式图，需单独导入手环 formulas 目录）');
+  }
+
+  sandbox.log('zip 解压完成: ' + files.length + ' 个 txt/json 文件，按原路径上传至「' + (state.targetFolderName || '主页') + '」');
+
+  var okCount = 0;
+  for (var i = 0; i < files.length; i++) {
+    var item = files[i];
+    var parts = splitZipPath(item.path);
+    var fileName = parts.pop();
+    try {
+      var dest = await ensureFolderPath(parts, targetFolder);
+      var text = bytesToText(item.bytes);
+      // 复用单文件的预处理（TXT 压缩 / JSON 校验）
+      var prepared = await prepareTransferContent(fileName, text);
+      if (!prepared) { sandbox.log('  ❌ 跳过: ' + item.path); continue; }
+      sandbox.log('上传 (' + (i + 1) + '/' + files.length + '): ' + item.path);
+      await transferFile(prepared.fileName, prepared.text, dest);
+      okCount++;
+    } catch (error) {
+      sandbox.log('  ❌ ' + item.path + ' 上传失败: ' + errMsg(error));
+    }
+  }
+  return okCount;
 }
 
 // ==================== 文件树同步 ====================
@@ -1323,6 +1558,12 @@ function showMainGui() {
       { type: 'label', text: '批量导入（同一批文件会放进一个新文件夹）：' },
       { type: 'file', id: 'batchFiles', label: '多选文件批量导入', accept: '.txt,.json', multiple: true },
       { type: 'file', id: 'dirFiles', label: '整目录导入（部分手机适用）', accept: '.txt,.json', multiple: true, directory: true },
+      { type: 'label', text: 'zip 考点包（解压后按原路径+文件夹上传）：' },
+      { type: 'file', id: 'zipInput', label: '导入 zip 考点包', accept: '.zip' },
+      { type: 'label', text: 'zip 考点包（解压后按原路径+文件夹上传）：' },
+      { type: 'file', id: 'zipInput', label: '导入 zip 考点包', accept: '.zip' },
+      { type: 'label', text: 'zip 考点包（解压后按原路径+文件夹上传）：' },
+      { type: 'file', id: 'zipInput', label: '导入 zip 考点包', accept: '.zip' },
       { type: 'button', id: 'btnAddToQueue', text: '单选手机适用：逐个加入批量队列' },
       { type: 'input', id: 'batchFolderName', placeholder: '手环新文件夹名（留空=传到当前位置）', value: '' },
 
@@ -1565,6 +1806,44 @@ function showMainGui() {
       await doBatchImport();
     } else {
       sandbox.log('[提示] 目录选择未得到文件，请改用多选或队列方式');
+    }
+  });
+
+  // zip 考点包：选择后自动解压并按原路径传输
+  mainGui.on('file:change', 'zipInput', async function (file) {
+    if (!file) return;
+    if (state.transferring) {
+      sandbox.log('正在传输中，请等待...');
+      return;
+    }
+    refreshTargetFolderFromGui();
+    try {
+      var ok = await importZipPackage(file, state.targetFolder);
+      if (ok > 0) {
+        sandbox.log('✅ zip 导入完成: 成功 ' + ok + ' 个文件');
+        await requestTree();
+      }
+    } catch (error) {
+      sandbox.log('❌ zip 导入失败: ' + errMsg(error));
+    }
+  });
+
+  // zip 考点包：选择后自动解压并按原路径传输
+  mainGui.on('file:change', 'zipInput', async function (file) {
+    if (!file) return;
+    if (state.transferring) {
+      sandbox.log('正在传输中，请等待...');
+      return;
+    }
+    refreshTargetFolderFromGui();
+    try {
+      var ok = await importZipPackage(file, state.targetFolder);
+      if (ok > 0) {
+        sandbox.log('✅ zip 导入完成: 成功 ' + ok + ' 个文件');
+        await requestTree();
+      }
+    } catch (error) {
+      sandbox.log('❌ zip 导入失败: ' + errMsg(error));
     }
   });
 
