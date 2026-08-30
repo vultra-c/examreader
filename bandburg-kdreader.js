@@ -724,6 +724,20 @@ async function prepareTransfer(file) {
       subjectDesc.push(check.subjects[si].name + '(' + check.subjects[si].count + '条)');
     }
     sandbox.log('✅ ' + rawName + ' JSON 校验通过，共 ' + check.subjects.length + ' 个科目：' + subjectDesc.join('、'));
+  } else {
+    // TXT 传输前压缩：去 \r\n → \n、删除 3+ 连续空行、去首尾空白——
+    // 手环端不显示这些差异，但可显著减小大文件的存储/读取分块数。
+    var original = text.length;
+    text = text
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .replace(/[ \t]+\n/g, '\n')
+      .trim();
+    if (text.length < original) {
+      var ratio = ((1 - text.length / original) * 100).toFixed(1);
+      sandbox.log('🗜 ' + rawName + ' 已压缩空白: ' + original + ' → ' + text.length + ' chars (-' + ratio + '%)');
+    }
   }
   return { fileName: fileName, text: text };
 }

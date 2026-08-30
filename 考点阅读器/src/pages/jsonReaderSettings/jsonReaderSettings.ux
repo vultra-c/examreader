@@ -40,10 +40,10 @@
       <list-item class="item" style="padding: 7px 16px; height: 50px;" type="tip">
         <text class="section-title" static>阅读导航</text>
       </list-item>
-      <list-item class="item" @click="goLastRead" type="item">
+      <list-item class="item" @click="goRestart" type="item">
         <div class="item-content">
-          <text class="itemtext" static>回到上次位置</text>
-          <text class="itemtext2" static>{{lastReadHint}}</text>
+          <text class="itemtext" static>从头开始</text>
+          <text class="itemtext2" static>清空进度回到科目列表</text>
         </div>
         <img static src="/common/images/enter.png" class="arrow" />
       </list-item>
@@ -94,8 +94,7 @@ export default {
     lineHeightValue: 30,
     keepScreenOn: false,
     contentPath: '',
-    contentName: '阅读设置',
-    lastReadHint: '读取中…'
+    contentName: '阅读设置'
   },
   protected: {
     path: ''
@@ -115,7 +114,6 @@ export default {
       this.contentName = name.replace(/\.json$/i, '')
     }
     this.loadAllSettings()
-    this.loadLastReadHint()
   },
 
   onShow() {
@@ -127,7 +125,6 @@ export default {
       return
     }
     this.loadAllSettings()
-    this.loadLastReadHint()
   },
 
   onDestroy() {
@@ -190,33 +187,12 @@ export default {
     })
   },
 
-  /** 回到上次阅读的科目+条目（JSON 知识点进度记忆） */
-  async goLastRead() {
-    const progress = await dataManager.getReadingProgress(this.contentPath)
-    if (!this.$valid) return
-    if (progress && progress.mode === 'json' && progress.subject) {
-      jumpBus.requestJump({
-        type: 'json',
-        subject: progress.subject,
-        index: (typeof progress.idx === 'number') ? progress.idx : -1,
-        path: this.contentPath
-      })
-      router.back()
-    } else {
-      this.lastReadHint = '从头开始阅读'
-    }
-  },
-
-  /** 加载上次阅读提示 */
-  async loadLastReadHint() {
-    const progress = await dataManager.getReadingProgress(this.contentPath)
-    if (!this.$valid) return
-    if (progress && progress.mode === 'json' && progress.subject) {
-      const idx = (typeof progress.idx === 'number' && progress.idx >= 0) ? progress.idx + 1 : 1
-      this.lastReadHint = progress.subject + ' · 第 ' + idx + ' 条'
-    } else {
-      this.lastReadHint = '从头开始'
-    }
+  /** 从头开始阅读：清空进度记录，回到科目列表 */
+  goRestart() {
+    dataManager.saveReadingProgress(this.contentPath, 0)
+    // 发一条 jump 请求触发 jsonReader.onShow 回到 subjects 视图
+    jumpBus.requestJump({ type: 'percent', value: 0, path: this.contentPath })
+    router.back()
   },
 
   goDeleteConfirm() {

@@ -14,9 +14,9 @@
 
     <!-- 文件夹/考点列表（分块渲染） -->
     <list class="list" if="{{visibleItems.length > 0}}" id="subList" onscrollbottom="onReachBottom">
-      <!-- 排序模式提示 -->
-      <list-item if="{{sortMode}}" class="item" style="padding: 7px 16px; height: 72px;" type="section">
-        <text class="section-title" style="lines: 2; width: 100%;" static>排序模式：↑/↓ 排序 · 长按删除 · 返回退出</text>
+      <!-- 排序模式顶部占位（把第一项 item 推出浮层覆盖区） -->
+      <list-item if="{{sortMode}}" style="height: 66px; background-color: transparent;" type="spacer">
+        <text style="font-size: 1px; color: transparent;" static></text>
       </list-item>
       <list-item for="{{visibleItems}}" tid="id" class="item" type="item" @click="onItemClick($item)" @longpress="onLongPress($item)">
         <div class="item-content">
@@ -50,6 +50,11 @@
     <img static src="/common/images/more.png" @click="goSettings" style="position: absolute; left: 258px; top: 6px; width: 72px; height: 72px;" />
     <text style="position: absolute; left: 78px; top: 6px; width: 180px; line-height: 30px; font-weight: bold; font-size: 24px; color: rgba(255,255,255,0.6); text-align: center;">{{nowTime}}</text>
     <text style="position: absolute; left: 78px; top: 36px; width: 180px; line-height: 42px; font-weight: bold; font-size: 32px; color: white; text-align: center; lines: 1; text-overflow: ellipsis;">{{pageName}}</text>
+
+    <!-- 排序模式提示（浮层：贴着顶栏 hd.png 之下，后渲染后绘制自然在 list 之上，不随 list 滚动） -->
+    <div if="{{sortMode}}" style="position: absolute; left: 0px; top: 102px; width: 336px; height: 56px; background-color: rgba(13, 110, 255, 0.22); justify-content: center; align-items: center;">
+      <text style="font-size: 22px; font-weight: bold; color: #7DB8FF; text-align: center;" static>↑/↓ 排序 · 长按删除 · 返回键退出</text>
+    </div>
 
   </div>
 </template>

@@ -18,10 +18,10 @@
       <list-item class="item" style="padding: 7px 16px; height: 50px;" type="tip">
         <text class="section-title" static>阅读导航</text>
       </list-item>
-      <list-item class="item" @click="goLastRead" type="item">
+      <list-item class="item" @click="goRestart" type="item">
         <div class="item-content">
-          <text class="itemtext" static>回到上次位置</text>
-          <text class="itemtext2" static>{{lastReadHint}}</text>
+          <text class="itemtext" static>从头开始阅读</text>
+          <text class="itemtext2" static>清空进度回到第一页</text>
         </div>
         <img static src="/common/images/enter.png" class="arrow" />
       </list-item>
@@ -113,8 +113,7 @@ export default {
     keepScreenOn: false,
     readingMode: 'paginated',
     contentPath: '',
-    contentName: '阅读设置',
-    lastReadHint: '读取中…'
+    contentName: '阅读设置'
   },
   protected: {
     path: ''
@@ -133,7 +132,6 @@ export default {
       this.contentName = name
     }
     this.loadAllSettings()
-    this.loadLastReadHint()
   },
 
   onShow() {
@@ -146,7 +144,6 @@ export default {
     }
     if (!this.$valid) return
     this.loadAllSettings()
-    this.loadLastReadHint()
   },
 
   onDestroy() {
@@ -223,40 +220,13 @@ export default {
     })
   },
 
-  /** 回到上次阅读位置：向阅读页发送跳转请求并返回 */
-  async goLastRead() {
-    const progress = await dataManager.getReadingProgress(this.contentPath)
-    if (!this.$valid) return
-    if (!progress || (typeof progress === 'number' && progress <= 0)) {
-      this.lastReadHint = '从头开始阅读'
-      return
-    }
-    if (progress.mode === 'seam') {
-      // 无缝模式：发 percent 跳转（近似即可）
-      jumpBus.requestJump({ type: 'percent', value: progress._percentHint || 0, path: this.contentPath })
-      this.lastReadHint = '已返回上次滚动位置'
-    } else if (typeof progress === 'number') {
-      jumpBus.requestJump({ type: 'page', value: progress, path: this.contentPath })
-      this.lastReadHint = '第 ' + (progress + 1) + ' 页'
-    } else {
-      this.lastReadHint = '无记录'
-      return
-    }
-    // 邮箱有请求，onShow 会自动 back 回阅读页
+  /** 从头开始阅读：清空进度并回到第 1 页 / 开头 */
+  goRestart() {
+    // 1) 落地 storage 清 0（分页/无缝都被这个值覆盖）
+    dataManager.saveReadingProgress(this.contentPath, 0)
+    // 2) 发跳转请求，reader onShow 消费时报完成
+    jumpBus.requestJump({ type: 'page', value: 0, path: this.contentPath })
     router.back()
-  },
-
-  /** 加载上次阅读提示 */
-  async loadLastReadHint() {
-    const progress = await dataManager.getReadingProgress(this.contentPath)
-    if (!this.$valid) return
-    if (progress && progress.mode === 'seam') {
-      this.lastReadHint = '无缝 · 上次滚动位置'
-    } else if (typeof progress === 'number' && progress > 0) {
-      this.lastReadHint = '读到第 ' + (progress + 1) + ' 页'
-    } else {
-      this.lastReadHint = '从头开始'
-    }
   },
 
   goDeleteConfirm() {

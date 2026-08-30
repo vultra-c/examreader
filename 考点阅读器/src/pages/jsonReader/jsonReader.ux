@@ -38,6 +38,7 @@
     </list>
 
     <!-- ============ 视图3：详情 ============ -->
+    <!-- detail 模式：单击文字区隐藏顶栏 UI（与 TXT 一致），仅 detail 模式启用此手势 -->
     <scroll class="jr-detail-scroll" if="{{loaded && viewMode === 'detail'}}" scroll-y="{{true}}" @click="onDetailClick">
       <div style="position: absolute; width: 336px; flex-direction: column; padding: 0 20px 60px 20px;">
 
@@ -110,12 +111,12 @@
       </div>
     </scroll>
 
-    <!-- 顶部栏 -->
-    <img static src="/common/images/hd.png" style="position: absolute; left: 0px; top: 0px; width: 336px; height: 102px;" />
-    <img static src="/common/images/back.png" @click="goBack" style="position: absolute; left: 6px; top: 6px; width: 72px; height: 72px;" />
-    <img static src="/common/images/more.png" @click="goSettings" style="position: absolute; left: 258px; top: 6px; width: 72px; height: 72px;" />
-    <text static style="position: absolute; left: 78px; top: 6px; width: 180px; line-height: 30px; font-weight: bold; font-size: 24px; color: rgba(255,255,255,0.6); text-align: center;">{{nowTime}}</text>
-    <text static style="position: absolute; left: 78px; top: 36px; width: 180px; line-height: 42px; font-weight: bold; font-size: 32px; color: white; text-align: center; lines: 1; text-overflow: ellipsis;">{{pageTitle}}</text>
+    <!-- 顶部栏（仅 detail 模式受 showSetting 控制；list/subjects 模式恒显） -->
+    <img show="{{showSetting || viewMode !== 'detail'}}" src="/common/images/hd.png" style="position: absolute; left: 0px; top: 0px; width: 336px; height: 102px;" />
+    <img show="{{showSetting || viewMode !== 'detail'}}" src="/common/images/back.png" @click="goBack" style="position: absolute; left: 6px; top: 6px; width: 72px; height: 72px;" />
+    <img show="{{showSetting || viewMode !== 'detail'}}" src="/common/images/more.png" @click="goSettings" style="position: absolute; left: 258px; top: 6px; width: 72px; height: 72px;" />
+    <text show="{{showSetting || viewMode !== 'detail'}}" style="position: absolute; left: 78px; top: 6px; width: 180px; line-height: 30px; font-weight: bold; font-size: 24px; color: rgba(255,255,255,0.6); text-align: center;">{{nowTime}}</text>
+    <text show="{{showSetting || viewMode !== 'detail'}}" style="position: absolute; left: 78px; top: 36px; width: 180px; line-height: 42px; font-weight: bold; font-size: 32px; color: white; text-align: center; lines: 1; text-overflow: ellipsis;">{{pageTitle}}</text>
 
   </div>
 </template>
@@ -172,7 +173,9 @@ export default {
     formulaImgW: FORMULA_BASE_W,
     formulaImgH: FORMULA_BASE_H,
     formulaZoom: 1.0,
-    formulaFilePath: ''
+    formulaFilePath: '',
+    // detail 模式下单击隐藏/显示顶栏 UI（与 TXT 阅读页一致）
+    showSetting: true
   },
   protected: {
     path: ''
@@ -340,36 +343,27 @@ export default {
     // 记录最近阅读（主页最近阅读展示）
     this.saveRecentRead()
 
-    // 搜索定位跳转：直接打开指定 科目 → 条目（经跳转邮箱传递）
+    // 搜索定位跳转：直接打开指定 科目 → 条目（经跳转邮箱传递），优先级最高
     const jreq = jumpBus.peekJump()
     if (jreq && jreq.path === this.path && jreq.type === 'json') {
       jumpBus.consumeJump()
       this.openLocatedEntry(jreq.subject || '', (jreq.index != null && jreq.index !== undefined) ? jreq.index : -1)
-    } else {
-      // 恢复上次阅读位置
-      let restored = false
+    } else if (rows.length === 1) {
+      // 只有 1 个科目：直接进入该科目的条目列表（不再自动 restore 进度，避免跳过科目列表）
+      this.enterSubject(rows[0].name)
+      // 单科目时仍恢复上次条目（条目列表就是入口，等价于打开上次位置，符合「默认回上次」语义）
       const prog = this._savedProgress
-      if (prog && typeof prog === 'object' && prog.mode === 'json' && prog.subject) {
-        const subjName = prog.subject
+      if (prog && typeof prog === 'object' && prog.mode === 'json' && prog.subject === rows[0].name) {
+        const items = this._entryItems || []
         const idx = (typeof prog.idx === 'number') ? prog.idx : -1
-        // 校验科目仍存在
-        if (this._parsedData && Array.isArray(this._parsedData[subjName])) {
-          this.enterSubject(subjName)
-          const items = this._entryItems || []
-          if (idx >= 0 && idx < items.length) {
-            this.openDetail(items[idx])
-          }
-          restored = true
+        if (idx >= 0 && idx < items.length) {
+          this.openDetail(items[idx])
         }
       }
-      if (!restored) {
-        if (rows.length === 1) {
-          this.enterSubject(rows[0].name)
-        } else {
-          this.viewMode = 'subjects'
-          this.pageTitle = this.pageTitle + ' · 科目'
-        }
-      }
+    } else {
+      // 多科目：进科目列表（不自动恢复某条目，返回时才返回科目列表——符合「点击返回返回文件夹」预期）
+      this.viewMode = 'subjects'
+      this.pageTitle = this.pageTitle + ' · 科目'
     }
     this.loaded = true
 
@@ -419,7 +413,10 @@ export default {
     }
   },
 
-  /** 百分比跳转：全部条目按科目顺序展开为一维进度，跳到对应条目 */
+  /** 百分比跳转：全部条目按科目顺序展开为一维进度，跳到对应条目。
+   * 关键：先把 viewMode 从 detail 切回 list（如当前正处于 detail），
+   * 否则旧条目会先渲染、然后被新条目覆盖——用户看到的是「百分比跳错了」的错觉。
+   */
   applyJsonPercentJump(percent) {
     if (!this._parsedData) return
     if (isNaN(percent)) percent = 0
@@ -429,6 +426,11 @@ export default {
     let total = 0
     for (let i = 0; i < subs.length; i++) total += subs[i].count
     if (total <= 0) return
+    // detail → list：清掉旧条目 detail 视图，防止渲染顺序错乱
+    if (this.viewMode === 'detail') {
+      this.viewMode = 'list'
+      this.showSetting = true
+    }
     let idx = Math.round(percent / 100 * (total - 1))
     for (let i = 0; i < subs.length; i++) {
       if (idx < subs[i].count) {
@@ -617,11 +619,17 @@ export default {
   },
 
   onDetailClick() {
-    // 预留
+    // 与 TXT 阅读页一致：单击切换顶栏 UI 显示/隐藏（仅 detail 视图）
+    this.showSetting = !this.showSetting
   },
 
   goBack() {
+    // detail 模式下：UI 隐藏时先唤出 UI，否则返回上一视图
     if (this.viewMode === 'detail') {
+      if (!this.showSetting) {
+        this.showSetting = true
+        return
+      }
       this.viewMode = 'list'
       this.pageTitle = this.curSubject
       return

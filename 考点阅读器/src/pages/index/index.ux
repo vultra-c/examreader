@@ -26,9 +26,9 @@
         <text class="section-title" static>全部文件</text>
       </list-item>
 
-      <!-- 排序模式提示 -->
-      <list-item if="{{sortMode}}" class="item" style="padding: 7px 16px; height: 72px;" type="section">
-        <text class="section-title" style="lines: 2; width: 100%;" static>排序模式：↑/↓ 调整 · 长按删除 · 返回退出</text>
+      <!-- 排序模式顶部占位（把第一项 item 推出浮层覆盖区 102~158px） -->
+      <list-item if="{{sortMode}}" style="height: 66px; background-color: transparent;" type="spacer">
+        <text style="font-size: 1px; color: transparent;" static></text>
       </list-item>
 
 
@@ -63,6 +63,11 @@
     <text style="position: absolute; left: 78px; top: 6px; width: 180px; line-height: 30px; font-weight: bold; font-size: 24px; color: rgba(255,255,255,0.6); text-align: center;">{{nowTime}}</text>
     <text static style="position: absolute; left: 78px; top: 36px; width: 180px; line-height: 42px; font-weight: bold; font-size: 32px; color: white; text-align: center;">主页</text>
 
+    <!-- 排序模式提示（浮层：贴着顶栏 hd.png 之下，后渲染后绘制自然在 list 之上，不随 list 滚动） -->
+    <div if="{{sortMode}}" style="position: absolute; left: 0px; top: 102px; width: 336px; height: 56px; background-color: rgba(13, 110, 255, 0.22); justify-content: center; align-items: center;">
+      <text style="font-size: 22px; font-weight: bold; color: #7DB8FF; text-align: center;" static>↑/↓ 排序 · 长按删除 · 返回键退出</text>
+    </div>
+
     <!-- 右下角全局搜索图标 -->
     <img if="{{!sortMode}}" static src="/common/images/search.png" @click="goSearch" style="position: absolute; left: 258px; top: 402px; width: 72px; height: 72px;" />
 
@@ -76,6 +81,7 @@ import storage from '@system.storage'
 import dataManager from '../../common/utils/dataManager.js'
 import { getFormattedTimeNow } from '../../common/utils/timeUtil.js'
 import appState from '../../common/utils/appState.js'
+import jumpBus from '../../common/utils/jumpBus.js'
 
 // 分块渲染参数：首屏 20 条，滚动加载更多
 const CHUNK_SIZE = 20
@@ -211,24 +217,59 @@ export default {
         }
       }
     }
-    // 读取进度百分比（仅 txt 文件有页码进度）
-    let subtitle = fmt === 'json' ? '知识点 JSON · 最近阅读' : '最近阅读'
+    // 读取进度（txt / json 共用），存起来给 onRecentClick 跳转用
+    let subtitle = fmt === 'json' ? '知识点 JSON · 继续上次' : '继续上次阅读'
+    let progress = null
     if (fmt !== 'json') {
-      const progress = await dataManager.getReadingProgress(rec.path)
+      progress = await dataManager.getReadingProgress(rec.path)
       if (!this.$valid) return
       if (typeof progress === 'number' && progress > 0) {
         subtitle = '读到第 ' + (progress + 1) + ' 页 · 点击继续'
+      } else if (progress && typeof progress === 'object' && progress.mode === 'seam') {
+        subtitle = '无缝模式 · 继续上次位置'
+      }
+    } else {
+      progress = await dataManager.getReadingProgress(rec.path)
+      if (!this.$valid) return
+      if (progress && typeof progress === 'object' && progress.mode === 'json') {
+        const subj = progress.subject || ''
+        const idx = (typeof progress.idx === 'number') ? progress.idx : -1
+        if (subj && idx >= 0) {
+          subtitle = subj + ' · 第 ' + (idx + 1) + ' 条 · 点击继续'
+        }
       }
     }
-    this.recentItem = { path: rec.path, name: name || '上次阅读', subtitle: subtitle, fmt: fmt }
+    this.recentItem = { path: rec.path, name: name || '上次阅读', subtitle: subtitle, fmt: fmt, progress: progress }
   },
 
   onRecentClick() {
     if (!this.recentItem) return
-    if (this.recentItem.fmt === 'json') {
-      router.push({ uri: '/pages/jsonReader', params: { path: this.recentItem.path } })
+    const path = this.recentItem.path
+    const fmt = this.recentItem.fmt
+    const progress = this.recentItem.progress
+    // 先把跳转请求写入邮箱（reader/jsonReader.onShow 或 pagesLoaded 后消费），再跳转
+    if (fmt === 'json') {
+      if (progress && typeof progress === 'object' && progress.mode === 'json') {
+        const idx = (typeof progress.idx === 'number') ? progress.idx : -1
+        if (progress.subject && idx >= 0) {
+          jumpBus.requestJump({
+            type: 'json',
+            subject: progress.subject,
+            index: idx,
+            path: path
+          })
+        }
+      }
+      router.push({ uri: '/pages/jsonReader', params: { path: path } })
     } else {
-      router.push({ uri: '/pages/reader', params: { path: this.recentItem.path } })
+      // txt: 页码 / 无缝字符偏移（用 percent 即可近似；页码精确）
+      if (typeof progress === 'number' && progress >= 0) {
+        jumpBus.requestJump({ type: 'page', value: progress, path: path })
+      } else if (progress && typeof progress === 'object' && progress.mode === 'seam') {
+        const offset = progress.offset || 0
+        jumpBus.requestJump({ type: 'char', value: offset, path: path })
+      }
+      router.push({ uri: '/pages/reader', params: { path: path } })
     }
   },
 
