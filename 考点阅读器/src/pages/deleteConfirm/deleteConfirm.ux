@@ -24,6 +24,7 @@ import app from '@system.app'
 import dataManager from '../../common/utils/dataManager.js'
 import { getNowTime } from '../../common/utils/timeUtil.js'
 import appState from '../../common/utils/appState.js'
+import jumpBus from '../../common/utils/jumpBus.js'
 
 export default {
   private: {
@@ -106,7 +107,7 @@ export default {
       dataManager.invalidateCache()
       appState.needRefreshList = true
       prompt.showToast({ message: '删除成功', duration: 1000 })
-      appState.refreshReader = true
+      jumpBus.requestRefresh()
       router.back()
     }
   },

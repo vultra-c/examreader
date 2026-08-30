@@ -83,7 +83,7 @@ import storage from '@system.storage'
 import brightness from '@system.brightness'
 import dataManager from '../../common/utils/dataManager.js'
 import { getFormattedTimeNow } from '../../common/utils/timeUtil.js'
-import appState from '../../common/utils/appState.js'
+import jumpBus from '../../common/utils/jumpBus.js'
 
 export default {
   private: {
@@ -123,9 +123,7 @@ export default {
     seamPrevLineHeight: 0
   },
   protected: {
-    path: '',
-    targetPage: -1,
-    targetChar: -1
+    path: ''
   },
 
   onInit() {
@@ -152,30 +150,11 @@ export default {
     await this.loadContent()
     if (!this.$valid) return
 
-    // 搜索结果跳转：按字符位置定位（分页→页码；无缝→滚动位置）
-    if (this.targetChar != null && this.targetChar !== undefined && this.targetChar >= 0) {
-      const chars = this.targetChar
-      this.targetChar = -1
-      if (this.readingMode === 'seamless') {
-        this.jumpSeamToChar(chars)
-      } else {
-        const page = await dataManager.findPageByCharPosition(this.path, chars, this.fontSize)
-        if (!this.$valid) return
-        if (page >= 0 && page < this.totalPages) {
-          this.currentPage = page
-        }
-        this.updatePageContent()
-      }
-      this.saveProgress()
-      return
-    }
-
-    // 搜索结果跳转：直接跳到指定页码
-    if (this.targetPage != null && this.targetPage >= 0 && this.targetPage < this.totalPages) {
-      this.currentPage = this.targetPage
-      this.targetPage = -1
-      this.updatePageContent()
-      this.saveProgress()
+    // 跨页跳转请求（搜索 char / 页码 page / 百分比），经 globalThis 邮箱传递
+    const initReq = jumpBus.peekJump()
+    if (initReq && initReq.path === this.path && initReq.type !== 'json') {
+      jumpBus.consumeJump()
+      this.applyJumpRequest()
       return
     }
 
@@ -185,8 +164,7 @@ export default {
   async onShow() {
     if (!this.$valid) return
     // 删除内容后自动返回上级
-    if (appState.refreshReader) {
-      appState.refreshReader = false
+    if (jumpBus.consumeRefresh()) {
       router.back()
       return
     }
@@ -229,8 +207,8 @@ export default {
         this.saveProgress()
       }
     }
-    // 处理跳页请求（pageJump / percentJump）
-    this.applyJumpToPage()
+    // 处理跳转请求（pageJump / percentJump / 搜索定位）
+    this.applyJumpRequest()
   },
 
   onDestroy() {
@@ -282,9 +260,6 @@ export default {
     this.fontSize = fontSize
     this.lineHeight = lineHeight
     this.modesLoaded = true
-    // 缓存到 appState，避免其它页面重复读取
-    appState.fontSize = fontSize
-    appState.lineHeight = lineHeight
 
     // 阅读模式检测变化（首次加载不触发 modeChanged，避免二次重载）
     const newMode = readingModeStr === 'seamless' ? 'seamless' : 'paginated'
@@ -293,7 +268,6 @@ export default {
         this.modeChanged = true
       }
       this.readingMode = newMode
-      appState.readingMode = newMode
     }
 
     const keepOn = keepOnStr === 'true'
@@ -341,8 +315,9 @@ export default {
   },
 
   /**
-   * 无缝模式按字符偏移跳转：page1 从目标前 200 字开始，
-   * 段内滚动位置按行高估算（同弦电子书 estimateScrollTopByOffset），
+   * 无缝模式按字符偏移跳转：对齐到目标所在行的行首作为段起点，
+   * 段内滚动置 0，目标行从视口顶部开始显示 —— 精确定位（旧实现按
+   * 每行字符数估算滚动像素，随排版折行误差可达整页）。
    * 立即同步滚动标量，保证随后的进度保存拿到一致位置。
    */
   jumpSeamToChar(chars) {
@@ -350,43 +325,80 @@ export default {
     if (isNaN(target)) target = 0
     if (target < 0) target = 0
     if (target > this.seamAllSize) target = this.seamAllSize
-    this.seamFileOffset = Math.max(0, target - 200)
-    this.seamSavedScrollOffset = this.estimateSeamScrollTopByOffset(target - this.seamFileOffset)
-    this.seamScrollTop = this.seamSavedScrollOffset
+    let offset = target
+    if (this._fullContent && offset > 0) {
+      const nl = this._fullContent.lastIndexOf('\n', offset - 1)
+      offset = nl >= 0 ? nl + 1 : 0
+    }
+    this.seamFileOffset = offset
+    this.seamSavedScrollOffset = 0
+    this.seamScrollTop = 0
     this.loadSeamInitial()
   },
 
-  applyJumpToPage() {
-    // 无缝模式：百分比跳转 → 字符偏移 → 定位段
-    if (appState.jumpToPercent != null && appState.jumpToPercent !== undefined) {
-      const percent = parseInt(appState.jumpToPercent)
-      appState.jumpToPercent = null
+  /**
+   * 消费跳转邮箱请求（仅处理与本页 path 匹配的请求）：
+   * - char：搜索定位（分页→页码 / 无缝→滚动位置）
+   * - percent：百分比（无缝→字符偏移 / 分页→页码）
+   * - page：页码直跳
+   */
+  applyJumpRequest() {
+    const req = jumpBus.peekJump()
+    if (!req || req.path !== this.path) return
+    jumpBus.consumeJump()
+
+    if (req.type === 'char') {
+      let chars = parseInt(req.value)
+      if (isNaN(chars) || chars < 0) chars = 0
+      if (this.readingMode === 'seamless') {
+        this.jumpSeamToChar(chars)
+        this.saveProgress()
+      } else {
+        dataManager.findPageByCharPosition(this.path, chars, this.fontSize).then((page) => {
+          if (!this.$valid) return
+          if (page >= 0 && page < this.totalPages) {
+            this.currentPage = page
+          }
+          this.updatePageContent()
+          this.saveProgress()
+        })
+      }
+      return
+    }
+
+    if (req.type === 'percent') {
+      let percent = parseInt(req.value)
+      if (isNaN(percent)) return
+      if (percent < 0) percent = 0
+      if (percent > 100) percent = 100
       if (this.readingMode === 'seamless' && this.pagesLoaded) {
-        if (percent < 0) percent = 0
-        if (percent > 100) percent = 100
         const targetChars = Math.round(percent / 100 * Math.max(1, this.seamAllSize))
         this.jumpSeamToChar(targetChars)
         this.saveProgress()
         prompt.showToast({ message: '已跳转到 ' + percent + '%', duration: 1000 })
-        return
+      } else if (this.pagesLoaded && this.totalPages > 0) {
+        let targetPage = this.totalPages > 1 ? Math.floor(percent / 100 * (this.totalPages - 1)) : 0
+        if (targetPage >= this.totalPages) targetPage = this.totalPages - 1
+        if (targetPage < 0) targetPage = 0
+        this.currentPage = targetPage
+        this.updatePageContent()
+        this.saveProgress()
+        prompt.showToast({ message: '已跳转到第 ' + (targetPage + 1) + ' 页', duration: 1000 })
       }
+      return
     }
 
-    // 分页模式：页码跳转
-    if (appState.jumpToPage == null || appState.jumpToPage === undefined) return
-    const target = parseInt(appState.jumpToPage)
-    if (this.pagesLoaded && target >= 0 && target < this.totalPages) {
-      this.currentPage = target
-      appState.jumpToPage = null
-      this.pendingJump = null
-      this.updatePageContent()
-      this.saveProgress()
-      prompt.showToast({ message: '已跳转到第 ' + (target + 1) + ' 页', duration: 1000 })
-    } else if (!this.pagesLoaded) {
-      this.pendingJump = target
-      appState.jumpToPage = null
-    } else {
-      appState.jumpToPage = null
+    if (req.type === 'page') {
+      const target = parseInt(req.value)
+      if (this.pagesLoaded && target >= 0 && target < this.totalPages) {
+        this.currentPage = target
+        this.pendingJump = null
+        this.updatePageContent()
+        this.saveProgress()
+        prompt.showToast({ message: '已跳转到第 ' + (target + 1) + ' 页', duration: 1000 })
+      } else if (!this.pagesLoaded) {
+        this.pendingJump = target
+      }
     }
   },
 
@@ -436,7 +448,6 @@ export default {
       this._pages = []
       this.currentPageContent = ''
       this.totalPages = 1
-      appState.totalPages = 1
       return
     }
 
@@ -456,8 +467,6 @@ export default {
 
     this._pages = pages
     this.totalPages = pages.length
-    // 同步总页数到 appState，供 pageJump / percentJump 复用
-    appState.totalPages = this.totalPages
 
     const name = dataManager.getUnifiedNodeName(this.path)
     if (name) {
@@ -484,7 +493,6 @@ export default {
     if (this.pendingJump != null) {
       const target = this.pendingJump
       this.pendingJump = null
-      appState.jumpToPage = null
       if (target >= 0 && target < this.totalPages) {
         this.currentPage = target
       }
@@ -809,9 +817,6 @@ export default {
   },
 
   goSettings() {
-    appState.readerPath = this.path
-    appState.readerPage = this.currentPage
-    appState.contentName = this.contentName
     router.push({
       uri: '/pages/readerSettings',
       params: { path: this.path }

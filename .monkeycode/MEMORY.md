@@ -31,6 +31,14 @@ Entries discovered by the Agent during task execution should follow this format:
 
 ## Entries
 
+[User Instruction Summary]
+- Date: 2026-08-29
+- Context: 完成考点阅读器搜索/跳转优化任务后用户补充的构建工作流
+- Instructions:
+  - 本仓库不需要本地构建手环 rpk：push 到 main 后 GitHub Action 自动构建
+  - 用户临时提供 GitHub token 用于 `gh run list`/`gh run view` 查看 CI 日志；token 绝不写入任何仓库文件或 git 配置，只在命令环境变量中使用
+  - CI 失败则修复后重新推送触发构建；CI 成功则不需要任何后续处理
+
 [Project Knowledge Summary]
 - Date: 2026-08-27
 - Context: Discovered by Agent while splitting the monorepo into three repositories per user instruction

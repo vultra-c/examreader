@@ -54,6 +54,7 @@ import router from '@system.router'
 import prompt from '@system.prompt'
 import dataManager from '../../common/utils/dataManager.js'
 import { getNowTime } from '../../common/utils/timeUtil.js'
+import jumpBus from '../../common/utils/jumpBus.js'
 
 // 结果分块渲染参数：首屏 24 行，滚动追加
 const CHUNK_SIZE = 24
@@ -257,25 +258,19 @@ export default {
       return
     }
     if (row.fmt === 'json' || match.position === -1) {
-      // JSON 知识点：定位到具体 科目 → 条目
-      router.push({
-        uri: '/pages/jsonReader',
-        params: {
-          path: row.path,
-          jumpSubject: match.subject || '',
-          jumpIndex: (match.entryIdx != null && match.entryIdx !== undefined) ? match.entryIdx : -1
-        }
+      // JSON 知识点：定位到具体 科目 → 条目（经跳转邮箱传递，路由只带 path）
+      jumpBus.requestJump({
+        type: 'json',
+        subject: match.subject || '',
+        index: (match.entryIdx != null && match.entryIdx !== undefined) ? match.entryIdx : -1,
+        path: row.path
       })
+      router.push({ uri: '/pages/jsonReader', params: { path: row.path } })
       return
     }
     // TXT：按字符位置跳转，阅读器按当前模式换算（分页→页码 / 无缝→滚动位置）
-    router.push({
-      uri: '/pages/reader',
-      params: {
-        path: row.path,
-        targetChar: match.position
-      }
-    })
+    jumpBus.requestJump({ type: 'char', value: match.position, path: row.path })
+    router.push({ uri: '/pages/reader', params: { path: row.path } })
   },
 
   goBack() {

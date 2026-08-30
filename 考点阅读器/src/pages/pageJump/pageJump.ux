@@ -42,8 +42,10 @@
 <script>
 import router from '@system.router'
 import prompt from '@system.prompt'
+import storage from '@system.storage'
+import dataManager from '../../common/utils/dataManager.js'
 import { getNowTime } from '../../common/utils/timeUtil.js'
-import appState from '../../common/utils/appState.js'
+import jumpBus from '../../common/utils/jumpBus.js'
 
 export default {
   private: {
@@ -65,12 +67,32 @@ export default {
       }
     }, 60000)
     this.contentPath = this.path
-    // 从 appState 读取总页数（由 reader.ux 在 onShow 时存入），不再调用 getReaderPages
-    this.totalPages = (appState.totalPages && appState.totalPages > 0) ? appState.totalPages : 1
-    // 默认显示当前页码
-    if (appState.readerPage != null && appState.readerPage !== undefined) {
-      this.inputPage = (appState.readerPage + 1).toString()
-    }
+    // 总页数/当前页自行计算：跨页共享的 appState 在真机上被逐页内联失效
+    storage.get({
+      key: 'KD_FONT_SIZE',
+      success: (data) => {
+        if (!this.$valid) return
+        const fs = data ? parseInt(data) : 26
+        this.loadPageInfo(isNaN(fs) ? 26 : fs)
+      },
+      fail: () => {
+        if (!this.$valid) return
+        this.loadPageInfo(26)
+      }
+    })
+  },
+
+  loadPageInfo(fontSize) {
+    dataManager.getReaderPagesUnified(this.path, fontSize).then((pages) => {
+      if (!this.$valid) return
+      this.totalPages = (pages && pages.length > 0) ? pages.length : 1
+    })
+    dataManager.getReadingProgress(this.path).then((progress) => {
+      if (!this.$valid) return
+      if (typeof progress === 'number' && progress >= 0) {
+        this.inputPage = (progress + 1).toString()
+      }
+    })
   },
 
   onDestroy() {
@@ -92,9 +114,8 @@ export default {
         prompt.showToast({ message: '页数不存在，无法跳转', duration: 2000 })
         return
       }
-      // 设置跳转目标页（转为0索引）
-      appState.jumpToPage = targetPage - 1
-      appState.needBackToReader = true
+      // 写入跳转邮箱（reader.onShow 消费），转为0索引
+      jumpBus.requestJump({ type: 'page', value: targetPage - 1, path: this.path })
       router.back()
       return
     }

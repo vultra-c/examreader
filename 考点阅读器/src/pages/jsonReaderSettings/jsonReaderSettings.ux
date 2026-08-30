@@ -76,7 +76,7 @@ import storage from '@system.storage'
 import brightness from '@system.brightness'
 import dataManager from '../../common/utils/dataManager.js'
 import { getNowTime } from '../../common/utils/timeUtil.js'
-import appState from '../../common/utils/appState.js'
+import jumpBus from '../../common/utils/jumpBus.js'
 
 // 与 TXT 阅读设置共用同一组存储键：两个阅读器的排版设置互通
 export default {
@@ -111,9 +111,9 @@ export default {
 
   onShow() {
     if (!this.$valid) return
-    // 百分比跳转确认后自动返回到阅读页（与 TXT 阅读设置同一回跳链路）
-    if (appState.needBackToReader) {
-      appState.needBackToReader = false
+    // 百分比跳转确认后邮箱里有待消费请求，自动回退到阅读页由 jsonReader.onShow 消费
+    const req = jumpBus.peekJump()
+    if (req && req.path === this.contentPath) {
       router.back()
       return
     }

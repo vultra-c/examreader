@@ -936,9 +936,40 @@ function _streamSegments(id, chunkCount, linesPerSegment) {
   })
 }
 
-// 流式按字符位置定位页码（与 findPageFromContent 同一分页口径）：
-// 逐块读取并累计全局字符偏移，越过目标位置即提前结束，
-// 大文件跳转不把整本书读进内存。
+// 按字符位置定位页码的精确口径：
+// 翻页判定与 splitContentIntoPages 完全一致（每 subCount 个显示行翻页）；
+// 偏移推进与原文逐字节一致：每个原始行推进 L+1（L 个字符 + 换行符），
+// 折行只是显示层切分，不额外虚构换行 —— 旧实现按折行子行各 +1，
+// 统计偏移随文本长度虚增，长文跳转误差可达数页。
+// 目标字符落在某原始行内即返回该行所在页（floor(显示行号 / maxLines)）。
+function _findPageInContent(content, charPosition, charsPerLine, maxLines) {
+  let lineCount = 0
+  let currentPage = 0
+  let globalCharPos = 0 // 当前原始行在原文中的精确起始偏移
+  if (!content) return 0
+  const lines = content.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const L = lines[i].length
+    // 目标落在本原始行内：所在页即当前页
+    if (charPosition >= globalCharPos &&
+      (L === 0 ? charPosition === globalCharPos : charPosition < globalCharPos + L)) {
+      return currentPage
+    }
+    const subCount = L === 0 ? 1 : Math.ceil(L / charsPerLine)
+    for (let j = 0; j < subCount; j++) {
+      if (lineCount >= maxLines) {
+        currentPage++
+        lineCount = 0
+      }
+      lineCount++
+    }
+    globalCharPos += L + 1 // L 个字符 + 换行符
+  }
+  return currentPage
+}
+
+// 流式按字符位置定位页码（与 _findPageInContent 同一口径）：
+// 逐块读取并累计全局字符偏移，命中即提前结束，大文件跳转不把整本书读进内存。
 function _streamFindPageByChar(id, chunkCount, charPosition, fontSize) {
   return new Promise((resolve) => {
     const fs = fontSize || DEFAULT_FONT_SIZE
@@ -957,37 +988,23 @@ function _streamFindPageByChar(id, chunkCount, charPosition, fontSize) {
       resolve(page)
     }
 
-    // 喂入一个完整行；返回 false 表示已定位可停止
+    // 喂入一个原始行（口径同 _findPageInContent）；返回 false 表示已定位可停止
     function feedLine(line) {
-      if (line.length === 0) {
+      const L = line.length
+      if (charPosition >= globalCharPos &&
+        (L === 0 ? charPosition === globalCharPos : charPosition < globalCharPos + L)) {
+        finish(currentPage)
+        return false
+      }
+      const subCount = L === 0 ? 1 : Math.ceil(L / charsPerLine)
+      for (let j = 0; j < subCount; j++) {
         if (lineCount >= maxLines) {
-          if (charPosition < globalCharPos) { finish(currentPage); return false }
           currentPage++
           lineCount = 0
         }
-        globalCharPos += 1 // \n
         lineCount++
-        return true
       }
-      let remaining = line
-      while (remaining.length > 0 || line.length === 0) {
-        let sub
-        if (remaining.length > charsPerLine) {
-          sub = remaining.substring(0, charsPerLine)
-          remaining = remaining.substring(charsPerLine)
-        } else {
-          sub = remaining
-          remaining = ''
-        }
-        if (lineCount >= maxLines) {
-          if (charPosition < globalCharPos) { finish(currentPage); return false }
-          currentPage++
-          lineCount = 0
-        }
-        globalCharPos += sub.length + 1 // +1 for \n（与 findPageFromContent 同口径）
-        lineCount++
-        if (remaining.length === 0) break
-      }
+      globalCharPos += L + 1
       return true
     }
 
@@ -2111,55 +2128,9 @@ export default {
       const charsPerLine = Math.max(1, Math.floor(SCREEN_TEXT_WIDTH / fs))
       const maxLines = Math.max(1, Math.floor(SCREEN_TEXT_HEIGHT / (fs + 4)))
 
-      // 逐行分页，跟踪每页首字符偏移，找到包含 charPosition 的页
+      // 精确口径定位（与 _streamFindPageByChar 共用 _findPageInContent）
       function findPageFromContent(content) {
-        if (!content) { resolve(0); return }
-        let lineCount = 0
-        const lines = content.split('\n')
-        let currentPage = 0
-        let globalCharPos = 0  // 跟踪在全文中的字符位置
-
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i]
-          // 空行
-          if (line.length === 0) {
-            if (lineCount >= maxLines) {
-              // 需要翻页：如果关键词在新页起始位置之前，说明在当前页
-              if (charPosition < globalCharPos) {
-                resolve(currentPage)
-                return
-              }
-              currentPage++
-              lineCount = 0
-            }
-            globalCharPos += 1  // \n
-            lineCount++
-            continue
-          }
-          // 超长行折行
-          let remaining = line
-          const subLines = []
-          while (remaining.length > charsPerLine) {
-            subLines.push(remaining.substring(0, charsPerLine))
-            remaining = remaining.substring(charsPerLine)
-          }
-          subLines.push(remaining)
-          for (let j = 0; j < subLines.length; j++) {
-            if (lineCount >= maxLines) {
-              // 需要翻页：如果关键词在新页起始位置之前，说明在当前页
-              if (charPosition < globalCharPos) {
-                resolve(currentPage)
-                return
-              }
-              currentPage++
-              lineCount = 0
-            }
-            globalCharPos += subLines[j].length + 1  // +1 for \n
-            lineCount++
-          }
-        }
-        // 遍历结束，关键词在最后一页
-        resolve(currentPage)
+        resolve(_findPageInContent(content, charPosition, charsPerLine, maxLines))
       }
 
       // 获取全文

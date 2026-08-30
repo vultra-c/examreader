@@ -37,7 +37,7 @@ import router from '@system.router'
 import storage from '@system.storage'
 import dataManager from '../../common/utils/dataManager.js'
 import { getFormattedTimeNow } from '../../common/utils/timeUtil.js'
-import appState from '../../common/utils/appState.js'
+import jumpBus from '../../common/utils/jumpBus.js'
 
 export default {
   private: {
@@ -110,23 +110,34 @@ export default {
     this.loading = false
   },
 
+  storageGet(key) {
+    return new Promise((resolve) => {
+      storage.get({
+        key: key,
+        success: (data) => resolve(data),
+        fail: () => resolve(null)
+      })
+    })
+  },
+
   async onChapterClick(row) {
     // 分页模式：字符偏移 → 页码；无缝模式：字符偏移 → 百分比。
-    // 复用 pageJump / percentJump 同一条回跳链路（needBackToReader）
-    if (appState.readingMode === 'seamless') {
+    // 经跳转邮箱回传（reader.onShow 消费），回退链路靠设置页 peek 自动返回
+    const modeStr = await this.storageGet('KD_READING_MODE')
+    if (!this.$valid) return
+    if (modeStr === 'seamless') {
       let percent = this.totalLength > 0 ? Math.round(row.start / this.totalLength * 100) : 0
       if (percent > 100) percent = 100
-      appState.jumpToPercent = percent
-      appState.needBackToReader = true
+      jumpBus.requestJump({ type: 'percent', value: percent, path: this.contentPath })
       router.back()
       return
     }
 
-    const fontSize = appState.fontSize || 26
+    let fontSize = parseInt(await this.storageGet('KD_FONT_SIZE'))
+    if (isNaN(fontSize) || fontSize <= 0) fontSize = 26
     const page = await dataManager.findPageByCharPosition(this.contentPath, row.start, fontSize)
     if (!this.$valid) return
-    appState.jumpToPage = page
-    appState.needBackToReader = true
+    jumpBus.requestJump({ type: 'page', value: page, path: this.contentPath })
     router.back()
   },
 
