@@ -18,13 +18,6 @@
       <list-item class="item" style="padding: 7px 16px; height: 50px;" type="tip">
         <text class="section-title" static>阅读导航</text>
       </list-item>
-      <list-item class="item" @click="goChapters" if="{{catalogAvailable}}" type="item">
-        <div class="item-content">
-          <text class="itemtext" static>章节目录</text>
-          <text class="itemtext2" static>长文分章加载，点章节直达</text>
-        </div>
-        <img static src="/common/images/enter.png" class="arrow" />
-      </list-item>
       <list-item class="item" @click="goPageJump" if="{{readingMode !== 'seamless'}}" type="item">
         <div class="item-content">
           <text class="itemtext" static>按页数跳转</text>
@@ -112,7 +105,6 @@ export default {
     lineHeightValue: 30,
     keepScreenOn: false,
     readingMode: 'paginated',
-    catalogAvailable: false,
     contentPath: '',
     contentName: '阅读设置'
   },
@@ -145,18 +137,6 @@ export default {
     }
     if (!this.$valid) return
     this.loadAllSettings()
-    // 章节目录仅对蓝牙传输的长文本开放（与电子书分章加载同门槛）
-    this.catalogAvailable = false
-    if (
-      this.contentPath &&
-      this.contentPath.indexOf('bt_') === 0 &&
-      this.contentPath.indexOf('bt_folder_') !== 0
-    ) {
-      dataManager.getReaderPagesUnified(this.contentPath).then((pages) => {
-        if (!this.$valid) return
-        this.catalogAvailable = !!(pages && pages.length > 8)
-      })
-    }
   },
 
   onDestroy() {
@@ -219,8 +199,8 @@ export default {
 
   adjustFontSize(delta) {
     let val = this.fontSizeValue + delta
-    if (val < 20) val = 20
-    if (val > 36) val = 36
+    if (val < 16) val = 16
+    if (val > 48) val = 48
     this.fontSizeValue = val
     storage.set({ key: 'KD_FONT_SIZE', value: val.toString() })
   },
@@ -228,7 +208,7 @@ export default {
   adjustLineHeight(delta) {
     let val = this.lineHeightValue + delta
     if (val < 20) val = 20
-    if (val > 50) val = 50
+    if (val > 64) val = 64
     this.lineHeightValue = val
     storage.set({ key: 'KD_LINE_HEIGHT', value: val.toString() })
   },
@@ -237,13 +217,6 @@ export default {
     this.keepScreenOn = !this.keepScreenOn
     storage.set({ key: 'KD_KEEP_SCREEN_ON', value: this.keepScreenOn.toString() })
     brightness.setKeepScreenOn({ keepScreenOn: this.keepScreenOn })
-  },
-
-  goChapters() {
-    router.push({
-      uri: '/pages/chapterList',
-      params: { path: this.contentPath }
-    })
   },
 
   goPageJump() {

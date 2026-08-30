@@ -243,8 +243,8 @@ export default {
 
   adjustFontSize(delta) {
     let val = this.fontSizeValue + delta
-    if (val < 20) val = 20
-    if (val > 36) val = 36
+    if (val < 16) val = 16
+    if (val > 48) val = 48
     this.fontSizeValue = val
     storage.set({ key: 'KD_FONT_SIZE', value: val.toString() })
   },

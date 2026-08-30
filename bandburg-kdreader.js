@@ -1331,8 +1331,8 @@ function showMainGui() {
     ]
   });
 
-  // 文件选择
-  mainGui.on('file:change', 'fileInput', function (file) {
+  // 导入考点 — 选择文件后自动开始传输（简化流程：选完即传，无需再点导入）
+  mainGui.on('file:change', 'fileInput', async function (file) {
     if (!file) {
       state.selectedFile = null;
       return;
@@ -1341,16 +1341,8 @@ function showMainGui() {
     var fileName = file.name || '未知文件';
     var fileSize = file.size || 0;
     sandbox.log('已选择文件: ' + fileName + ' (' + fileSize + ' 字节)');
-    // 调试：打印 file 对象的可用属性，方便排查读取方式
-    try {
-      var keys = Object.keys(file);
-      sandbox.log('[调试] file 对象属性: ' + keys.join(', '));
-      if (typeof file.text === 'function') {
-        sandbox.log('[调试] file.text() 可用');
-      } else {
-        sandbox.log('[调试] file.text() 不可用，将尝试其他读取方式');
-      }
-    } catch (e) {}
+    sandbox.log('→ 自动开始传输到「' + state.targetFolderName + '」...');
+    await startImport();
   });
 
   // 目标文件夹切换
@@ -1413,8 +1405,16 @@ function showMainGui() {
     }
   });
 
-  // 导入考点 — 将选中的 TXT 文件传输到当前文件夹
+  // 保留手动导入按钮（文件已选时可直接重传）
   mainGui.on('button:click', 'btnImport', async function () {
+    await startImport();
+  });
+
+  /**
+   * 统一导入入口：读取已选文件 → 校验 → 传输到当前文件夹。
+   * 简化后的流程：选完文件自动调用；按钮仅用于重传。
+   */
+  async function startImport() {
     if (!state.selectedFile) {
       sandbox.log('请先选择 TXT 或 JSON 考点文件');
       return;
@@ -1428,19 +1428,13 @@ function showMainGui() {
     try {
       var guiValue = mainGui.getValue('targetFolder');
       if (guiValue !== null && guiValue !== undefined) {
-        sandbox.log('[调试] getValue(targetFolder) = ' + JSON.stringify(guiValue) + ' (类型: ' + typeof guiValue + ')');
         var resolved = resolveFolderFromValue(guiValue);
         if (resolved) {
           state.targetFolder = resolved.id;
           state.targetFolderName = resolved.name;
-          sandbox.log('[调试] 从 getValue 解析文件夹: ' + state.targetFolderName + ' (ID: ' + state.targetFolder + ')');
         }
       }
-    } catch (e) {
-      sandbox.log('[调试] getValue(targetFolder) 失败: ' + errMsg(e));
-    }
-
-    sandbox.log('[调试] 最终传输目标: folder=' + state.targetFolder + ', name=' + state.targetFolderName);
+    } catch (e) {}
 
     try {
       // 使用统一的文件读取函数，自动适配多种 file 对象格式
@@ -1456,7 +1450,7 @@ function showMainGui() {
     } catch (error) {
       sandbox.log('传输失败: ' + errMsg(error));
     }
-  });
+  }
 
   // 批量导入文件选择（多选时 BandBurg 可能返回数组，归一化处理）
   mainGui.on('file:change', 'batchFiles', function (file) {

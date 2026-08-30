@@ -151,6 +151,8 @@ export default {
   async initReader() {
     await this.loadSettingsBatch()
     if (!this.$valid) return
+    // 记录最近阅读（主页顶部展示）
+    this.saveRecentRead()
     // 先读进度：无缝模式需要用起始字符偏移来初始化分段
     this.rawProgress = await dataManager.getReadingProgress(this.path)
     if (!this.$valid) return
@@ -230,6 +232,23 @@ export default {
     this.saveProgress()
   },
 
+  /** 保存最近阅读记录（path/name/fmt），主页「最近阅读」读取 */
+  saveRecentRead() {
+    try {
+      if (!this.path) return
+      const meta = dataManager.isBluetoothJson(this.path) ? { fmt: 'json' } : {}
+      const rec = {
+        path: this.path,
+        name: dataManager.getUnifiedNodeName(this.path) || '',
+        fmt: meta.fmt || '',
+        ts: Date.now()
+      }
+      storage.set({ key: 'KD_RECENT_READ', value: JSON.stringify(rec) })
+    } catch (e) {
+      // 保存最近阅读失败时忽略
+    }
+  },
+
   storageGet(key) {
     return new Promise((resolve) => {
       storage.get({
@@ -259,12 +278,12 @@ export default {
 
     let fontSize = fontSizeStr ? parseInt(fontSizeStr) : 26
     if (isNaN(fontSize)) fontSize = 26
-    if (fontSize < 20) fontSize = 20
-    if (fontSize > 36) fontSize = 36
+    if (fontSize < 16) fontSize = 16
+    if (fontSize > 48) fontSize = 48
 
     let lineHeight = lineHeightStr ? parseInt(lineHeightStr) : Math.round(fontSize * 1.15)
     if (isNaN(lineHeight) || lineHeight < 20) lineHeight = Math.round(fontSize * 1.15)
-    if (lineHeight > 50) lineHeight = 50
+    if (lineHeight > 64) lineHeight = 64
 
     const fontChanged = (this.fontSize !== fontSize)
     const wasLoaded = this.modesLoaded

@@ -240,8 +240,8 @@ export default {
       success: (data) => {
         if (!this.$valid) return
         let fs = data ? parseInt(data) : 26
-        if (isNaN(fs) || fs < 20) fs = 20
-        if (fs > 36) fs = 36
+        if (isNaN(fs) || fs < 16) fs = 16
+        if (fs > 48) fs = 48
         this.fontSize = fs
       },
       fail: () => {
