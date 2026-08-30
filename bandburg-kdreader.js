@@ -1560,10 +1560,6 @@ function showMainGui() {
       { type: 'file', id: 'dirFiles', label: '整目录导入（部分手机适用）', accept: '.txt,.json', multiple: true, directory: true },
       { type: 'label', text: 'zip 考点包（解压后按原路径+文件夹上传）：' },
       { type: 'file', id: 'zipInput', label: '导入 zip 考点包', accept: '.zip' },
-      { type: 'label', text: 'zip 考点包（解压后按原路径+文件夹上传）：' },
-      { type: 'file', id: 'zipInput', label: '导入 zip 考点包', accept: '.zip' },
-      { type: 'label', text: 'zip 考点包（解压后按原路径+文件夹上传）：' },
-      { type: 'file', id: 'zipInput', label: '导入 zip 考点包', accept: '.zip' },
       { type: 'button', id: 'btnAddToQueue', text: '单选手机适用：逐个加入批量队列' },
       { type: 'input', id: 'batchFolderName', placeholder: '手环新文件夹名（留空=传到当前位置）', value: '' },
 
@@ -1806,25 +1802,6 @@ function showMainGui() {
       await doBatchImport();
     } else {
       sandbox.log('[提示] 目录选择未得到文件，请改用多选或队列方式');
-    }
-  });
-
-  // zip 考点包：选择后自动解压并按原路径传输
-  mainGui.on('file:change', 'zipInput', async function (file) {
-    if (!file) return;
-    if (state.transferring) {
-      sandbox.log('正在传输中，请等待...');
-      return;
-    }
-    refreshTargetFolderFromGui();
-    try {
-      var ok = await importZipPackage(file, state.targetFolder);
-      if (ok > 0) {
-        sandbox.log('✅ zip 导入完成: 成功 ' + ok + ' 个文件');
-        await requestTree();
-      }
-    } catch (error) {
-      sandbox.log('❌ zip 导入失败: ' + errMsg(error));
     }
   });
 
