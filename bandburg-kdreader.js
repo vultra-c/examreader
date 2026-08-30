@@ -772,8 +772,9 @@ async function readFileAsArrayBuffer(file) {
       if (c2 && c2.byteLength !== undefined) return c2;
     }
   }
-  // FileReader 兜底（readAsArrayBuffer）
-  if (typeof FileReader !== 'undefined' && typeof Blob !== 'undefined' && (file instanceof Blob || (file && file.size !== undefined))) {
+  // 部分 BandBurg 版本返回的是普通文件描述对象，不是 Blob，不能直接传给 FileReader。
+  // 只有真实 Blob/File 才允许走 FileReader；普通对象必须先通过 fs API 读取。
+  if (typeof FileReader !== 'undefined' && typeof Blob !== 'undefined' && file instanceof Blob) {
     return await new Promise(function (resolve, reject) {
       var reader = new FileReader();
       reader.onload = function () { resolve(reader.result); };
@@ -781,7 +782,7 @@ async function readFileAsArrayBuffer(file) {
       reader.readAsArrayBuffer(file);
     });
   }
-  throw new Error('无法以二进制方式读取文件，无法解析 zip');
+  throw new Error('无法读取 ZIP 二进制内容：当前文件选择器返回的对象不是 Blob，且没有可用的文件路径或 fs 读取接口');
 }
 
 function base64ToArrayBuffer(b64) {
