@@ -93,7 +93,7 @@
           <text class="itemtext2" static>暂无传输记录</text>
         </div>
       </list-item>
-      <list-item class="item" for="{{transferRecords}}" tid="id" type="record">
+      <list-item class="item" for="{{transferRecords}}" tid="id" type="record" @longpress="onRecordLongPress($item)">
         <div class="item-content">
           <text class="itemtext" static>{{$item.name}}</text>
           <text class="itemtext2" static>{{$item.time}}</text>
@@ -322,6 +322,19 @@ export default {
     hours = hours < 10 ? '0' + hours : hours
     minutes = minutes < 10 ? '0' + minutes : minutes
     return month + '-' + day + ' ' + hours + ':' + minutes
+  },
+
+  // 长按传输记录删除对应文件（按 id 而非文件名，天然兼容重名文件）
+  onRecordLongPress(record) {
+    if (!record || !record.id) return
+    router.push({
+      uri: '/pages/deleteConfirm',
+      params: {
+        action: 'deleteContent',
+        path: record.id,
+        name: record.name
+      }
+    })
   },
 
   clearCache() {

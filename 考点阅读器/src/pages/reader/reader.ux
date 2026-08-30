@@ -138,6 +138,13 @@ export default {
         }
       }
     }, 60000)
+    // 跳转邮箱轮询兜底：路由对栈内已有页面的生命周期触发不稳定
+    // （实测搜索点击偶发而不执行跳转），400ms 轮询确保请求必被消费
+    this.jumpPollTimer = setInterval(() => {
+      if (this.$valid && this.pagesLoaded) {
+        this.applyJumpRequest()
+      }
+    }, 400)
     this.initReader()
   },
 
@@ -149,6 +156,9 @@ export default {
     if (!this.$valid) return
     await this.loadContent()
     if (!this.$valid) return
+
+    // 最近阅读打点（蓝牙文件；fire & forget）
+    dataManager.touchRecent(this.path)
 
     // 跨页跳转请求（搜索 char / 页码 page / 百分比），经 globalThis 邮箱传递。
     // applyJumpRequest 是唯一 peek+consume 点（不再在 initReader 预消费）。
@@ -212,6 +222,10 @@ export default {
     if (this.timer) {
       clearInterval(this.timer)
       this.timer = null
+    }
+    if (this.jumpPollTimer) {
+      clearInterval(this.jumpPollTimer)
+      this.jumpPollTimer = null
     }
     this.saveProgress()
   },

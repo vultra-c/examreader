@@ -182,6 +182,13 @@ export default {
         this.nowTime = getFormattedTimeNow(this.timeFormat)
       }
     }, 60000)
+    // 跳转邮箱轮询兜底（同 reader）：路由生命周期不稳定时确保
+    // percent/json 跳转请求最终被消费
+    this.jumpPollTimer = setInterval(() => {
+      if (this.$valid) {
+        this.consumeJumpBus()
+      }
+    }, 400)
     this.loadTimeFormat()
     this.loadDisplaySettings()
     this.loadJson()
@@ -194,8 +201,20 @@ export default {
       return
     }
     // 百分比跳转（jsonReaderSettings → percentJump 回跳链路）
+    this.consumeJumpBus()
+    this.loadDisplaySettings()
+  },
+
+  /**
+   * 消费跳转邮箱里针对本页 path 的请求：
+   * - percent：百分比定位条目（未加载完则排队 _pendingPercent）
+   * - json：搜索定位 科目 → 条目（须在加载完成后）
+   * 返回 true 表示请求已被消费，false 表示无可消费内容。
+   */
+  consumeJumpBus() {
     const req = jumpBus.peekJump()
-    if (req && req.path === this.path && req.type === 'percent') {
+    if (!req || req.path !== this.path) return false
+    if (req.type === 'percent') {
       jumpBus.consumeJump()
       const percent = parseInt(req.value)
       if (!isNaN(percent)) {
@@ -205,8 +224,14 @@ export default {
           this._pendingPercent = percent
         }
       }
+      return true
     }
-    this.loadDisplaySettings()
+    if (req.type === 'json' && this.loaded) {
+      jumpBus.consumeJump()
+      this.openLocatedEntry(req.subject || '', (req.index != null && req.index !== undefined) ? req.index : -1)
+      return true
+    }
+    return false
   },
 
   loadDisplaySettings() {
@@ -265,6 +290,10 @@ export default {
       clearInterval(this.timer)
       this.timer = null
     }
+    if (this.jumpPollTimer) {
+      clearInterval(this.jumpPollTimer)
+      this.jumpPollTimer = null
+    }
   },
 
   loadTimeFormat() {
@@ -317,6 +346,9 @@ export default {
 
     const name = dataManager.getNodeName(this.path) || '知识点'
     this.pageTitle = name.replace(/\.json$/i, '')
+
+    // 最近阅读打点（蓝牙文件；fire & forget）
+    dataManager.touchRecent(this.path)
 
     // 搜索定位跳转：直接打开指定 科目 → 条目（经跳转邮箱传递）
     const jreq = jumpBus.peekJump()

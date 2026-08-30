@@ -13,7 +13,15 @@
     </div>
 
     <!-- 文件夹列表（分块渲染） -->
-    <list class="list" id="homeList" if="{{visibleItems.length > 0}}" onscrollbottom="onReachBottom">
+    <list class="list" id="homeList" if="{{visibleItems.length > 0 || visibleRecent.length > 0}}" onscrollbottom="onReachBottom">
+      <!-- 最近阅读区（上限 5 条，点击直接续读） -->
+      <list-item for="{{visibleRecent}}" tid="id" class="item" type="recent" @click="onRecentClick($item)">
+        <div class="item-content">
+          <text class="itemtext">{{$item.name}}</text>
+          <text class="itemtext2">最近阅读</text>
+        </div>
+        <img static src="/common/images/enter.png" class="arrow" />
+      </list-item>
       <list-item for="{{visibleItems}}" tid="id" class="item" type="folder" @click="onItemClick($item)" @longpress="onLongPress($item)">
         <div class="item-content">
           <text class="itemtext">{{$item.name}}</text>
@@ -60,6 +68,7 @@ export default {
     timeFormat: '24h',
     allItems: [],
     visibleItems: [],
+    visibleRecent: [],
     hasMore: false,
     loading: true,
     isNavigating: false,
@@ -112,6 +121,10 @@ export default {
   async loadData() {
     this.loading = true
     const folders = await dataManager.getTopLevelFolders()
+    if (!this.$valid) return
+
+    // 最近阅读（标签区，最多 5 条）
+    this.visibleRecent = await dataManager.getRecentList(5)
     if (!this.$valid) return
 
     const items = []
@@ -199,6 +212,17 @@ export default {
         name: item.name
       }
     })
+  },
+
+  onRecentClick(item) {
+    if (this.isNavigating) return
+    this.isNavigating = true
+    setTimeout(() => { if (this.$valid) this.isNavigating = false }, 2000)
+    if (item.fmt === 'json') {
+      router.push({ uri: '/pages/jsonReader', params: { path: item.id } })
+    } else {
+      router.push({ uri: '/pages/reader', params: { path: item.id } })
+    }
   },
 
   goSettings() {

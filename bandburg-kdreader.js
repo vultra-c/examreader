@@ -9,8 +9,10 @@
  *     - .json → 知识点阅读器（Snapnotes 结构，保留 .json 后缀，
  *       手环端 interconnfile.js 据此后缀路由；发送前本地校验结构）
  *  4. 批量导入：选择本地文件夹内多个 TXT/JSON 文件，一次传输到手环
- *     （可指定手环端新文件夹名，自动创建后导入）
- *  5. 编辑手环端文件顺序：选中当前文件夹内条目上移/下移，
+ *     （可指定手环端新文件夹名，自动创建后导入）。
+ *     入口三选一：多选 / 直接选择文件夹（部分手机适用）/
+ *     单选逐个加入队列（仅支持单选的手机适用）
+ *  5. 编辑手环端文件顺序：选中当前文件夹内条目上移/下移（含嵌套文件夹），
  *     手环列表按元数据数组顺序展示，即调即变
  *
  * 通信协议：JSON 消息 + tag 路由
@@ -1170,6 +1172,28 @@ function resolveFolderFromValue(value) {
 
 // ==================== 排序/批量 辅助函数 ====================
 
+// 把「直接选择文件夹」的返回值归一化为文件数组：
+// BandBurg 各版本可能返回 文件数组 / {files:[...]} / {children:[...]} / 单文件对象
+function normalizeDirPick(file) {
+  if (!file) return [];
+  if (Array.isArray(file)) return file;
+  if (Array.isArray(file.files)) return file.files;
+  if (Array.isArray(file.children)) return file.children;
+  return [file];
+}
+
+// 从文件的绝对路径推断其父目录名（用于自动填充手环新文件夹名）
+function guessParentFolderName(file) {
+  var p = file && (file.path || file.uri || file.fullPath);
+  if (!p || typeof p !== 'string') return '';
+  var parts = p.replace(/\\/g, '/').split('/');
+  if (parts.length >= 2) {
+    var cand = parts[parts.length - 2];
+    if (cand && cand !== '') return cand;
+  }
+  return '';
+}
+
 // 在文件树中按 ID 查找节点
 function findTreeNode(nodes, id) {
   if (!nodes) return null;
@@ -1290,6 +1314,8 @@ function showMainGui() {
       // 选项三：批量导入本地文件夹内多个文件
       { type: 'label', text: '批量导入（选择本地文件夹内多个文件）：' },
       { type: 'file', id: 'batchFiles', label: '选择文件夹内多个TXT/JSON文件', accept: '.txt,.json', multiple: true },
+      { type: 'file', id: 'dirFiles', label: '直接选择本地文件夹（部分手机适用）', accept: '.txt,.json', multiple: true, directory: true },
+      { type: 'button', id: 'btnAddToQueue', text: '把单选文件加入批量队列（仅支持单选的手机适用）' },
       { type: 'input', id: 'batchFolderName', placeholder: '手环新文件夹名（留空=传入当前文件夹）', value: '' },
       { type: 'button', id: 'btnBatchImport', text: '批量导入选中文件' },
 
@@ -1445,6 +1471,60 @@ function showMainGui() {
     } else {
       sandbox.log('已清空批量选择');
     }
+  });
+
+  // 直接选择文件夹（部分手机适用）：BandBurg 可能返回文件数组 /
+  // 带 files/children 的容器对象，归一化为文件列表；同时尝试从
+  // 文件路径推断文件夹名，自动填到手环新文件夹名。
+  mainGui.on('file:change', 'dirFiles', function (file) {
+    var list = normalizeDirPick(file);
+    // 调试：打印对象键，排查不同 BandBurg 版本返回格式
+    try {
+      if (file && typeof file === 'object' && !Array.isArray(file)) {
+        sandbox.log('[调试] 目录选择对象键: ' + Object.keys(file).join(', '));
+      } else if (Array.isArray(file) && file.length > 0 && file[0]) {
+        sandbox.log('[调试] 目录选择首项键: ' + Object.keys(file[0]).join(', '));
+      }
+    } catch (e) {}
+    if (list.length > 0) {
+      state.batchFiles = list;
+      var names = [];
+      for (var i = 0; i < list.length; i++) names.push(list[i].name || '未知文件');
+      sandbox.log('已从目录选择 ' + list.length + ' 个文件: ' + names.join(', '));
+      // 自动推断父文件夹名（仅当手环新文件夹名留空时）
+      try {
+        var cur = mainGui.getValue('batchFolderName');
+        if (!cur || ('' + cur).trim() === '') {
+          var guessed = guessParentFolderName(list[0]);
+          if (guessed) {
+            mainGui.setValue('batchFolderName', guessed);
+            sandbox.log('已自动填入手环新文件夹名: ' + guessed + '（可在输入框修改/清空）');
+          }
+        }
+      } catch (e) {}
+    } else {
+      sandbox.log('[提示] 目录选择未得到文件，请改用多选或队列方式');
+    }
+  });
+
+  // 单选手机兜底：把「选择TXT/JSON考点文件」里选中的文件逐个加入批量队列
+  mainGui.on('button:click', 'btnAddToQueue', function () {
+    if (!state.selectedFile) {
+      sandbox.log('请先用「选择TXT/JSON考点文件」选择一个文件');
+      return;
+    }
+    var q = state.batchFiles || [];
+    for (var i = 0; i < q.length; i++) {
+      if (q[i].name === state.selectedFile.name && q[i].size === state.selectedFile.size) {
+        sandbox.log('该文件已在队列中，跳过');
+        return;
+      }
+    }
+    q.push(state.selectedFile);
+    state.batchFiles = q;
+    var names = [];
+    for (var j = 0; j < q.length; j++) names.push(q[j].name || '未知文件');
+    sandbox.log('队列现有 ' + q.length + ' 个文件: ' + names.join(', '));
   });
 
   // 排序条目选择

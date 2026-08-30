@@ -52,6 +52,7 @@
 <script>
 import router from '@system.router'
 import prompt from '@system.prompt'
+import storage from '@system.storage'
 import dataManager from '../../common/utils/dataManager.js'
 import { getNowTime } from '../../common/utils/timeUtil.js'
 import jumpBus from '../../common/utils/jumpBus.js'
@@ -72,7 +73,8 @@ export default {
     renderPos: 0,
     hasSearched: false,
     searching: false,
-    scopeName: ''
+    scopeName: '',
+    totalMatches: 0
   },
   protected: {
     scope: 'global',
@@ -81,9 +83,14 @@ export default {
 
   computed: {
     scopeLabel() {
-      if (this.scope === 'single') return '当前考点'
-      if (this.scope === 'folder') return this.scopeName || '当前文件夹'
-      return '全部考点'
+      let base = ''
+      if (this.scope === 'single') base = '当前考点'
+      else if (this.scope === 'folder') base = this.scopeName || '当前文件夹'
+      else base = '全部考点'
+      if (this.hasSearched) {
+        base += this.totalMatches > 0 ? (' · 命中 ' + this.totalMatches + ' 处') : ' · 无结果'
+      }
+      return base
     }
   },
 
@@ -98,6 +105,20 @@ export default {
     if (this.scope === 'folder' && this.searchPath) {
       this.scopeName = dataManager.getNodeName(this.searchPath) || '当前文件夹'
     }
+    // 快速找考点：记忆上次关键词，重新进搜索直接带出结果
+    const self = this
+    storage.get({
+      key: 'KD_SEARCH_LAST',
+      success(data) {
+        if (!self.$valid) return
+        if (data) {
+          self.searchText = data
+          self.updateSearchDisplay()
+          self.doSearch()
+        }
+      },
+      fail() {}
+    })
   },
 
   onDestroy() {
@@ -152,12 +173,16 @@ export default {
   },
 
   // 把 dataManager 的分组结果展平为列表行：
-  // 每个文件一行（统计命中数），其后紧跟该文件的全部命中行，同文件命中归在一起
+  // 每个文件一行（统计命中数与类型徽标），其后紧跟该文件的全部命中行，
+  // 同文件命中归在一起；行首用 → 表示命中行，文件行不加前缀，层级清晰。
   buildRows(groups) {
     const rows = []
+    let totalMatches = 0
     for (let g = 0; g < groups.length; g++) {
       const group = groups[g]
       const matches = group.matches || []
+      totalMatches += matches.length
+      const fmtTag = group.fmt === 'json' ? 'JSON' : (group.type === 'builtin' ? '示例' : 'TXT')
       rows.push({
         id: 'f_' + group.path,
         kind: 'file',
@@ -165,7 +190,7 @@ export default {
         fmt: group.fmt || '',
         type: group.type || '',
         line1: group.name,
-        line2: matches.length > 0 ? (matches.length + ' 处匹配') : '文件名匹配',
+        line2: fmtTag + ' · ' + (matches.length > 0 ? (matches.length + ' 处匹配') : '文件名匹配'),
         match: matches.length > 0 ? matches[0] : null
       })
       for (let i = 0; i < matches.length; i++) {
@@ -177,13 +202,14 @@ export default {
           fmt: group.fmt || '',
           type: group.type || '',
           line1: m.position >= 0
-            ? ('第 ' + (i + 1) + ' 处')
-            : ((m.subject || '') + ' · ' + (m.entryTitle || '')),
+            ? ('→ 第 ' + (i + 1) + ' 处')
+            : ('→ ' + (m.subject || '') + ' · ' + (m.entryTitle || '')),
           line2: m.snippet || '',
           match: m
         })
       }
     }
+    this.totalMatches = totalMatches
     return rows
   },
 
@@ -233,6 +259,9 @@ export default {
       groups = await dataManager.searchContent(keyword)
     }
     if (!this.$valid) return
+
+    // 记忆本次关键词（下次进搜索自动带出）
+    storage.set({ key: 'KD_SEARCH_LAST', value: keyword })
 
     this.searching = false
     this.allRows = this.buildRows(groups || [])
@@ -410,7 +439,7 @@ export default {
   .result-snippet {
     font-size: 20px;
     color: rgba(255, 255, 255, 0.5);
-    lines: 1;
+    lines: 2;
     text-overflow: ellipsis;
     margin-top: 4px;
   }
