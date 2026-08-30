@@ -8,6 +8,10 @@
  *     - .txt  → 普通文本阅读器（传输时去掉后缀，与旧行为一致）
  *     - .json → 知识点阅读器（Snapnotes 结构，保留 .json 后缀，
  *       手环端 interconnfile.js 据此后缀路由；发送前本地校验结构）
+ *  4. 批量导入：选择本地文件夹内多个 TXT/JSON 文件，一次传输到手环
+ *     （可指定手环端新文件夹名，自动创建后导入）
+ *  5. 编辑手环端文件顺序：选中当前文件夹内条目上移/下移，
+ *     手环列表按元数据数组顺序展示，即调即变
  *
  * 通信协议：JSON 消息 + tag 路由
  *   发送: thirdpartyapp_send_message(addr, pkg, JSON.stringify({tag, ...payload}))
@@ -35,6 +39,8 @@ const state = {
   transferring: false,
   pendingResponses: new Map(),
   selectedFile: null,  // file:change 事件返回的文件对象
+  batchFiles: [],      // 批量导入选中的文件列表（单个文件时会归一成数组）
+  orderNodeId: null,   // 排序编辑当前选中的手环条目 ID
   launchMethod: null,  // 探测出的可用启动签名 {id, route}，缓存复用
   appListDumped: false, // 是否已打印过应用列表原始字段（仅一次，避免刷屏）
 };
@@ -682,6 +688,44 @@ function validateKnowledgeJson(text) {
   return { ok: true, subjects: subjects };
 }
 
+/**
+ * 读取并预处理一个待传文件：读文本、识别 TXT/JSON、校验 JSON 结构。
+ * 供单文件导入与批量导入共用。返回 { fileName, text }；校验失败返回 null。
+ */
+async function prepareTransfer(file) {
+  var text = await readFileAsText(file);
+  var rawName = file.name || 'untitled';
+  var isJson = /\.json$/i.test(rawName);
+  // TXT 去掉后缀传输（旧格式）；JSON 必须保留 .json 后缀，手环据此路由到知识点阅读器
+  var fileName = isJson ? rawName : rawName.replace(/\.txt$/i, '');
+  // 如果文件名也是 base64 编码，解码它
+  if (!isJson && isBase64(fileName) && fileName.length >= 8) {
+    var decodedName = decodeBase64ToText(fileName);
+    if (decodedName && decodedName.length > 0) fileName = decodedName;
+  }
+  // 内容嗅探：后缀是 .json 但实际是纯文本（不以 { 开头）时自动按 TXT 传输
+  var jsonLike = /^\s*\{/.test(text);
+  if (isJson && !jsonLike) {
+    sandbox.log('⚠️ ' + rawName + ' 后缀为 .json 但内容为纯文本，已自动按 TXT 文本传输');
+    isJson = false;
+    fileName = rawName.replace(/\.json$/i, '');
+  }
+  if (isJson) {
+    var check = validateKnowledgeJson(text);
+    if (!check.ok) {
+      sandbox.log('❌ ' + rawName + ' JSON 校验未通过：' + check.error);
+      sandbox.log('   参考 samples/knowledge-sample.json 的结构');
+      return null;
+    }
+    var subjectDesc = [];
+    for (var si = 0; si < check.subjects.length; si++) {
+      subjectDesc.push(check.subjects[si].name + '(' + check.subjects[si].count + '条)');
+    }
+    sandbox.log('✅ ' + rawName + ' JSON 校验通过，共 ' + check.subjects.length + ' 个科目：' + subjectDesc.join('、'));
+  }
+  return { fileName: fileName, text: text };
+}
+
 // ==================== 文件树同步 ====================
 
 function registerTreeHandler() {
@@ -695,6 +739,8 @@ function registerTreeHandler() {
       resolveResponse('deleteNode', payload);
     } else if (response === 'nodeRenamed') {
       resolveResponse('renameNode', payload);
+    } else if (response === 'nodeMoved') {
+      resolveResponse('moveNode', payload);
     }
   });
 }
@@ -764,6 +810,41 @@ async function createFolder(name, parentId) {
   } catch (error) {
     cancelPendingResponse('createFolder');
     sandbox.log('创建文件夹失败: ' + errMsg(error));
+  }
+}
+
+// 批量导入专用：只建文件夹并返回 folderId，不刷新文件树（失败返回 null）
+async function createFolderRaw(name, parentId) {
+  try {
+    var promise = waitForResponse('tree', 'createFolder', TREE_TIMEOUT);
+    await sendMessage('tree', { action: 'createFolder', name: name, parentId: parentId || 'bt_root' });
+    var result = await promise;
+    return result && result.success ? result.folderId : null;
+  } catch (error) {
+    cancelPendingResponse('createFolder');
+    sandbox.log('创建文件夹失败: ' + errMsg(error));
+    return null;
+  }
+}
+
+/**
+ * 调整手环端条目顺序（上移/下移一位）
+ * @param {string} nodeId 节点 ID
+ * @param {string} direction 'up' | 'down'
+ * @returns {Promise<boolean>} 是否成功
+ */
+async function moveNode(nodeId, direction) {
+  try {
+    var promise = waitForResponse('tree', 'moveNode', TREE_TIMEOUT);
+    await sendMessage('tree', { action: 'moveNode', nodeId: nodeId, direction: direction });
+    var result = await promise;
+    if (result && result.success) return true;
+    sandbox.log('顺序调整失败: ' + ((result && result.error) || '未知错误'));
+    return false;
+  } catch (error) {
+    cancelPendingResponse('moveNode');
+    sandbox.log('顺序调整失败: ' + errMsg(error));
+    return false;
   }
 }
 
@@ -1087,6 +1168,84 @@ function resolveFolderFromValue(value) {
   return null;
 }
 
+// ==================== 排序/批量 辅助函数 ====================
+
+// 在文件树中按 ID 查找节点
+function findTreeNode(nodes, id) {
+  if (!nodes) return null;
+  for (var i = 0; i < nodes.length; i++) {
+    if (!nodes[i]) continue;
+    if (nodes[i].id === id) return nodes[i];
+    if (nodes[i].children) {
+      var r = findTreeNode(nodes[i].children, id);
+      if (r) return r;
+    }
+  }
+  return null;
+}
+
+// 生成「当前文件夹内条目」选项列表（文件+文件夹，按手环展示顺序）
+function buildChildOptions(tree, parentId) {
+  parentId = parentId || 'bt_root';
+  var list;
+  if (parentId === 'bt_root') {
+    list = tree || [];
+  } else {
+    var node = findTreeNode(tree, parentId);
+    list = (node && node.children) ? node.children : [];
+  }
+  var opts = [];
+  for (var i = 0; i < list.length; i++) {
+    var c = list[i];
+    opts.push({
+      label: (c.type === 'folder' ? '📁 ' : '📄 ') + c.name,
+      value: c.id,
+      selected: c.id === state.orderNodeId
+    });
+  }
+  if (opts.length === 0) opts.push({ label: '（空文件夹）', value: '__empty__' });
+  return opts;
+}
+
+// 从 select:change / getValue 返回解析出条目 ID（容错同 resolveFolderFromValue）
+function resolveOrderNodeId(value) {
+  if (value === null || value === undefined) return null;
+  var opts = buildChildOptions(state.fileTree, state.targetFolder);
+  if (typeof value === 'string' && value.indexOf('bt_') === 0) return value;
+  if (typeof value === 'string') {
+    for (var i = 0; i < opts.length; i++) {
+      if (opts[i].label === value || opts[i].value === value) return opts[i].value;
+    }
+    var idx = parseInt(value);
+    if (!isNaN(idx) && idx >= 0 && idx < opts.length) return opts[idx].value;
+  }
+  if (typeof value === 'number') {
+    var idx2 = Math.floor(value);
+    if (idx2 >= 0 && idx2 < opts.length) return opts[idx2].value;
+  }
+  if (typeof value === 'object') {
+    var objId = value.value || value.id || value.v;
+    if (typeof objId === 'string' && objId.indexOf('bt_') === 0) return objId;
+    var objLabel = value.label || value.text || value.name;
+    if (objLabel) return resolveOrderNodeId(objLabel);
+  }
+  return null;
+}
+
+// 从 GUI 读取当前选中的目标文件夹并同步到 state（btnNewFolder/btnImport/btnBatchImport 共用）
+function refreshTargetFolderFromGui() {
+  try {
+    var guiValue = mainGui.getValue('targetFolder');
+    if (guiValue !== null && guiValue !== undefined) {
+      var resolved = resolveFolderFromValue(guiValue);
+      if (resolved) {
+        state.targetFolder = resolved.id;
+        state.targetFolderName = resolved.name;
+      }
+    }
+  } catch (e) {}
+}
+
 function showMainGui() {
   if (mainGui) {
     mainGui.show();
@@ -1102,6 +1261,8 @@ function showMainGui() {
       break;
     }
   }
+  // 构建「当前文件夹内条目」排序选项
+  var childOptions = buildChildOptions(state.fileTree, state.targetFolder);
 
   mainGui = sandbox.gui({
     title: '考点传输',
@@ -1122,10 +1283,21 @@ function showMainGui() {
       // 选项一：新建文件夹
       { type: 'input', id: 'newFolderName', placeholder: '输入文件夹名称', value: '' },
       { type: 'button', id: 'btnNewFolder', text: '新建文件夹' },
-
       // 选项二：导入考点（TXT 或 JSON）
       { type: 'file', id: 'fileInput', label: '选择TXT/JSON考点文件', accept: '.txt,.json' },
       { type: 'button', id: 'btnImport', text: '导入考点到当前文件夹' },
+
+      // 选项三：批量导入本地文件夹内多个文件
+      { type: 'label', text: '批量导入（选择本地文件夹内多个文件）：' },
+      { type: 'file', id: 'batchFiles', label: '选择文件夹内多个TXT/JSON文件', accept: '.txt,.json', multiple: true },
+      { type: 'input', id: 'batchFolderName', placeholder: '手环新文件夹名（留空=传入当前文件夹）', value: '' },
+      { type: 'button', id: 'btnBatchImport', text: '批量导入选中文件' },
+
+      // 选项四：调整手环端条目顺序
+      { type: 'label', text: '编辑手环文件顺序（对当前文件夹下的条目生效）：' },
+      { type: 'select', id: 'orderItem', label: '当前文件夹内条目', options: childOptions },
+      { type: 'button', id: 'btnMoveUp', text: '上移选中条目' },
+      { type: 'button', id: 'btnMoveDown', text: '下移选中条目' },
 
       // 其他
       { type: 'button', id: 'btnCheckApps', text: '检测手环已装应用' },
@@ -1246,55 +1418,123 @@ function showMainGui() {
 
     try {
       // 使用统一的文件读取函数，自动适配多种 file 对象格式
-      var text = await readFileAsText(state.selectedFile);
-      var rawName = state.selectedFile.name || 'untitled';
-      var isJson = /\.json$/i.test(rawName);
-      // TXT 去掉后缀传输（旧格式）；JSON 必须保留 .json 后缀，手环据此路由到知识点阅读器
-      var fileName = isJson ? rawName : rawName.replace(/\.txt$/i, '');
-      // 如果文件名也是 base64 编码，解码它
-      if (!isJson && isBase64(fileName) && fileName.length >= 8) {
-        sandbox.log('[调试] 文件名疑似 base64: ' + fileName);
-        var decodedName = decodeBase64ToText(fileName);
-        if (decodedName && decodedName.length > 0) {
-          fileName = decodedName;
-          sandbox.log('[调试] 文件名解码为: ' + fileName);
-        }
-      }
+      var prepared = await prepareTransfer(state.selectedFile);
+      if (!prepared) return;
 
-      // JSON 知识点文件：发送前本地预校验（与手环端同规则），避免无效数据占用蓝牙带宽。
-      // 内容嗅探兑底：后缀是 .json 但实际是纯文本（不以 { 开头）时自动按 TXT 传输，不再误判/拒发
-      var jsonLike = /^\s*\{/.test(text);
-      if (isJson && !jsonLike) {
-        sandbox.log('⚠️ 所选文件后缀为 .json 但内容为纯文本，已自动按 TXT 文本传输');
-        isJson = false;
-        fileName = rawName.replace(/\.json$/i, '');
-      }
-      if (isJson) {
-        var check = validateKnowledgeJson(text);
-        if (!check.ok) {
-          sandbox.log('❌ JSON 校验未通过：' + check.error);
-          sandbox.log('   参考 samples/knowledge-sample.json 的结构');
-          return;
-        }
-        var subjectDesc = [];
-        for (var si = 0; si < check.subjects.length; si++) {
-          subjectDesc.push(check.subjects[si].name + '(' + check.subjects[si].count + '条)');
-        }
-        sandbox.log('✅ JSON 校验通过，共 ' + check.subjects.length + ' 个科目：' + subjectDesc.join('、'));
-      }
-
-      sandbox.log('开始传输: ' + fileName + ' (' + text.length + ' 字符, ' + (isJson ? '知识点JSON' : 'TXT文本') + ') → ' + state.targetFolderName + ' (folder ID: ' + state.targetFolder + ')');
-      if (text.length > 50000) {
+      sandbox.log('开始传输: ' + prepared.fileName + ' (' + prepared.text.length + ' 字符) → ' + state.targetFolderName + ' (folder ID: ' + state.targetFolder + ')');
+      if (prepared.text.length > 50000) {
         sandbox.log('文件较大，传输可能需要较长时间');
       }
 
-      await transferFile(fileName, text, state.targetFolder);
+      await transferFile(prepared.fileName, prepared.text, state.targetFolder);
     } catch (error) {
       sandbox.log('传输失败: ' + errMsg(error));
     }
   });
 
+  // 批量导入文件选择（多选时 BandBurg 可能返回数组，归一化处理）
+  mainGui.on('file:change', 'batchFiles', function (file) {
+    var list = [];
+    if (Array.isArray(file)) list = file;
+    else if (file) list = [file];
+    state.batchFiles = list;
+    if (list.length > 0) {
+      var names = [];
+      for (var i = 0; i < list.length; i++) names.push(list[i].name || '未知文件');
+      sandbox.log('已选择 ' + list.length + ' 个文件: ' + names.join(', '));
+    } else {
+      sandbox.log('已清空批量选择');
+    }
+  });
+
+  // 排序条目选择
+  mainGui.on('select:change', 'orderItem', function (value) {
+    var resolved = resolveOrderNodeId(value);
+    if (resolved && resolved !== '__empty__') state.orderNodeId = resolved;
+  });
+
+  // 批量导入选中文件到（可选）新手环文件夹
+  mainGui.on('button:click', 'btnBatchImport', async function () {
+    var files = state.batchFiles || [];
+    if (files.length === 0) {
+      sandbox.log('请先在「选择文件夹内多个TXT/JSON文件」里选择文件');
+      return;
+    }
+    if (state.transferring) {
+      sandbox.log('正在传输中，请等待...');
+      return;
+    }
+    refreshTargetFolderFromGui();
+    var destFolder = state.targetFolder;
+    var destName = state.targetFolderName;
+    var folderName = '';
+    try {
+      folderName = ('' + (mainGui.getValue('batchFolderName') || '')).trim();
+    } catch (e) {}
+    if (folderName) {
+      var folderId = await createFolderRaw(folderName, destFolder);
+      if (!folderId) {
+        sandbox.log('❌ 手环文件夹创建失败，批量导入中止');
+        return;
+      }
+      destFolder = folderId;
+      destName = folderName;
+      sandbox.log('已创建手环文件夹: ' + folderName);
+    }
+
+    var okCount = 0;
+    for (var i = 0; i < files.length; i++) {
+      var f = files[i];
+      sandbox.log('批量导入 (' + (i + 1) + '/' + files.length + '): ' + (f.name || '未知文件'));
+      try {
+        var prepared = await prepareTransfer(f);
+        if (!prepared) continue;
+        await transferFile(prepared.fileName, prepared.text, destFolder);
+        okCount++;
+      } catch (error) {
+        sandbox.log('  ❌ 传输失败: ' + errMsg(error));
+      }
+    }
+    sandbox.log('批量导入完成: 成功 ' + okCount + '/' + files.length + ' → ' + destName);
+    state.batchFiles = [];
+  });
+
+  // 上移选中条目
+  mainGui.on('button:click', 'btnMoveUp', async function () {
+    await onMoveOrder('up');
+  });
+
+  // 下移选中条目
+  mainGui.on('button:click', 'btnMoveDown', async function () {
+    await onMoveOrder('down');
+  });
+
   sandbox.log('GUI 界面已创建');
+}
+
+// 上移/下移选中条目：成功后刷新文件树（recreateGui 会重建选项并恢复选中）
+async function onMoveOrder(direction) {
+  refreshTargetFolderFromGui();
+  var nodeId = state.orderNodeId;
+  try {
+    var guiValue = mainGui.getValue('orderItem');
+    if (guiValue !== null && guiValue !== undefined) {
+      var resolved = resolveOrderNodeId(guiValue);
+      if (resolved) nodeId = resolved;
+    }
+  } catch (e) {}
+  if (!nodeId || nodeId === '__empty__') {
+    sandbox.log('请先选中要移动的条目');
+    return;
+  }
+  if (!state.connected) {
+    sandbox.log('尚未连接手环');
+    return;
+  }
+  if (await moveNode(nodeId, direction)) {
+    state.orderNodeId = nodeId;
+    await requestTree();
+  }
 }
 
 // ==================== 主入口 ====================

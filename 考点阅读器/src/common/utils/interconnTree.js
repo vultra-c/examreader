@@ -10,14 +10,16 @@
  *   - createFolder: 创建文件夹 { name, parentId }
  *   - deleteNode: 删除节点 { nodeId }
  *   - renameNode: 重命名节点 { nodeId, newName }
+ *   - moveNode: 调整同级显示顺序 { nodeId, direction: 'up'|'down' }
  *
  * 发送方向（response 字段）：
  *   - treeData: 文件树数据 { tree: [...] }
  *   - folderCreated: 文件夹创建结果 { folderId, success, error }
  *   - nodeDeleted: 节点删除结果 { success, error }
  *   - nodeRenamed: 节点重命名结果 { success, error }
+ *   - nodeMoved: 顺序调整结果 { success, error }
  *
- * 注：createFolder / deleteNode / renameNode 后不再自动全量推树，
+ * 注：createFolder / deleteNode / renameNode / moveNode 后不再自动全量推树，
  *     手机端收到成功响应后自行调用 requestTree 刷新。
  */
 import { interconnModule } from './interconn.js';
@@ -45,6 +47,9 @@ export default class interconnTree {
                         break;
                     case 'renameNode':
                         await this.handleRenameNode(payload);
+                        break;
+                    case 'moveNode':
+                        await this.handleMoveNode(payload);
                         break;
                     default:
                         console.warn('[BT-Tree] Unknown action: ' + action);
@@ -127,19 +132,24 @@ export default class interconnTree {
      * @param {string} nodeId 节点 ID
      * @param {string} newName 新名称
      */
-    async handleRenameNode({ nodeId, newName }) {
-        console.log('[BT-Tree] renameNode: ' + nodeId + ' -> ' + newName);
+    /**
+     * 处理顺序调整请求
+     * @param {string} nodeId 节点 ID
+     * @param {string} direction 'up' 上移 | 'down' 下移
+     */
+    async handleMoveNode({ nodeId, direction }) {
+        console.log('[BT-Tree] moveNode: ' + nodeId + ' -> ' + direction);
         try {
-            const success = await dataManager.renameBluetoothNode(nodeId, newName);
+            const success = await dataManager.moveBluetoothNode(nodeId, direction === 'down' ? 'down' : 'up');
             await this.send({
-                response: 'nodeRenamed',
+                response: 'nodeMoved',
                 success: !!success,
-                error: success ? undefined : '节点不存在'
+                error: success ? undefined : '已到顶/底或节点不存在'
             });
             // 不再自动全量推树，手机端收到成功响应后自行 requestTree
         } catch (e) {
             await this.send({
-                response: 'nodeRenamed',
+                response: 'nodeMoved',
                 success: false,
                 error: (e && e.message) ? e.message : String(e || '未知错误')
             });

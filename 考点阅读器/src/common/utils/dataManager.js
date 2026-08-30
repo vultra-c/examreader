@@ -582,6 +582,17 @@ function getBluetoothMeta() {
 
 // 保存蓝牙元数据列表（updates cache）
 // 写入前永久清除"蓝牙传输"包装文件夹，确保不会持久化到存储
+// 生成不与现有 meta 重复的蓝牙节点 ID（同毫秒连续保存会撞时间戳，
+// 找到即往后追加 _n 后缀；真实碰撞多发生于批量传输/测试环境）。
+function _genUniqueBtId(metaList, prefix) {
+  let id = prefix + Date.now()
+  let n = 1
+  while (metaList.some(m => m.id === id)) {
+    id = prefix + Date.now() + '_' + (n++)
+  }
+  return id
+}
+
 function saveBluetoothMeta(list) {
   // 写入前永久清除"蓝牙传输"文件夹
   list = _filterOutLegacyWrapper(list)
@@ -1592,7 +1603,7 @@ export default {
   saveBluetoothContent(filename, content, targetFolder, fmt) {
     return new Promise((resolve) => {
       getBluetoothMeta().then((metaList) => {
-        const id = 'bt_' + Date.now()
+        const id = _genUniqueBtId(metaList, 'bt_')
         const meta = {
           id: id,
           name: filename,
@@ -1643,7 +1654,7 @@ export default {
   createBluetoothFolder(name, parentId) {
     return new Promise((resolve) => {
       getBluetoothMeta().then((metaList) => {
-        const id = 'bt_folder_' + Date.now()
+        const id = _genUniqueBtId(metaList, 'bt_folder_')
         const folder = {
           id: id,
           name: name,
@@ -1687,6 +1698,48 @@ export default {
         saveBluetoothMeta(updated).then(() => {
           console.log('[DM] Node renamed: ' + nodeId + ' -> ' + newName)
           resolve(true)
+        })
+      })
+    })
+  },
+
+  /**
+   * 移动蓝牙传输节点在其父级下的显示顺序（上移/下移一位）。
+   * 手环列表页按 KD_BT_META 数组顺序展示，排序即重排数组中
+   * 同父节点条目的相对位置。
+   * @param {string} nodeId 节点 ID
+   * @param {string} direction 'up' | 'down'
+   * @returns {Promise<boolean>} 是否发生移动（已到顶/底或节点不存在返回 false）
+   */
+  moveBluetoothNode(nodeId, direction) {
+    return new Promise((resolve) => {
+      getBluetoothMeta().then((metaList) => {
+        if (!metaList) { resolve(false); return }
+        const idx = metaList.findIndex(m => m.id === nodeId)
+        if (idx < 0) { resolve(false); return }
+        const parentOf = (item) => (item.type === 'folder'
+          ? (item.parentId || 'bt_root')
+          : (item.folder || 'bt_root'))
+        const parent = parentOf(metaList[idx])
+        // 在 meta 顺序中向前/向后找最近的同父节点
+        let target = -1
+        if (direction === 'up') {
+          for (let i = idx - 1; i >= 0; i--) {
+            if (parentOf(metaList[i]) === parent) { target = i; break }
+          }
+        } else {
+          for (let i = idx + 1; i < metaList.length; i++) {
+            if (parentOf(metaList[i]) === parent) { target = i; break }
+          }
+        }
+        if (target < 0) { resolve(false); return }
+        const updated = metaList.slice()
+        const tmp = updated[idx]
+        updated[idx] = updated[target]
+        updated[target] = tmp
+        saveBluetoothMeta(updated).then((ok) => {
+          console.log('[DM] Node moved ' + direction + ': ' + nodeId)
+          resolve(!!ok)
         })
       })
     })

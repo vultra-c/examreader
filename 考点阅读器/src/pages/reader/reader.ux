@@ -150,15 +150,12 @@ export default {
     await this.loadContent()
     if (!this.$valid) return
 
-    // 跨页跳转请求（搜索 char / 页码 page / 百分比），经 globalThis 邮箱传递
-    const initReq = jumpBus.peekJump()
-    if (initReq && initReq.path === this.path && initReq.type !== 'json') {
-      jumpBus.consumeJump()
-      this.applyJumpRequest()
-      return
+    // 跨页跳转请求（搜索 char / 页码 page / 百分比），经 globalThis 邮箱传递。
+    // applyJumpRequest 是唯一 peek+consume 点（不再在 initReader 预消费）。
+    const hadJump = this.applyJumpRequest()
+    if (!hadJump) {
+      await this.loadReadingProgress()
     }
-
-    await this.loadReadingProgress()
   },
 
   async onShow() {
@@ -183,7 +180,7 @@ export default {
       if (!this.$valid) return
 
       await this.loadReadingProgress()
-      this.applyJumpToPage()
+      this.applyJumpRequest()
       return
     }
 
@@ -341,13 +338,15 @@ export default {
    * - char：搜索定位（分页→页码 / 无缝→滚动位置）
    * - percent：百分比（无缝→字符偏移 / 分页→页码）
    * - page：页码直跳
+   * 返回 true 表示请求已被消费（包括异步落地中），false 表示无匹配请求。
+   * 不匹配的请求会留在邮箱中供其它实例消费。
    */
   applyJumpRequest() {
     const req = jumpBus.peekJump()
-    if (!req || req.path !== this.path) return
-    jumpBus.consumeJump()
+    if (!req || req.path !== this.path) return false
 
     if (req.type === 'char') {
+      jumpBus.consumeJump()
       let chars = parseInt(req.value)
       if (isNaN(chars) || chars < 0) chars = 0
       if (this.readingMode === 'seamless') {
@@ -363,20 +362,26 @@ export default {
           this.saveProgress()
         })
       }
-      return
+      return true
     }
 
     if (req.type === 'percent') {
       let percent = parseInt(req.value)
-      if (isNaN(percent)) return
+      if (isNaN(percent)) return false
       if (percent < 0) percent = 0
       if (percent > 100) percent = 100
-      if (this.readingMode === 'seamless' && this.pagesLoaded) {
+      // 内容未加载完：把百分比换算成页码排队（分页）或排队等待无缝初始化后再执行
+      if (!this.pagesLoaded) {
+        // 无缝/paginated 都在 loadContent 或对接处再消费，这里不消费，防止丢失
+        return false
+      }
+      jumpBus.consumeJump()
+      if (this.readingMode === 'seamless') {
         const targetChars = Math.round(percent / 100 * Math.max(1, this.seamAllSize))
         this.jumpSeamToChar(targetChars)
         this.saveProgress()
         prompt.showToast({ message: '已跳转到 ' + percent + '%', duration: 1000 })
-      } else if (this.pagesLoaded && this.totalPages > 0) {
+      } else if (this.totalPages > 0) {
         let targetPage = this.totalPages > 1 ? Math.floor(percent / 100 * (this.totalPages - 1)) : 0
         if (targetPage >= this.totalPages) targetPage = this.totalPages - 1
         if (targetPage < 0) targetPage = 0
@@ -385,10 +390,11 @@ export default {
         this.saveProgress()
         prompt.showToast({ message: '已跳转到第 ' + (targetPage + 1) + ' 页', duration: 1000 })
       }
-      return
+      return true
     }
 
     if (req.type === 'page') {
+      jumpBus.consumeJump()
       const target = parseInt(req.value)
       if (this.pagesLoaded && target >= 0 && target < this.totalPages) {
         this.currentPage = target
@@ -399,7 +405,9 @@ export default {
       } else if (!this.pagesLoaded) {
         this.pendingJump = target
       }
+      return true
     }
+    return false
   },
 
   async loadContent() {
