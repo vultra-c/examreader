@@ -414,8 +414,8 @@ export default {
   },
 
   /** 百分比跳转：全部条目按科目顺序展开为一维进度，跳到对应条目。
-   * 关键：先把 viewMode 从 detail 切回 list（如当前正处于 detail），
-   * 否则旧条目会先渲染、然后被新条目覆盖——用户看到的是「百分比跳错了」的错觉。
+   * 关键：无条件清空当前视图状态（含 viewMode/entryRows/subject），再重新进入目标
+   * 科目与条目——否则旧 detail 内容会先渲染一帧再被替换，用户看到「跳回了上次」的错觉。
    */
   applyJsonPercentJump(percent) {
     if (!this._parsedData) return
@@ -426,11 +426,12 @@ export default {
     let total = 0
     for (let i = 0; i < subs.length; i++) total += subs[i].count
     if (total <= 0) return
-    // detail → list：清掉旧条目 detail 视图，防止渲染顺序错乱
-    if (this.viewMode === 'detail') {
-      this.viewMode = 'list'
-      this.showSetting = true
-    }
+    // 强制回到 list 状态：防止当前 detail 内容干扰新条目渲染
+    this.viewMode = 'list'
+    this.showSetting = true
+    this.curPoints = []
+    this.curFormulas = []
+    this.rawParagraphs = []
     let idx = Math.round(percent / 100 * (total - 1))
     for (let i = 0; i < subs.length; i++) {
       if (idx < subs[i].count) {
