@@ -14,19 +14,6 @@
 
     <!-- 文件夹列表（分块渲染） -->
     <list class="list" id="homeList" if="{{visibleItems.length > 0}}" onscrollbottom="onReachBottom">
-      <!-- 最近阅读分区标签（列表最顶部） -->
-      <list-item if="{{recentItem && !sortMode}}" class="item" type="recent" @click="onRecentClick">
-        <div class="item-content">
-          <text class="itemtext">{{recentItem.name}}</text>
-          <text class="itemtext2">{{recentItem.subtitle}}</text>
-        </div>
-        <img static src="/common/images/enter.png" class="arrow" />
-      </list-item>
-      <list-item if="{{recentItem && !sortMode}}" class="item" style="padding: 7px 16px; height: 50px;" type="section">
-        <text class="section-title" static>全部文件</text>
-      </list-item>
-
-
       <list-item for="{{visibleItems}}" tid="id" class="item {{sortMode ? 'item--sort' : ''}}" type="folder" @click="onItemClick($item)" @longpress="onLongPress($item)">
         <div class="item-content">
           <text class="itemtext">{{$item.name}}</text>
@@ -69,13 +56,9 @@ import storage from '@system.storage'
 import dataManager from '../../common/utils/dataManager.js'
 import { getFormattedTimeNow } from '../../common/utils/timeUtil.js'
 import appState from '../../common/utils/appState.js'
-import jumpBus from '../../common/utils/jumpBus.js'
 
 // 分块渲染参数：首屏 20 条，滚动加载更多
 const CHUNK_SIZE = 20
-// 最近阅读记录键
-const KEY_RECENT = 'KD_RECENT_READ'
-// 阅读进度键（与 reader 共用 KD_READING_PROGRESS，此处仅读）
 
 export default {
   private: {
@@ -89,8 +72,6 @@ export default {
     isNavigating: false,
     longPressTriggered: false,
     renderPos: 0,
-    // 最近阅读
-    recentItem: null,
     // 排序模式
     sortMode: false
   },
@@ -138,12 +119,7 @@ export default {
   },
 
   async loadData() {
-    this.loading = true
-    // 并发：顶层文件夹列表 + 蓝牙 meta（最近阅读复用）
-    const [folders, meta] = await Promise.all([
-      dataManager.getTopLevelFolders(),
-      dataManager.getBluetoothMeta()
-    ])
+    const folders = await dataManager.getTopLevelFolders()
     if (!this.$valid) return
 
     const items = []
@@ -163,102 +139,30 @@ export default {
       }
     }
 
+    // 数据未变化时（如从子页返回）跳过整表重建：
+    // 不闪「加载中」、不重置列表与滚动位置
+    const sig = this._computeSig(items)
+    if (sig === this._sig) {
+      this.loading = false
+      return
+    }
+    this._sig = sig
+
     this.allItems = items
     this.renderPos = 0
     this.visibleItems = []
     this.loading = false
     this.appendVisibleChunk()
-    this.loadRecent(meta)
   },
 
-  /** 读取最近阅读，meta 传入可复用 loadData 的并发结果，避免重复 storage 读 */
-  async loadRecent(metaHint) {
-    const rec = await new Promise((resolve) => {
-      storage.get({
-        key: KEY_RECENT,
-        success: (d) => {
-          if (!d) { resolve(null); return }
-          try { resolve(JSON.parse(d)) } catch (e) { resolve(null) }
-        },
-        fail: () => resolve(null)
-      })
-    })
-    if (!this.$valid) return
-    if (!rec || !rec.path) {
-      this.recentItem = null
-      return
+  /** 列表内容签名：id/名称/类型/格式按序拼接，用于检测列表是否变化 */
+  _computeSig(items) {
+    const parts = []
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i]
+      parts.push(it.id + '/' + it.name + '/' + it.type + '/' + (it.fmt || ''))
     }
-    // 优先用 loadData 传入的 meta 缓存；缺失才现场拉
-    let meta = metaHint
-    if (!meta) {
-      meta = await dataManager.getBluetoothMeta()
-      if (!this.$valid) return
-    }
-    let name = rec.name || ''
-    let fmt = rec.fmt || ''
-    if (meta) {
-      for (let i = 0; i < meta.length; i++) {
-        if (meta[i].id === rec.path) {
-          name = meta[i].name
-          fmt = meta[i].fmt || ''
-          break
-        }
-      }
-    }
-    // 读取进度（txt / json 共用），存起来给 onRecentClick 跳转用
-    let subtitle = fmt === 'json' ? '知识点 JSON · 继续上次' : '继续上次阅读'
-    let progress = null
-    if (fmt !== 'json') {
-      progress = await dataManager.getReadingProgress(rec.path)
-      if (!this.$valid) return
-      if (typeof progress === 'number' && progress > 0) {
-        subtitle = '读到第 ' + (progress + 1) + ' 页 · 点击继续'
-      } else if (progress && typeof progress === 'object' && progress.mode === 'seam') {
-        subtitle = '无缝模式 · 继续上次位置'
-      }
-    } else {
-      progress = await dataManager.getReadingProgress(rec.path)
-      if (!this.$valid) return
-      if (progress && typeof progress === 'object' && progress.mode === 'json') {
-        const subj = progress.subject || ''
-        const idx = (typeof progress.idx === 'number') ? progress.idx : -1
-        if (subj && idx >= 0) {
-          subtitle = subj + ' · 第 ' + (idx + 1) + ' 条 · 点击继续'
-        }
-      }
-    }
-    this.recentItem = { path: rec.path, name: name || '上次阅读', subtitle: subtitle, fmt: fmt, progress: progress }
-  },
-
-  onRecentClick() {
-    if (!this.recentItem) return
-    const path = this.recentItem.path
-    const fmt = this.recentItem.fmt
-    const progress = this.recentItem.progress
-    // 先把跳转请求写入邮箱（reader/jsonReader.onShow 或 pagesLoaded 后消费），再跳转
-    if (fmt === 'json') {
-      if (progress && typeof progress === 'object' && progress.mode === 'json') {
-        const idx = (typeof progress.idx === 'number') ? progress.idx : -1
-        if (progress.subject && idx >= 0) {
-          jumpBus.requestJump({
-            type: 'json',
-            subject: progress.subject,
-            index: idx,
-            path: path
-          })
-        }
-      }
-      router.push({ uri: '/pages/jsonReader', params: { path: path } })
-    } else {
-      // txt: 页码 / 无缝字符偏移（用 percent 即可近似；页码精确）
-      if (typeof progress === 'number' && progress >= 0) {
-        jumpBus.requestJump({ type: 'page', value: progress, path: path })
-      } else if (progress && typeof progress === 'object' && progress.mode === 'seam') {
-        const offset = progress.offset || 0
-        jumpBus.requestJump({ type: 'char', value: offset, path: path })
-      }
-      router.push({ uri: '/pages/reader', params: { path: path } })
-    }
+    return parts.join('|')
   },
 
   appendVisibleChunk() {

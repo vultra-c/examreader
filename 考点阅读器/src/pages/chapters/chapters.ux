@@ -1,0 +1,178 @@
+<template>
+  <div class="page" style="flex-direction: column;" @swipe="onSwipe">
+
+    <!-- 空状态：无章节结构 -->
+    <div if="{{allItems.length == 0 && !loading}}" style="position: absolute; width: 336px; height: 480px; flex-direction: column; justify-content: center; align-items: center;">
+      <img static src="/common/images/empty_state.png" style="width: 128px; height: 128px;" />
+      <text static style="line-height: 42px; font-weight: bold; font-size: 28px; color: rgba(255,255,255,0.6); text-align: center; margin-top: 24px;">没有章节</text>
+      <text static style="line-height: 32px; font-size: 22px; color: rgba(255,255,255,0.4); text-align: center; margin-top: 8px;">该考点无章节结构，可用搜索定位</text>
+    </div>
+
+    <!-- 加载中 -->
+    <div if="{{loading}}" style="position: absolute; width: 336px; height: 480px; flex-direction: column; justify-content: center; align-items: center;">
+      <text static style="line-height: 42px; font-size: 22px; color: rgba(255,255,255,0.4); text-align: center;">加载中...</text>
+    </div>
+
+    <!-- 章节目录列表（分块渲染） -->
+    <list class="list" if="{{visibleItems.length > 0}}" id="chapterList" onscrollbottom="onReachBottom">
+      <list-item for="{{visibleItems}}" tid="id" class="item" type="chapter" @click="onItemClick($item)">
+        <div class="item-content">
+          <text class="itemtext">{{$item.title}}</text>
+          <text class="itemtext2">{{$item.subtitle}}</text>
+        </div>
+        <img static src="/common/images/enter.png" class="arrow" />
+      </list-item>
+      <list-item if="{{hasMore}}" type="more" class="item" @click="loadMore">
+        <div class="item-content">
+          <text class="itemtext2">▼ 加载更多 ({{allItems.length - visibleItems.length}})</text>
+        </div>
+      </list-item>
+    </list>
+
+    <!-- 顶部栏 -->
+    <img static src="/common/images/hd.png" style="position: absolute; left: 0px; top: 0px; width: 336px; height: 102px;" />
+    <img static src="/common/images/back.png" @click="goBack" style="position: absolute; left: 6px; top: 6px; width: 72px; height: 72px;" />
+    <text style="position: absolute; left: 78px; top: 6px; width: 180px; line-height: 30px; font-weight: bold; font-size: 24px; color: rgba(255,255,255,0.6); text-align: center;">{{nowTime}}</text>
+    <text static style="position: absolute; left: 78px; top: 36px; width: 180px; line-height: 42px; font-weight: bold; font-size: 32px; color: white; text-align: center;">章节目录</text>
+
+  </div>
+</template>
+
+<script>
+import router from '@system.router'
+import storage from '@system.storage'
+import dataManager from '../../common/utils/dataManager.js'
+import { getFormattedTimeNow } from '../../common/utils/timeUtil.js'
+import jumpBus from '../../common/utils/jumpBus.js'
+
+const CHUNK_SIZE = 20
+
+export default {
+  private: {
+    nowTime: '00:00',
+    timer: null,
+    timeFormat: '24h',
+    allItems: [],
+    visibleItems: [],
+    hasMore: false,
+    loading: true,
+    renderPos: 0
+  },
+  protected: {
+    path: ''
+  },
+
+  onInit() {
+    this.loadTimeFormat()
+    this.timer = setInterval(() => {
+      if (this.$valid) {
+        this.nowTime = getFormattedTimeNow(this.timeFormat)
+      }
+    }, 60000)
+    this.loadChapters()
+  },
+
+  loadTimeFormat() {
+    storage.get({
+      key: 'KD_TIME_FORMAT',
+      success: (data) => {
+        if (!this.$valid) return
+        if (data) {
+          this.timeFormat = data
+        }
+        this.nowTime = getFormattedTimeNow(this.timeFormat)
+      },
+      fail: () => {
+        if (!this.$valid) return
+        this.nowTime = getFormattedTimeNow(this.timeFormat)
+      }
+    })
+  },
+
+  onDestroy() {
+    if (this.timer) {
+      clearInterval(this.timer)
+      this.timer = null
+    }
+  },
+
+  async loadChapters() {
+    this.loading = true
+    const result = await dataManager.getReaderChapters(this.path)
+    if (!this.$valid) return
+    const list = (result && result.list) || []
+    const totalLength = (result && result.totalLength) || 0
+    const items = []
+    for (let i = 0; i < list.length; i++) {
+      const ch = list[i]
+      const pct = totalLength > 0 ? Math.round(ch.start / totalLength * 100) : 0
+      items.push({
+        id: 'ch_' + i,
+        title: ch.title,
+        subtitle: '第 ' + (i + 1) + ' 章 · ' + pct + '%',
+        start: ch.start
+      })
+    }
+    this.allItems = items
+    this.renderPos = 0
+    this.visibleItems = []
+    this.loading = false
+    this.appendVisibleChunk()
+  },
+
+  appendVisibleChunk() {
+    const start = this.renderPos
+    const end = Math.min(start + CHUNK_SIZE, this.allItems.length)
+    const newItems = this.allItems.slice(start, end)
+    if (newItems.length > 0) {
+      this.visibleItems = this.visibleItems.concat(newItems)
+      this.renderPos = end
+    }
+    this.hasMore = this.renderPos < this.allItems.length
+  },
+
+  onReachBottom() {
+    if (this.hasMore) {
+      this.appendVisibleChunk()
+    }
+  },
+
+  loadMore() {
+    this.appendVisibleChunk()
+  },
+
+  /**
+   * 点击章节：发 char 跳转请求后返回。
+   * readerSettings.onShow 检测到有待消费跳转会自动回退到阅读页，
+   * reader 消费请求后按当前模式定位（分页→页码 / 无缝→滚动位置）。
+   */
+  onItemClick(item) {
+    jumpBus.requestJump({ type: 'char', value: item.start, path: this.path })
+    router.back()
+  },
+
+  goBack() {
+    router.back()
+  },
+
+  onSwipe(e) {
+    if (e.direction === 'right') {
+      router.back()
+    }
+  },
+
+  onBackPress() {
+    router.back()
+    return true
+  }
+}
+</script>
+
+<style>
+  @import '../../common/style.css';
+  .list {
+    height: 394px;
+    top: 86px;
+    padding: 0px 6px;
+  }
+</style>

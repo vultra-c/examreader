@@ -18,42 +18,6 @@ const STORAGE_KEY_INIT = 'KD_DATA_INIT'
 const STORAGE_KEY_BT_CONTENT = 'KD_BT_CONTENT'              // 旧版全量键，保留用于迁移检测
 const STORAGE_KEY_BT_META = 'KD_BT_META'
 
-// ==================== 最近阅读 ====================
-
-const STORAGE_KEY_BT_RECENT = 'KD_BT_RECENT'
-const BT_RECENT_MAX = 30
-
-function _loadRecent() {
-  return new Promise((resolve) => {
-    storage.get({
-      key: STORAGE_KEY_BT_RECENT,
-      success: (data) => {
-        let list = []
-        if (data) {
-          try { list = JSON.parse(data) } catch (e) { list = [] }
-        }
-        if (!Array.isArray(list)) list = []
-        resolve(list)
-      },
-      fail: () => resolve([])
-    })
-  })
-}
-
-function _saveRecent(list) {
-  storage.set({ key: STORAGE_KEY_BT_RECENT, value: JSON.stringify(list) })
-}
-
-// 删除节点后同步清理最近阅读记录
-function _purgeRecent(removedIds) {
-  _loadRecent().then((list) => {
-    const filtered = list.filter(r => r && !removedIds.has(r.id))
-    if (filtered.length !== list.length) {
-      _saveRecent(filtered)
-    }
-  })
-}
-
 const STORAGE_KEY_BT_FILE_PREFIX = 'KD_BT_FILE_'            // + id（旧版单键，兼容读取）
 const STORAGE_KEY_BT_CHUNK_PREFIX = 'KD_BT_C_'              // + id + '_' + chunkIndex（新版分块）
 const STORAGE_KEY_READING_PROGRESS = 'KD_READING_PROGRESS'
@@ -805,9 +769,13 @@ function _writeChunkedContent(id, content) {
   })
 }
 
+// 流式分页首屏批次：产出满 N 页即回调一次，让阅读器先渲染首屏，
+// 后台继续完成整本分页（大文件首开长文本白屏问题）
+const FIRST_BATCH_PAGES = 3
+
 // 流式分页：逐块读取存储，边读边分页，避免将整个大文件加载到内存
 // 逐块串行读取，每读完一块就尝试分页，保持跨块文本的行完整性
-function _streamPaginate(id, chunkCount, fontSize) {
+function _streamPaginate(id, chunkCount, fontSize, onFirstBatch) {
   return new Promise((resolve) => {
     const fs = fontSize || DEFAULT_FONT_SIZE
     const charsPerLine = Math.max(1, Math.floor(SCREEN_TEXT_WIDTH / fs))
@@ -819,6 +787,16 @@ function _streamPaginate(id, chunkCount, fontSize) {
     let pendingLine = '' // 跨块的未完成行
     let readIndex = 0
     let failed = false
+    let firstBatchFired = false
+
+    // 产出满第一批页后回调一次（快照复制，调用方不得在回调中修改原数组语义）
+    function maybeFireFirstBatch() {
+      if (firstBatchFired || typeof onFirstBatch !== 'function') return
+      if (pages.length >= FIRST_BATCH_PAGES) {
+        firstBatchFired = true
+        onFirstBatch(pages.slice())
+      }
+    }
 
     // 将文本分页（处理已有的行列表）
     function processLines(lines) {
@@ -889,6 +867,7 @@ function _streamPaginate(id, chunkCount, fontSize) {
           if (chunk.length > 0) {
             const lines = chunk.split('\n')
             processLines(lines)
+            maybeFireFirstBatch()
           }
           readIndex++
           readNext()
@@ -1356,54 +1335,6 @@ export default {
    * 主页直接显示根级文件夹和文件
    * "蓝牙传输"包装文件夹已在 getBluetoothMeta() 读取层永久过滤
    */
-  /**
-   * 记录一个蓝牙文件的打开（最近阅读打点）。
-   * 非蓝牙节点/文件夹/不存在的 id 直接跳过。
-   */
-  touchRecent(id) {
-    if (!id || id.indexOf('bt_') !== 0 || id.indexOf('bt_folder_') === 0) {
-      return Promise.resolve(false)
-    }
-    return getBluetoothMeta().then((metaList) => {
-      const hit = metaList.find(m => m.id === id)
-      if (!hit || hit.type === 'folder') return false
-      return _loadRecent().then((list) => {
-        const next = [{ id: id, ts: Date.now() }].concat(list.filter(r => r && r.id !== id))
-        if (next.length > BT_RECENT_MAX) next.length = BT_RECENT_MAX
-        _saveRecent(next)
-        return true
-      })
-    })
-  },
-
-  /**
-   * 获取最近阅读列表（与 meta 联查；已删除的文件自动过滤）。
-   * @param {number} limit 最多返回条数（默认 5）
-   * @returns {Promise<Array<{id,name,fmt,ts}>>}
-   */
-  getRecentList(limit) {
-    return _loadRecent().then((list) => {
-      if (!list.length) return []
-      return getBluetoothMeta().then((metaList) => {
-        const byId = new Map()
-        for (let i = 0; i < metaList.length; i++) {
-          const m = metaList[i]
-          if (m.type !== 'folder') byId.set(m.id, m)
-        }
-        const out = []
-        const cap = limit || 5
-        for (let i = 0; i < list.length && out.length < cap; i++) {
-          const r = list[i]
-          const m = r && byId.get(r.id)
-          if (m) {
-            out.push({ id: m.id, name: m.name, fmt: m.fmt || '', ts: r.ts })
-          }
-        }
-        return out
-      })
-    })
-  },
-
   getTopLevelFolders() {
     return new Promise((resolve) => {
       getBluetoothMeta().then((metaList) => {
@@ -1500,8 +1431,10 @@ export default {
    * 对大文件采用逐块流式分页，避免将整个文件加载到内存导致 OOM
    * @param {string} pathStr 路径
    * @param {number} [fontSize] 字号，默认 26
+   * @param {function} [onFirstBatch] 大文件流式分页首批页就绪回调（快照数组），
+   *        用于阅读器首屏先渲染；小文件/缓存命中不触发
    */
-  getReaderPages(pathStr, fontSize) {
+  getReaderPages(pathStr, fontSize, onFirstBatch) {
     return new Promise((resolve) => {
       const fs = fontSize || DEFAULT_FONT_SIZE
       // 蓝牙传输内容：ID 以 bt_ 开头
@@ -1519,7 +1452,7 @@ export default {
             const count = parseInt(countStr)
             // 超过 10 块（约 30000 字符）使用流式分页，避免 OOM
             if (count && count > 10) {
-              _streamPaginate(pathStr, count, fs).then((pages) => {
+              _streamPaginate(pathStr, count, fs, onFirstBatch).then((pages) => {
                 _btPagesCacheSet(cacheKey, pages)
                 resolve(pages)
               })
@@ -1613,7 +1546,6 @@ export default {
     return new Promise((resolve) => {
       // knowledgeTree 已为空，仅清空蓝牙传输内容
       clearAllBluetooth().then(() => {
-        _saveRecent([])
         resolve(true)
       })
     })
@@ -1879,8 +1811,6 @@ export default {
         // 从 meta 中移除
         const filtered = metaList.filter(item => !toDelete.has(item.id))
         saveBluetoothMeta(filtered).then(() => {
-          // 同步清理最近阅读记录
-          _purgeRecent(toDelete)
           // 逐个删除正文键（仅 content 类型有正文键）+ 清分页缓存
           const deleteIds = []
           toDelete.forEach(id => {

@@ -117,7 +117,6 @@ export default {
   },
 
   async loadData() {
-    this.loading = true
     const children = await dataManager.getVisibleChildren(this.path)
     if (!this.$valid) return
     const items = children || []
@@ -125,11 +124,29 @@ export default {
       const it = items[i]
       it.subtitle = it.type === 'folder' ? '文件夹' : (it.fmt === 'json' ? '知识点 JSON' : '考点')
     }
+    // 数据未变化时（如从子页返回）跳过整表重建：
+    // 不闪「加载中」、不重置列表与滚动位置
+    const sig = this._computeSig(items)
+    if (sig === this._sig) {
+      this.loading = false
+      return
+    }
+    this._sig = sig
     this.allItems = items
     this.renderPos = 0
     this.visibleItems = []
     this.loading = false
     this.appendVisibleChunk()
+  },
+
+  /** 列表内容签名：id/名称/类型/格式按序拼接，用于检测列表是否变化 */
+  _computeSig(items) {
+    const parts = []
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i]
+      parts.push(it.id + '/' + it.name + '/' + it.type + '/' + (it.fmt || ''))
+    }
+    return parts.join('|')
   },
 
   appendVisibleChunk() {

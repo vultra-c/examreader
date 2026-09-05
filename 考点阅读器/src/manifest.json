@@ -84,6 +84,9 @@
       },
       "pages/search": {
         "component": "search"
+      },
+      "pages/chapters": {
+        "component": "chapters"
       }
     }
   },

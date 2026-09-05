@@ -135,7 +135,6 @@ import jumpBus from '../../common/utils/jumpBus.js'
 const RAW_PAGE_CHAR_LIMIT = 320
 // JSON 阅读进度存入 KD_READING_PROGRESS，key 与 dataManager.getReadingProgress 共用；
 // 值为对象 {mode:'json', subject:'科目名', idx:条目索引}，与 TXT 的页码/无缝偏移互斥但共存于同一 storage。
-const KEY_RECENT = 'KD_RECENT_READ'
 // 公式图默认尺寸
 const FORMULA_BASE_W = 260
 const FORMULA_BASE_H = 200
@@ -338,11 +337,6 @@ export default {
     this._savedProgress = await dataManager.getReadingProgress(this.path)
     if (!this.$valid) return
 
-    // 最近阅读打点（蓝牙文件；fire & forget）
-    dataManager.touchRecent(this.path)
-    // 记录最近阅读（主页最近阅读展示）
-    this.saveRecentRead()
-
     // 搜索定位跳转：直接打开指定 科目 → 条目（经跳转邮箱传递），优先级最高
     const jreq = jumpBus.peekJump()
     if (jreq && jreq.path === this.path && jreq.type === 'json') {
@@ -500,21 +494,6 @@ export default {
         idx: curIdx
       })
     }
-  },
-
-  /** 保存最近阅读记录（主页「最近阅读」读取） */
-  saveRecentRead() {
-    try {
-      if (!this.path) return
-      const name = dataManager.getNodeName(this.path) || ''
-      const rec = {
-        path: this.path,
-        name: name.replace(/\.json$/i, ''),
-        fmt: 'json',
-        ts: Date.now()
-      }
-      storage.set({ key: KEY_RECENT, value: JSON.stringify(rec) })
-    } catch (e) {}
   },
 
   /**

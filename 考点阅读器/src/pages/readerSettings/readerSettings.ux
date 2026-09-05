@@ -39,6 +39,13 @@
         </div>
         <img static src="/common/images/enter.png" class="arrow" />
       </list-item>
+      <list-item class="item" @click="goChapters" type="item">
+        <div class="item-content">
+          <text class="itemtext" static>章节目录</text>
+          <text class="itemtext2" static>按章节快速定位考点</text>
+        </div>
+        <img static src="/common/images/enter.png" class="arrow" />
+      </list-item>
 
       <!-- 显示设置分区 -->
       <list-item class="item" style="padding: 7px 16px; height: 50px;" type="tip">
@@ -216,6 +223,14 @@ export default {
   goPercentJump() {
     router.push({
       uri: '/pages/percentJump',
+      params: { path: this.contentPath }
+    })
+  },
+
+  /** 章节目录：按章节快速定位考点（无章节结构的文件在目录页显示空态） */
+  goChapters() {
+    router.push({
+      uri: '/pages/chapters',
       params: { path: this.contentPath }
     })
   },

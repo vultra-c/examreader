@@ -151,16 +151,11 @@ export default {
   async initReader() {
     await this.loadSettingsBatch()
     if (!this.$valid) return
-    // 记录最近阅读（主页顶部展示）
-    this.saveRecentRead()
     // 先读进度：无缝模式需要用起始字符偏移来初始化分段
     this.rawProgress = await dataManager.getReadingProgress(this.path)
     if (!this.$valid) return
     await this.loadContent()
     if (!this.$valid) return
-
-    // 最近阅读打点（蓝牙文件；fire & forget）
-    dataManager.touchRecent(this.path)
 
     // 跨页跳转请求（搜索 char / 页码 page / 百分比），经 globalThis 邮箱传递。
     // applyJumpRequest 是唯一 peek+consume 点（不再在 initReader 预消费）。
@@ -230,23 +225,6 @@ export default {
       this.jumpPollTimer = null
     }
     this.saveProgress()
-  },
-
-  /** 保存最近阅读记录（path/name/fmt），主页「最近阅读」读取 */
-  saveRecentRead() {
-    try {
-      if (!this.path) return
-      const meta = dataManager.isBluetoothJson(this.path) ? { fmt: 'json' } : {}
-      const rec = {
-        path: this.path,
-        name: dataManager.getUnifiedNodeName(this.path) || '',
-        fmt: meta.fmt || '',
-        ts: Date.now()
-      }
-      storage.set({ key: 'KD_RECENT_READ', value: JSON.stringify(rec) })
-    } catch (e) {
-      // 保存最近阅读失败时忽略
-    }
   },
 
   storageGet(key) {
@@ -445,6 +423,8 @@ export default {
 
   async loadContent() {
     this.pagesLoaded = false
+    // 首屏批次是否已提前渲染（流式分页两段式加载）
+    this._earlyShown = false
 
     // 无缝模式：加载全文并按行分块，使用 scroll + 多个 text 元素渲染
     // 套用弦电子书 detail.ux 的 scroll 结构，避免长文本一次性渲染导致卡顿
@@ -501,8 +481,16 @@ export default {
       // 内置示例使用预计算缓存
       pages = await dataManager.getReaderPagesUnified(this.path)
     } else {
-      // 传入字号，由 dataManager 按字号动态分页
-      pages = await dataManager.getReaderPages(this.path, this.fontSize)
+      // 传入字号，由 dataManager 按字号动态分页；
+      // 大文件流式分页：首批页就绪即先渲染首屏，整本分页后台继续
+      pages = await dataManager.getReaderPages(this.path, this.fontSize, (firstPages) => {
+        if (!this.$valid || this.pagesLoaded || this._earlyShown) return
+        this._earlyShown = true
+        this._pages = firstPages
+        this.totalPages = firstPages.length
+        this.currentPage = 0
+        this.updatePageContent()
+      })
     }
     if (!this.$valid) return
 
